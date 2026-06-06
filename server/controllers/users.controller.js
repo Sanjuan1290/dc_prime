@@ -28,7 +28,18 @@ export const login = async (req, res) => {
   }
 
   const [rows] = await db.query(
-    `SELECT * FROM users WHERE email = ? LIMIT 1`,
+    `
+    SELECT
+      id,
+      full_name,
+      email,
+      password_hash,
+      role,
+      status
+    FROM users
+    WHERE email = ?
+    LIMIT 1
+    `,
     [email]
   )
 

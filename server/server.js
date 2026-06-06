@@ -5,6 +5,13 @@ import cookieParser from 'cookie-parser'
 import { db } from './db/connect.js'
 import usersRouter from './routers/users.router.js'
 import projectsRouter from './routers/projects.router.js'
+import listingsRouter from './routers/listings.router.js'
+import clientsRouter from './routers/clients.router.js'
+import clientUnitsRouter from './routers/clientUnits.router.js'
+import documentsRouter from './routers/documents.router.js'
+import paymentsRouter from './routers/payments.router.js'
+import accreditedSellersRouter from './routers/accreditedSellers.router.js'
+import commissionsRouter from './routers/commissions.router.js'
 import useCurrentUser from './utils/useCurrentUser.js'
 
 const app = express()
@@ -25,6 +32,13 @@ app.get('/api/v1/getCurrentUser', useCurrentUser)
 
 app.use('/api/v1', usersRouter)
 app.use('/api/v1', projectsRouter)
+app.use('/api/v1', listingsRouter)
+app.use('/api/v1', clientsRouter)
+app.use('/api/v1', clientUnitsRouter)
+app.use('/api/v1', documentsRouter)
+app.use('/api/v1', paymentsRouter)
+app.use('/api/v1', accreditedSellersRouter)
+app.use('/api/v1', commissionsRouter)
 
 app.use((req, res) => {
   res.status(404).json({
