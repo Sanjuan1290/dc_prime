@@ -12,6 +12,12 @@ import documentsRouter from './routers/documents.router.js'
 import paymentsRouter from './routers/payments.router.js'
 import accreditedSellersRouter from './routers/accreditedSellers.router.js'
 import commissionsRouter from './routers/commissions.router.js'
+import employeesRouter from './routers/employees.router.js'
+import attendanceRouter from './routers/attendance.router.js'
+import dashboardRouter from './routers/dashboard.router.js'
+import reportsRouter from './routers/reports.router.js'
+import auditLogsRouter from './routers/auditLogs.router.js'
+import settingsRouter from './routers/settings.router.js'
 import useCurrentUser from './utils/useCurrentUser.js'
 
 const app = express()
@@ -39,6 +45,12 @@ app.use('/api/v1', documentsRouter)
 app.use('/api/v1', paymentsRouter)
 app.use('/api/v1', accreditedSellersRouter)
 app.use('/api/v1', commissionsRouter)
+app.use('/api/v1', employeesRouter)
+app.use('/api/v1', attendanceRouter)
+app.use('/api/v1', dashboardRouter)
+app.use('/api/v1', reportsRouter)
+app.use('/api/v1', auditLogsRouter)
+app.use('/api/v1', settingsRouter)
 
 app.use((req, res) => {
   res.status(404).json({
