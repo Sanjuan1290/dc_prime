@@ -37,8 +37,7 @@ const navGroups: NavGroup[] = [
     title: "Management",
     items: [
       { label: "Projects", to: "/projects", icon: FiBriefcase },
-      { label: "Listings", to: "/listings", icon: FiHome, badge: "100" },
-      { label: "Reservations", to: "/reservations", icon: FiClock }
+      { label: "Listings", to: "/listings", icon: FiHome, badge: "100" }
     ]
   },
   {
