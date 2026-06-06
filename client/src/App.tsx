@@ -7,6 +7,7 @@ import Projects from "./pages/Projects"
 import Listings from "./pages/Listings"
 import Clients from "./pages/Clients"
 import ClientListings from "./pages/ClientListings"
+import AccredittedSellers from "./pages/AccredittedSellers"
 
 
 const App = () => {
@@ -22,6 +23,7 @@ const App = () => {
         <Route path="listings" element={<Listings/>} />
         <Route path="clients" element={<Clients/>} />
         <Route path="client/:id" element={<ClientListings/>} />
+        <Route path="accreditted_sellers" element={<AccredittedSellers/>} />
       </Route>
     </>
   ))
