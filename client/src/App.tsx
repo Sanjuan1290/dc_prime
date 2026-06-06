@@ -11,6 +11,9 @@ import AccredittedSellers from "./pages/AccredittedSellers"
 import Documents from "./pages/Documents"
 import Payments from "./pages/Payments"
 import Commissions from "./pages/Commissions"
+import Reports from "./pages/Reports"
+import AuditLogs from "./pages/AuditLogs"
+import Settings from "./pages/Settings"
 
 
 const App = () => {
@@ -30,6 +33,9 @@ const App = () => {
         <Route path="documents" element={<Documents/>} />
         <Route path="payments" element={<Payments/>} />
         <Route path="commissions" element={<Commissions/>} />
+        <Route path="reports" element={<Reports/>} />
+        <Route path="audit-logs" element={<AuditLogs/>} />
+        <Route path="settings" element={<Settings/>} />
       </Route>
     </>
   ))
