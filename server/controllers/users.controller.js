@@ -1,6 +1,7 @@
 import bcrypt from 'bcrypt'
 import jwt from 'jsonwebtoken'
 import { db } from '../db/connect.js'
+import { createAuditLog } from '../utils/createAuditLog.js'
 
 const allowedRoles = ['admin', 'personnel']
 
@@ -74,7 +75,7 @@ export const login = async (req, res) => {
 
   res.cookie('token', token, {
     httpOnly: true,
-    secure: false, // true kapag production + HTTPS
+    secure: false,
     sameSite: 'lax',
     maxAge: 1000 * 60 * 60 * 24 * 7
   })
@@ -83,6 +84,14 @@ export const login = async (req, res) => {
     `UPDATE users SET last_login = NOW() WHERE id = ?`,
     [user.id]
   )
+
+  await createAuditLog({
+    userId: user.id,
+    action: 'login',
+    module: 'Auth',
+    description: `${user.full_name} logged in`,
+    ipAddress: req.ip
+  })
 
   res.status(200).json({
     message: 'Login successful',
@@ -94,5 +103,17 @@ export const login = async (req, res) => {
       status: user.status,
       features
     }
+  })
+}
+
+export const logout = async (req, res) => {
+  res.clearCookie('token', {
+    httpOnly: true,
+    secure: false,
+    sameSite: 'lax'
+  })
+
+  res.status(200).json({
+    message: 'Logout successful'
   })
 }
