@@ -5,6 +5,8 @@ import SystemLayout from "./layouts/systemLayout"
 import Dashboard from "./pages/Dashboard"
 import Projects from "./pages/Projects"
 import Listings from "./pages/Listings"
+import Clients from "./pages/Clients"
+import ClientListings from "./pages/ClientListings"
 
 
 const App = () => {
@@ -18,6 +20,8 @@ const App = () => {
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="projects" element={<Projects/>} />
         <Route path="listings" element={<Listings/>} />
+        <Route path="clients" element={<Clients/>} />
+        <Route path="client/:id" element={<ClientListings/>} />
       </Route>
     </>
   ))

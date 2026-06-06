@@ -11,7 +11,7 @@ type Listing = {
   id: number
   projectId: number
   projectName: string
-  cadastalLotNo: string
+  cadastralLotNo: string
   unitId: string
   lotType: string
   promoDiscount: number
@@ -41,7 +41,7 @@ const Listings = () => {
       id: 1,
       projectId: 1,
       projectName: "Luntiang Aguinaldo",
-      cadastalLotNo: "CAD-0505",
+      cadastralLotNo: "CAD-0505",
       unitId: "LA-0505",
       lotType: "Residential",
       promoDiscount: 0,
@@ -57,7 +57,7 @@ const Listings = () => {
       id: 2,
       projectId: 1,
       projectName: "Luntiang Aguinaldo",
-      cadastalLotNo: "CAD-0506",
+      cadastralLotNo: "CAD-0506",
       unitId: "LA-0506",
       lotType: "Residential",
       promoDiscount: 0,
@@ -82,7 +82,7 @@ const Listings = () => {
 
   const [formData, setFormData] = useState({
     projectId: 1,
-    cadastalLotNo: "",
+    cadastralLotNo: "",
     unitId: "",
     lotType: "",
     promoDiscount: 0,
@@ -113,7 +113,7 @@ const Listings = () => {
   const resetForm = () => {
     setFormData({
       projectId: 1,
-      cadastalLotNo: "",
+      cadastralLotNo: "",
       unitId: "",
       lotType: "",
       promoDiscount: 0,
@@ -175,7 +175,7 @@ const Listings = () => {
       listing.unitId.toLowerCase().includes(search) ||
       listing.projectName.toLowerCase().includes(search) ||
       listing.lotType.toLowerCase().includes(search) ||
-      listing.cadastalLotNo.toLowerCase().includes(search) ||
+      listing.cadastralLotNo.toLowerCase().includes(search) ||
       listing.status.toLowerCase().includes(search)
 
     const matchesStatus =
@@ -194,7 +194,9 @@ const Listings = () => {
     return listings.filter((listing) => listing.status === status).length
   }
 
-  const lotTypes = [...new Set(listings.map((listing) => listing.lotType))].filter(Boolean)
+  const lotTypes = [
+    ...new Set(listings.map((listing) => listing.lotType)),
+  ].filter(Boolean)
 
   return (
     <div className="p-4">
@@ -259,7 +261,7 @@ const Listings = () => {
       <div className="mb-4 flex flex-col gap-2 md:flex-row md:items-center">
         <input
           type="text"
-          placeholder="Search by unit ID, project, lot type, cadastal lot no..."
+          placeholder="Search by unit ID, project, lot type, cadastral lot no..."
           value={searchInput}
           onChange={(e) => setSearchInput(e.target.value)}
           className="border border-black px-3 py-2 md:w-96"
@@ -303,15 +305,33 @@ const Listings = () => {
         <table className="w-full border border-black text-sm">
           <thead>
             <tr className="border-b border-black">
-              <th className="border-r border-black px-4 py-2 text-left">Unit ID ↕</th>
-              <th className="border-r border-black px-4 py-2 text-left">Project ↕</th>
-              <th className="border-r border-black px-4 py-2 text-left">Lot Type ↕</th>
-              <th className="border-r border-black px-4 py-2 text-left">Area ↕</th>
-              <th className="border-r border-black px-4 py-2 text-left">Price / SQM ↕</th>
-              <th className="border-r border-black px-4 py-2 text-left">Net Price ↕</th>
-              <th className="border-r border-black px-4 py-2 text-left">Legal / Misc ↕</th>
-              <th className="border-r border-black px-4 py-2 text-left">Status ↕</th>
-              <th className="px-4 py-2 text-left">Actions ↕</th>
+              <th className="border-r border-black px-4 py-2 text-left">
+                Unit ID ↕
+              </th>
+              <th className="border-r border-black px-4 py-2 text-left">
+                Project ↕
+              </th>
+              <th className="border-r border-black px-4 py-2 text-left">
+                Lot Type ↕
+              </th>
+              <th className="border-r border-black px-4 py-2 text-left">
+                Area ↕
+              </th>
+              <th className="border-r border-black px-4 py-2 text-left">
+                Price / SQM ↕
+              </th>
+              <th className="border-r border-black px-4 py-2 text-left">
+                Net Price ↕
+              </th>
+              <th className="border-r border-black px-4 py-2 text-left">
+                Legal / Misc ↕
+              </th>
+              <th className="border-r border-black px-4 py-2 text-left">
+                Status ↕
+              </th>
+              <th className="px-4 py-2 text-left">
+                Actions ↕
+              </th>
             </tr>
           </thead>
 
@@ -386,7 +406,10 @@ const Listings = () => {
           <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto border border-black bg-white p-4">
             <h2 className="mb-4 text-2xl font-bold">Add Listing</h2>
 
-            <form onSubmit={handleAddListing} className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <form
+              onSubmit={handleAddListing}
+              className="grid grid-cols-1 gap-3 md:grid-cols-2"
+            >
               <select
                 value={formData.projectId}
                 onChange={(e) =>
@@ -406,10 +429,13 @@ const Listings = () => {
 
               <input
                 type="text"
-                placeholder="Cadastal lot no."
-                value={formData.cadastalLotNo}
+                placeholder="Cadastral lot no."
+                value={formData.cadastralLotNo}
                 onChange={(e) =>
-                  setFormData({ ...formData, cadastalLotNo: e.target.value })
+                  setFormData({
+                    ...formData,
+                    cadastralLotNo: e.target.value,
+                  })
                 }
                 className="border border-black px-3 py-2"
               />
@@ -573,18 +599,46 @@ const Listings = () => {
             <h2 className="mb-4 text-2xl font-bold">Listing Details</h2>
 
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              <p><b>Project:</b> {viewListing.projectName}</p>
-              <p><b>Cadastal Lot No:</b> {viewListing.cadastalLotNo}</p>
-              <p><b>Unit ID:</b> {viewListing.unitId}</p>
-              <p><b>Lot Type:</b> {viewListing.lotType}</p>
-              <p><b>Promo Discount:</b> {formatMoney(viewListing.promoDiscount)}</p>
-              <p><b>Downpayment:</b> {formatMoney(viewListing.downpayment)}</p>
-              <p><b>Reservation Fee:</b> {formatMoney(viewListing.reservationFee)}</p>
-              <p><b>Price Per SQM:</b> {formatMoney(viewListing.pricePerSqm)}</p>
-              <p><b>Lot Area:</b> {formatNumber(viewListing.lotAreaSqm)} sqm</p>
-              <p><b>Net Selling Price:</b> {formatMoney(viewListing.netSellingPrice)}</p>
-              <p><b>Legal / Misc Fee:</b> {formatMoney(viewListing.legalMiscFee)}</p>
-              <p><b>Status:</b> {viewListing.status}</p>
+              <p>
+                <b>Project:</b> {viewListing.projectName}
+              </p>
+              <p>
+                <b>Cadastral Lot No:</b> {viewListing.cadastralLotNo}
+              </p>
+              <p>
+                <b>Unit ID:</b> {viewListing.unitId}
+              </p>
+              <p>
+                <b>Lot Type:</b> {viewListing.lotType}
+              </p>
+              <p>
+                <b>Promo Discount:</b>{" "}
+                {formatMoney(viewListing.promoDiscount)}
+              </p>
+              <p>
+                <b>Downpayment:</b> {formatMoney(viewListing.downpayment)}
+              </p>
+              <p>
+                <b>Reservation Fee:</b>{" "}
+                {formatMoney(viewListing.reservationFee)}
+              </p>
+              <p>
+                <b>Price Per SQM:</b> {formatMoney(viewListing.pricePerSqm)}
+              </p>
+              <p>
+                <b>Lot Area:</b> {formatNumber(viewListing.lotAreaSqm)} sqm
+              </p>
+              <p>
+                <b>Net Selling Price:</b>{" "}
+                {formatMoney(viewListing.netSellingPrice)}
+              </p>
+              <p>
+                <b>Legal / Misc Fee:</b>{" "}
+                {formatMoney(viewListing.legalMiscFee)}
+              </p>
+              <p>
+                <b>Status:</b> {viewListing.status}
+              </p>
             </div>
 
             <div className="mt-4 flex justify-end gap-2">
@@ -614,7 +668,10 @@ const Listings = () => {
           <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto border border-black bg-white p-4">
             <h2 className="mb-4 text-2xl font-bold">Edit Listing</h2>
 
-            <form onSubmit={handleUpdateListing} className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <form
+              onSubmit={handleUpdateListing}
+              className="grid grid-cols-1 gap-3 md:grid-cols-2"
+            >
               <select
                 value={editListing.projectId}
                 onChange={(e) =>
@@ -634,11 +691,11 @@ const Listings = () => {
 
               <input
                 type="text"
-                value={editListing.cadastalLotNo}
+                value={editListing.cadastralLotNo}
                 onChange={(e) =>
                   setEditListing({
                     ...editListing,
-                    cadastalLotNo: e.target.value,
+                    cadastralLotNo: e.target.value,
                   })
                 }
                 className="border border-black px-3 py-2"
