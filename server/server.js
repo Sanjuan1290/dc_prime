@@ -4,6 +4,7 @@ import cors from 'cors'
 import cookieParser from 'cookie-parser'
 import { db } from './db/connect.js'
 import usersRouter from './routers/users.router.js'
+import useCurrentUser from './utils/useCurrentUser.js'
 
 const app = express()
 
@@ -21,6 +22,8 @@ app.use(cors({
 app.get('/', (req, res) => {
   res.json({ message: 'Server is running' })
 })
+
+app.get('/api/v1/getCurrentUser', useCurrentUser)
 
 app.use('/api/v1', usersRouter)
 

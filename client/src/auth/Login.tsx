@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "react-router-dom"
 import { useState } from "react"
 
-const API_LINK = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1'
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1'
 
 const Login = () => {
   const [email, setEmail] = useState('')
@@ -14,7 +14,7 @@ const Login = () => {
   const loginMutation = useMutation({
     mutationKey: ['login'],
     mutationFn: async () => {
-      const res = await fetch(`${API_LINK}/login`, {
+      const res = await fetch(`${API_URL}/login`, {
         method: 'POST',
         credentials: 'include',
         headers: {
