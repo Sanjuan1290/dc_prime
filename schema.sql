@@ -24,15 +24,21 @@ DROP TABLE IF EXISTS `accredited_sellers`;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `accredited_sellers` (
   `id` int NOT NULL AUTO_INCREMENT,
+  `user_id` int DEFAULT NULL,
   `full_name` varchar(255) NOT NULL,
   `email` varchar(255) DEFAULT NULL,
-  `manager` varchar(255) DEFAULT NULL,
   `contact_no` varchar(50) DEFAULT NULL,
+  `seller_role` varchar(50) NOT NULL DEFAULT 'agent',
+  `parent_seller_id` int DEFAULT NULL,
   `status` varchar(50) NOT NULL DEFAULT 'active',
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+  PRIMARY KEY (`id`),
+  KEY `fk_accredited_sellers_user` (`user_id`),
+  KEY `fk_accredited_sellers_parent` (`parent_seller_id`),
+  CONSTRAINT `fk_accredited_sellers_parent` FOREIGN KEY (`parent_seller_id`) REFERENCES `accredited_sellers` (`id`),
+  CONSTRAINT `fk_accredited_sellers_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -41,6 +47,7 @@ CREATE TABLE `accredited_sellers` (
 
 LOCK TABLES `accredited_sellers` WRITE;
 /*!40000 ALTER TABLE `accredited_sellers` DISABLE KEYS */;
+INSERT INTO `accredited_sellers` VALUES (1,NULL,'PARROCHO, JOSEPH E.',NULL,NULL,'broker_network_manager',NULL,'active','2026-06-06 13:12:07','2026-06-06 13:12:07'),(2,NULL,'HERNANDEZ, JULIE ANN D.',NULL,NULL,'broker',1,'active','2026-06-06 13:12:07','2026-06-06 13:12:07'),(3,NULL,'RIOJA, KIRSTEN JHOYCE A.',NULL,'09941603497','manager',2,'active','2026-06-06 13:12:07','2026-06-06 13:12:07'),(4,NULL,'NEPOMUCENO, ERWIN','phproperty13@gmail.com','0991-995-8155','agent',3,'active','2026-06-06 13:12:07','2026-06-06 13:12:07');
 /*!40000 ALTER TABLE `accredited_sellers` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -64,7 +71,7 @@ CREATE TABLE `attendance` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_employee_attendance_date` (`employee_id`,`attendance_date`),
   CONSTRAINT `fk_attendance_employee` FOREIGN KEY (`employee_id`) REFERENCES `employees` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -73,6 +80,7 @@ CREATE TABLE `attendance` (
 
 LOCK TABLES `attendance` WRITE;
 /*!40000 ALTER TABLE `attendance` DISABLE KEYS */;
+INSERT INTO `attendance` VALUES (1,1,'2026-06-06','08:00:00','17:00:00','08:00:00','17:00:00','2026-06-06 13:12:07','2026-06-06 13:12:07'),(2,2,'2026-06-06','08:15:00','17:05:00','08:00:00','17:00:00','2026-06-06 13:12:07','2026-06-06 13:12:07');
 /*!40000 ALTER TABLE `attendance` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -94,7 +102,7 @@ CREATE TABLE `audit_logs` (
   PRIMARY KEY (`id`),
   KEY `fk_audit_logs_user` (`user_id`),
   CONSTRAINT `fk_audit_logs_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=8 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -103,6 +111,7 @@ CREATE TABLE `audit_logs` (
 
 LOCK TABLES `audit_logs` WRITE;
 /*!40000 ALTER TABLE `audit_logs` DISABLE KEYS */;
+INSERT INTO `audit_logs` VALUES (1,1,'create','Projects','Created sample projects','127.0.0.1','2026-06-06 13:12:07'),(2,1,'create','Listings','Created sample listings','127.0.0.1','2026-06-06 13:12:07'),(3,1,'create','Clients','Created sample clients','127.0.0.1','2026-06-06 13:12:07'),(4,1,'reserve','Client Units','Reserved LA-0416 and LA-0506 for sample clients','127.0.0.1','2026-06-06 13:12:07'),(5,1,'payment','Payments','Created sample payment records','127.0.0.1','2026-06-06 13:12:07'),(6,1,'document_check','Documents','Created sample client document checklists','127.0.0.1','2026-06-06 13:12:07'),(7,1,'create','Commissions','Created sample commission records','127.0.0.1','2026-06-06 13:12:07');
 /*!40000 ALTER TABLE `audit_logs` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -130,7 +139,7 @@ CREATE TABLE `client_document_list` (
   CONSTRAINT `fk_client_documents_client_unit` FOREIGN KEY (`client_unit_id`) REFERENCES `client_units` (`id`),
   CONSTRAINT `fk_client_documents_document` FOREIGN KEY (`document_id`) REFERENCES `documents` (`id`),
   CONSTRAINT `fk_client_documents_reviewer` FOREIGN KEY (`reviewed_by`) REFERENCES `users` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=63 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -139,6 +148,7 @@ CREATE TABLE `client_document_list` (
 
 LOCK TABLES `client_document_list` WRITE;
 /*!40000 ALTER TABLE `client_document_list` DISABLE KEYS */;
+INSERT INTO `client_document_list` VALUES (1,1,1,NULL,'submitted',1,'2026-06-06 21:12:07','2026-06-06 13:12:07','2026-06-06 13:12:07'),(2,1,2,NULL,'submitted',1,'2026-06-06 21:12:07','2026-06-06 13:12:07','2026-06-06 13:12:07'),(3,1,3,NULL,'not_submitted',NULL,NULL,'2026-06-06 13:12:07','2026-06-06 13:12:07'),(4,1,4,NULL,'not_submitted',NULL,NULL,'2026-06-06 13:12:07','2026-06-06 13:12:07'),(5,1,5,NULL,'submitted',1,'2026-06-06 21:12:07','2026-06-06 13:12:07','2026-06-06 13:12:07'),(6,1,6,NULL,'not_submitted',NULL,NULL,'2026-06-06 13:12:07','2026-06-06 13:12:07'),(7,1,7,NULL,'not_submitted',NULL,NULL,'2026-06-06 13:12:07','2026-06-06 13:12:07'),(8,1,8,NULL,'not_submitted',NULL,NULL,'2026-06-06 13:12:07','2026-06-06 13:12:07'),(9,1,9,NULL,'not_submitted',NULL,NULL,'2026-06-06 13:12:07','2026-06-06 13:12:07'),(10,1,10,NULL,'not_submitted',NULL,NULL,'2026-06-06 13:12:07','2026-06-06 13:12:07'),(11,1,11,NULL,'not_submitted',NULL,NULL,'2026-06-06 13:12:07','2026-06-06 13:12:07'),(12,1,12,NULL,'not_submitted',NULL,NULL,'2026-06-06 13:12:07','2026-06-06 13:12:07'),(13,1,13,NULL,'submitted',1,'2026-06-06 21:12:07','2026-06-06 13:12:07','2026-06-06 13:12:07'),(14,1,14,NULL,'not_submitted',NULL,NULL,'2026-06-06 13:12:07','2026-06-06 13:12:07'),(15,1,15,NULL,'not_submitted',NULL,NULL,'2026-06-06 13:12:07','2026-06-06 13:12:07'),(16,1,16,NULL,'not_submitted',NULL,NULL,'2026-06-06 13:12:07','2026-06-06 13:12:07'),(17,1,17,NULL,'not_submitted',NULL,NULL,'2026-06-06 13:12:07','2026-06-06 13:12:07'),(18,1,18,NULL,'not_submitted',NULL,NULL,'2026-06-06 13:12:07','2026-06-06 13:12:07'),(19,1,19,NULL,'not_submitted',NULL,NULL,'2026-06-06 13:12:07','2026-06-06 13:12:07'),(20,1,20,NULL,'not_submitted',NULL,NULL,'2026-06-06 13:12:07','2026-06-06 13:12:07'),(32,2,1,NULL,'not_submitted',NULL,NULL,'2026-06-06 13:12:07','2026-06-06 13:12:07'),(33,2,2,NULL,'not_submitted',NULL,NULL,'2026-06-06 13:12:07','2026-06-06 13:12:07'),(34,2,3,NULL,'not_submitted',NULL,NULL,'2026-06-06 13:12:07','2026-06-06 13:12:07'),(35,2,4,NULL,'not_submitted',NULL,NULL,'2026-06-06 13:12:07','2026-06-06 13:12:07'),(36,2,5,NULL,'not_submitted',NULL,NULL,'2026-06-06 13:12:07','2026-06-06 13:12:07'),(37,2,6,NULL,'not_submitted',NULL,NULL,'2026-06-06 13:12:07','2026-06-06 13:12:07'),(38,2,7,NULL,'not_submitted',NULL,NULL,'2026-06-06 13:12:07','2026-06-06 13:12:07'),(39,2,8,NULL,'not_submitted',NULL,NULL,'2026-06-06 13:12:07','2026-06-06 13:12:07'),(40,2,9,NULL,'not_submitted',NULL,NULL,'2026-06-06 13:12:07','2026-06-06 13:12:07'),(41,2,10,NULL,'not_submitted',NULL,NULL,'2026-06-06 13:12:07','2026-06-06 13:12:07'),(42,2,11,NULL,'not_submitted',NULL,NULL,'2026-06-06 13:12:07','2026-06-06 13:12:07'),(43,2,12,NULL,'not_submitted',NULL,NULL,'2026-06-06 13:12:07','2026-06-06 13:12:07'),(44,2,13,NULL,'not_submitted',NULL,NULL,'2026-06-06 13:12:07','2026-06-06 13:12:07'),(45,2,14,NULL,'not_submitted',NULL,NULL,'2026-06-06 13:12:07','2026-06-06 13:12:07'),(46,2,15,NULL,'not_submitted',NULL,NULL,'2026-06-06 13:12:07','2026-06-06 13:12:07'),(47,2,16,NULL,'not_submitted',NULL,NULL,'2026-06-06 13:12:07','2026-06-06 13:12:07'),(48,2,17,NULL,'not_submitted',NULL,NULL,'2026-06-06 13:12:07','2026-06-06 13:12:07'),(49,2,18,NULL,'not_submitted',NULL,NULL,'2026-06-06 13:12:07','2026-06-06 13:12:07'),(50,2,19,NULL,'not_submitted',NULL,NULL,'2026-06-06 13:12:07','2026-06-06 13:12:07'),(51,2,20,NULL,'not_submitted',NULL,NULL,'2026-06-06 13:12:07','2026-06-06 13:12:07');
 /*!40000 ALTER TABLE `client_document_list` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -167,7 +177,7 @@ CREATE TABLE `client_units` (
   CONSTRAINT `fk_client_units_client` FOREIGN KEY (`client_id`) REFERENCES `clients` (`id`),
   CONSTRAINT `fk_client_units_listing` FOREIGN KEY (`listing_id`) REFERENCES `listings` (`id`),
   CONSTRAINT `chk_due_day` CHECK ((`due_day` between 1 and 31))
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -176,6 +186,7 @@ CREATE TABLE `client_units` (
 
 LOCK TABLES `client_units` WRITE;
 /*!40000 ALTER TABLE `client_units` DISABLE KEYS */;
+INSERT INTO `client_units` VALUES (1,1,3,1,'active',932000.00,28,'2026-06-06 13:12:07','2026-06-06 13:12:07'),(2,2,2,1,'reserved',4117500.00,15,'2026-06-06 13:12:07','2026-06-06 13:12:07');
 /*!40000 ALTER TABLE `client_units` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -196,7 +207,7 @@ CREATE TABLE `clients` (
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -205,6 +216,7 @@ CREATE TABLE `clients` (
 
 LOCK TABLES `clients` WRITE;
 /*!40000 ALTER TABLE `clients` DISABLE KEYS */;
+INSERT INTO `clients` VALUES (1,'AHMED, SARAH NACINO',NULL,'msx.sarah0929@gmail.com','0969-129-1596','BIÑAN LAGUNA','2026-06-06 13:12:07','2026-06-06 13:12:07'),(2,'ALAMER, JAZZIE',NULL,'alamermarkchristopher21@gmail.com','0927-437-5425','GEN. TRI CAVITE','2026-06-06 13:12:07','2026-06-06 13:12:07');
 /*!40000 ALTER TABLE `clients` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -230,7 +242,7 @@ CREATE TABLE `commissions` (
   KEY `fk_commissions_seller` (`seller_id`),
   CONSTRAINT `fk_commissions_client_unit` FOREIGN KEY (`client_unit_id`) REFERENCES `client_units` (`id`),
   CONSTRAINT `fk_commissions_seller` FOREIGN KEY (`seller_id`) REFERENCES `accredited_sellers` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -239,6 +251,7 @@ CREATE TABLE `commissions` (
 
 LOCK TABLES `commissions` WRITE;
 /*!40000 ALTER TABLE `commissions` DISABLE KEYS */;
+INSERT INTO `commissions` VALUES (1,1,4,5.00,50000.00,20000.00,'payable','2026-06-06 13:12:07','2026-06-06 13:12:07'),(2,2,4,5.00,205875.00,0.00,'pending','2026-06-06 13:12:07','2026-06-06 13:12:07');
 /*!40000 ALTER TABLE `commissions` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -259,7 +272,7 @@ CREATE TABLE `documents` (
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=21 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -268,6 +281,7 @@ CREATE TABLE `documents` (
 
 LOCK TABLES `documents` WRITE;
 /*!40000 ALTER TABLE `documents` DISABLE KEYS */;
+INSERT INTO `documents` VALUES (1,'Client Registration Form - Seller\'s Copy','Seller copy of the client registration form',1,0,'active','2026-06-06 13:12:07','2026-06-06 13:12:07'),(2,'Client Registration Form - Administrator Copy','Administrator copy of the client registration form',1,0,'active','2026-06-06 13:12:07','2026-06-06 13:12:07'),(3,'Intent to Buy','Client intent to buy document',1,0,'active','2026-06-06 13:12:07','2026-06-06 13:12:07'),(4,'Offer to Buy & Buyer\'s Profile','Offer to buy form with buyer profile',1,0,'active','2026-06-06 13:12:07','2026-06-06 13:12:07'),(5,'Reservation Agreement','Agreement for unit reservation',1,0,'active','2026-06-06 13:12:07','2026-06-06 13:12:07'),(6,'Deed of Sale','Document used after sale completion',0,0,'active','2026-06-06 13:12:07','2026-06-06 13:12:07'),(7,'Contract to Sell','Contract document before full ownership transfer',0,0,'active','2026-06-06 13:12:07','2026-06-06 13:12:07'),(8,'Buyer Counselling and Acknowledgement Form','Buyer counselling acknowledgement',1,0,'active','2026-06-06 13:12:07','2026-06-06 13:12:07'),(9,'Voluntary Cancellation and Waiver of Rights','Cancellation and waiver document',0,0,'active','2026-06-06 13:12:07','2026-06-06 13:12:07'),(10,'Buyer Acknowledgement Form','Buyer acknowledgement document',1,0,'active','2026-06-06 13:12:07','2026-06-06 13:12:07'),(11,'SPA to Process Title (for Company)','Special power of attorney for title processing',0,0,'active','2026-06-06 13:12:07','2026-06-06 13:12:07'),(12,'SPA Authorization to Sign (for Representative)','Authorization to sign for representative',0,0,'active','2026-06-06 13:12:07','2026-06-06 13:12:07'),(13,'Two valid Government-issued IDs (with 3 specimen signatures)','Valid IDs with specimen signatures',1,1,'active','2026-06-06 13:12:07','2026-06-06 13:12:07'),(14,'TIN No. / TIN ID','Tax identification document',1,1,'active','2026-06-06 13:12:07','2026-06-06 13:12:07'),(15,'PSA (Single)','PSA certificate for single buyer',0,1,'active','2026-06-06 13:12:07','2026-06-06 13:12:07'),(16,'Marriage Certificate','Marriage certificate if applicable',0,1,'active','2026-06-06 13:12:07','2026-06-06 13:12:07'),(17,'Valid ID of Spouse (when required)','Spouse valid ID when required',0,1,'active','2026-06-06 13:12:07','2026-06-06 13:12:07'),(18,'CENOMAR (if the buyer has kids but not married)','CENOMAR when applicable',0,1,'active','2026-06-06 13:12:07','2026-06-06 13:12:07'),(19,'Passport ID','Passport identification',0,1,'active','2026-06-06 13:12:07','2026-06-06 13:12:07'),(20,'Valid IDs of both Principal and Representative','IDs for principal and representative',0,1,'active','2026-06-06 13:12:07','2026-06-06 13:12:07');
 /*!40000 ALTER TABLE `documents` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -287,7 +301,7 @@ CREATE TABLE `employees` (
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -296,6 +310,7 @@ CREATE TABLE `employees` (
 
 LOCK TABLES `employees` WRITE;
 /*!40000 ALTER TABLE `employees` DISABLE KEYS */;
+INSERT INTO `employees` VALUES (1,'JUAN DELA CRUZ','Admin Staff',25000.00,'active','2026-06-06 13:12:07','2026-06-06 13:12:07'),(2,'MARIA SANTOS','Treasury Staff',28000.00,'active','2026-06-06 13:12:07','2026-06-06 13:12:07');
 /*!40000 ALTER TABLE `employees` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -325,7 +340,7 @@ CREATE TABLE `listings` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_listing_project_unit` (`project_id`,`unit_id`),
   CONSTRAINT `fk_listings_project` FOREIGN KEY (`project_id`) REFERENCES `projects` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -334,6 +349,7 @@ CREATE TABLE `listings` (
 
 LOCK TABLES `listings` WRITE;
 /*!40000 ALTER TABLE `listings` DISABLE KEYS */;
+INSERT INTO `listings` VALUES (1,1,'CAD-LA-0505','LA-0505','Residential',0.00,300000.00,10000.00,2500.00,1200.00,3000000.00,300000.00,'available','2026-06-06 13:12:07','2026-06-06 13:12:07'),(2,1,'CAD-LA-0506','LA-0506','Residential',0.00,411750.00,10000.00,2500.00,1647.00,4117500.00,411750.00,'reserved','2026-06-06 13:12:07','2026-06-06 13:12:07'),(3,1,'CAD-LA-0416','LA-0416','Residential',0.00,100000.00,10000.00,2500.00,400.00,1000000.00,100000.00,'reserved','2026-06-06 13:12:07','2026-06-06 13:12:07'),(4,2,'CAD-BP-0001','BP-0001','Residential',0.00,50000.00,10000.00,2000.00,100.00,200000.00,20000.00,'available','2026-06-06 13:12:07','2026-06-06 13:12:07');
 /*!40000 ALTER TABLE `listings` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -356,7 +372,7 @@ CREATE TABLE `payments` (
   PRIMARY KEY (`id`),
   KEY `fk_payments_client_unit` (`client_unit_id`),
   CONSTRAINT `fk_payments_client_unit` FOREIGN KEY (`client_unit_id`) REFERENCES `client_units` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -365,6 +381,7 @@ CREATE TABLE `payments` (
 
 LOCK TABLES `payments` WRITE;
 /*!40000 ALTER TABLE `payments` DISABLE KEYS */;
+INSERT INTO `payments` VALUES (1,1,10000.00,'reservation_fee','cash','2026-06-01','2026-06-06 13:12:07','2026-06-06 13:12:07'),(2,1,58000.00,'downpayment','bank_transfer','2026-06-05','2026-06-06 13:12:07','2026-06-06 13:12:07'),(3,2,10000.00,'reservation_fee','gcash','2026-06-06','2026-06-06 13:12:07','2026-06-06 13:12:07');
 /*!40000 ALTER TABLE `payments` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -387,7 +404,7 @@ CREATE TABLE `projects` (
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -396,6 +413,7 @@ CREATE TABLE `projects` (
 
 LOCK TABLES `projects` WRITE;
 /*!40000 ALTER TABLE `projects` DISABLE KEYS */;
+INSERT INTO `projects` VALUES (1,'Luntiang Aguinaldo','Gen. Emilio Aguinaldo, Cavite','Christopher Prime','TD-001-2026','PIN-001-2026','active',NULL,'2026-06-06 13:12:07','2026-06-06 13:12:07'),(2,'Bailen Project','Bailen, Cavite','Christopher Prime','TD-002-2026','PIN-002-2026','active',NULL,'2026-06-06 13:12:07','2026-06-06 13:12:07');
 /*!40000 ALTER TABLE `projects` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -414,7 +432,7 @@ CREATE TABLE `rest_days` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_employee_rest_day` (`employee_id`,`day_name`),
   CONSTRAINT `fk_rest_days_employee` FOREIGN KEY (`employee_id`) REFERENCES `employees` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -423,6 +441,7 @@ CREATE TABLE `rest_days` (
 
 LOCK TABLES `rest_days` WRITE;
 /*!40000 ALTER TABLE `rest_days` DISABLE KEYS */;
+INSERT INTO `rest_days` VALUES (1,1,'Sunday',1),(2,2,'Saturday',1);
 /*!40000 ALTER TABLE `rest_days` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -441,7 +460,7 @@ CREATE TABLE `settings` (
   `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `setting_key` (`setting_key`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=8 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -450,6 +469,7 @@ CREATE TABLE `settings` (
 
 LOCK TABLES `settings` WRITE;
 /*!40000 ALTER TABLE `settings` DISABLE KEYS */;
+INSERT INTO `settings` VALUES (1,'company_name','D&C Prime Realty','2026-06-06 13:12:07','2026-06-06 13:12:07'),(2,'company_email','admin@gmail.com','2026-06-06 13:12:07','2026-06-06 13:12:07'),(3,'company_contact','09123456789','2026-06-06 13:12:07','2026-06-06 13:12:07'),(4,'company_address','Cavite, Philippines','2026-06-06 13:12:07','2026-06-06 13:12:07'),(5,'default_reservation_fee','10000','2026-06-06 13:12:07','2026-06-06 13:12:07'),(6,'default_commission_rate','5','2026-06-06 13:12:07','2026-06-06 13:12:07'),(7,'system_status','active','2026-06-06 13:12:07','2026-06-06 13:12:07');
 /*!40000 ALTER TABLE `settings` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -472,7 +492,7 @@ CREATE TABLE `users` (
   `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `email` (`email`)
-) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -481,7 +501,7 @@ CREATE TABLE `users` (
 
 LOCK TABLES `users` WRITE;
 /*!40000 ALTER TABLE `users` DISABLE KEYS */;
-INSERT INTO `users` VALUES (1,'christopher prime','admin@gmail.com','$2b$10$NctIePlPkOKirDJpOSR5PemQyFQydpwRSK2uE2oTj5e1dmbpPwGGy','admin','active','2026-06-06 20:23:24','2026-06-06 08:02:00','2026-06-06 12:23:24');
+INSERT INTO `users` VALUES (1,'christopher prime','admin@gmail.com','$2b$10$NctIePlPkOKirDJpOSR5PemQyFQydpwRSK2uE2oTj5e1dmbpPwGGy','admin','active','2026-06-06 20:23:24','2026-06-06 08:02:00','2026-06-06 12:23:24'),(3,'Maria Treasury','treasury@gmail.com','$2b$10$NctIePlPkOKirDJpOSR5PemQyFQydpwRSK2uE2oTj5e1dmbpPwGGy','personnel','active',NULL,'2026-06-06 13:12:06','2026-06-06 13:12:06');
 /*!40000 ALTER TABLE `users` ENABLE KEYS */;
 UNLOCK TABLES;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
@@ -494,4 +514,4 @@ UNLOCK TABLES;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2026-06-06 20:49:50
+-- Dump completed on 2026-06-06 21:12:32
