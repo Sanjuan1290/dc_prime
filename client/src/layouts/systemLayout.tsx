@@ -45,7 +45,8 @@ const navGroups: NavGroup[] = [
     items: [
       { label: "Attendance", to: "/attendance", icon: FiClock },
       { label: "Clients", to: "/clients", icon: FiUsers, badge: "75" },
-      { label: "Accreditted Sellers", to: "/accreditted_sellers", icon: FiUsers, badge: "25" }
+      { label: "Accreditted Sellers", to: "/accreditted_sellers", icon: FiUsers, badge: "25" },
+      { label: "Employees", to: "/employees", icon: FiUsers, badge: "8" }
     ]
   },
   {

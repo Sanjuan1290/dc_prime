@@ -14,6 +14,8 @@ import Commissions from "./pages/Commissions"
 import Reports from "./pages/Reports"
 import AuditLogs from "./pages/AuditLogs"
 import Settings from "./pages/Settings"
+import Employees from "./pages/Employees"
+import Attendance from "./pages/Attendance"
 
 
 const App = () => {
@@ -36,6 +38,8 @@ const App = () => {
         <Route path="reports" element={<Reports/>} />
         <Route path="audit-logs" element={<AuditLogs/>} />
         <Route path="settings" element={<Settings/>} />
+        <Route path="employees" element={<Employees/>} />
+        <Route path="attendance" element={<Attendance/>} />
       </Route>
     </>
   ))

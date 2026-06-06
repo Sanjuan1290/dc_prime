@@ -2,11 +2,18 @@ import { useState } from "react"
 
 type SellerStatus = "active" | "inactive"
 
+type SellerRole =
+  | "broker_network_manager"
+  | "broker"
+  | "manager"
+  | "agent"
+
 type AccreditedSeller = {
   id: number
   status: SellerStatus
   fullName: string
-  manager: string
+  sellerRole: SellerRole
+  parentSellerId: number | null
   contactNo: string
   email: string
   createdAt: string
@@ -16,9 +23,10 @@ const AccredittedSellers = () => {
   const [sellers, setSellers] = useState<AccreditedSeller[]>([
     {
       id: 1,
-      status: "inactive",
-      fullName: "ORAPA, MARILOU",
-      manager: "PARROCHO, JOSEPH E.",
+      status: "active",
+      fullName: "PARROCHO, JOSEPH E.",
+      sellerRole: "broker_network_manager",
+      parentSellerId: null,
       contactNo: "",
       email: "",
       createdAt: "2025-05-16",
@@ -26,35 +34,39 @@ const AccredittedSellers = () => {
     {
       id: 2,
       status: "active",
-      fullName: "NEPOMUCENO, ERWIN",
-      manager: "PARROCHO, JOSEPH E.",
-      contactNo: "0991-995-8155",
-      email: "phproperty13@gmail.com",
+      fullName: "HERNANDEZ, JULIE ANN D.",
+      sellerRole: "broker",
+      parentSellerId: 1,
+      contactNo: "",
+      email: "",
       createdAt: "2025-06-06",
     },
     {
       id: 3,
-      status: "inactive",
-      fullName: "DE CASTRO, ROSE MARIE D.",
-      manager: "HERNANDEZ, JULIE ANN D.",
-      contactNo: "09237301104",
-      email: "rosemariedecastro06@yahoo.com",
+      status: "active",
+      fullName: "RIOJA, KIRSTEN JHOYCE A.",
+      sellerRole: "manager",
+      parentSellerId: 2,
+      contactNo: "",
+      email: "",
       createdAt: "2025-08-31",
     },
     {
       id: 4,
       status: "active",
-      fullName: "BRIONES, CONIE, A.",
-      manager: "HERNANDEZ, JULIE ANN D.",
-      contactNo: "09948685799",
-      email: "",
-      createdAt: "2025-08-31",
+      fullName: "NEPOMUCENO, ERWIN",
+      sellerRole: "agent",
+      parentSellerId: 3,
+      contactNo: "0991-995-8155",
+      email: "phproperty13@gmail.com",
+      createdAt: "2025-06-06",
     },
     {
       id: 5,
       status: "inactive",
       fullName: "TOLEDO, NICKIE ROSE E.",
-      manager: "RIOJA, KIRSTEN JHOYCE A.",
+      sellerRole: "agent",
+      parentSellerId: 3,
       contactNo: "09941603497",
       email: "nickierosetoledo@gmail.com",
       createdAt: "2025-08-31",
@@ -68,7 +80,8 @@ const AccredittedSellers = () => {
   const [formData, setFormData] = useState({
     status: "active" as SellerStatus,
     fullName: "",
-    manager: "",
+    sellerRole: "agent" as SellerRole,
+    parentSellerId: null as number | null,
     contactNo: "",
     email: "",
     createdAt: new Date().toISOString().slice(0, 10),
@@ -78,7 +91,8 @@ const AccredittedSellers = () => {
     setFormData({
       status: "active",
       fullName: "",
-      manager: "",
+      sellerRole: "agent",
+      parentSellerId: null,
       contactNo: "",
       email: "",
       createdAt: new Date().toISOString().slice(0, 10),
@@ -95,12 +109,56 @@ const AccredittedSellers = () => {
     })
   }
 
+  const formatRole = (role: SellerRole) => {
+    return role
+      .split("_")
+      .map((word) => word[0].toUpperCase() + word.slice(1))
+      .join(" ")
+  }
+
+  const getParentSellerName = (parentSellerId: number | null) => {
+    if (!parentSellerId) return "-"
+
+    const parentSeller = sellers.find((seller) => seller.id === parentSellerId)
+
+    return parentSeller ? parentSeller.fullName : "-"
+  }
+
+  const getPossibleParentSellers = (
+    currentSellerId?: number,
+    role?: SellerRole
+  ) => {
+    return sellers.filter((seller) => {
+      if (seller.id === currentSellerId) return false
+
+      if (role === "broker_network_manager") return false
+
+      if (role === "broker") {
+        return seller.sellerRole === "broker_network_manager"
+      }
+
+      if (role === "manager") {
+        return seller.sellerRole === "broker"
+      }
+
+      if (role === "agent") {
+        return seller.sellerRole === "manager"
+      }
+
+      return true
+    })
+  }
+
   const handleAddSeller = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
 
     const newSeller: AccreditedSeller = {
       id: sellers.length + 1,
       ...formData,
+      parentSellerId:
+        formData.sellerRole === "broker_network_manager"
+          ? null
+          : formData.parentSellerId,
     }
 
     setSellers((prev) => [...prev, newSeller])
@@ -115,7 +173,15 @@ const AccredittedSellers = () => {
 
     setSellers((prev) =>
       prev.map((seller) =>
-        seller.id === editSeller.id ? editSeller : seller
+        seller.id === editSeller.id
+          ? {
+              ...editSeller,
+              parentSellerId:
+                editSeller.sellerRole === "broker_network_manager"
+                  ? null
+                  : editSeller.parentSellerId,
+            }
+          : seller
       )
     )
 
@@ -124,12 +190,14 @@ const AccredittedSellers = () => {
 
   const filteredSellers = sellers.filter((seller) => {
     const search = searchInput.toLowerCase().trim()
+    const parentSellerName = getParentSellerName(seller.parentSellerId)
 
     return (
       search === "" ||
       seller.status.toLowerCase().includes(search) ||
       seller.fullName.toLowerCase().includes(search) ||
-      seller.manager.toLowerCase().includes(search) ||
+      seller.sellerRole.toLowerCase().includes(search) ||
+      parentSellerName.toLowerCase().includes(search) ||
       seller.contactNo.toLowerCase().includes(search) ||
       seller.email.toLowerCase().includes(search) ||
       seller.createdAt.toLowerCase().includes(search)
@@ -141,7 +209,7 @@ const AccredittedSellers = () => {
       <div className="mb-6">
         <h1 className="text-3xl font-bold">Accredited Sellers</h1>
         <p className="text-sm text-gray-600">
-          Seller accreditation records from MySQL
+          Seller hierarchy records from MySQL
         </p>
       </div>
 
@@ -156,7 +224,7 @@ const AccredittedSellers = () => {
         <div className="flex flex-col gap-2 md:flex-row">
           <input
             type="text"
-            placeholder="Search status, agent, manager, contact, email..."
+            placeholder="Search status, seller, role, parent, contact, email..."
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             className="border border-black px-3 py-2 md:w-96"
@@ -179,10 +247,13 @@ const AccredittedSellers = () => {
                 Status ↕
               </th>
               <th className="border-r border-black px-4 py-2 text-left">
-                Name of Agent ↕
+                Name of Seller ↕
               </th>
               <th className="border-r border-black px-4 py-2 text-left">
-                Manager ↕
+                Seller Role ↕
+              </th>
+              <th className="border-r border-black px-4 py-2 text-left">
+                Reports Under ↕
               </th>
               <th className="border-r border-black px-4 py-2 text-left">
                 Accreditation Date ↕
@@ -211,7 +282,11 @@ const AccredittedSellers = () => {
                 </td>
 
                 <td className="border-r border-black px-4 py-2">
-                  {seller.manager || "-"}
+                  {formatRole(seller.sellerRole)}
+                </td>
+
+                <td className="border-r border-black px-4 py-2">
+                  {getParentSellerName(seller.parentSellerId)}
                 </td>
 
                 <td className="border-r border-black px-4 py-2">
@@ -239,7 +314,7 @@ const AccredittedSellers = () => {
 
             {filteredSellers.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-6 text-center text-gray-600">
+                <td colSpan={8} className="px-4 py-6 text-center text-gray-600">
                   No accredited sellers found
                 </td>
               </tr>
@@ -270,7 +345,7 @@ const AccredittedSellers = () => {
 
               <input
                 type="text"
-                placeholder="Name of agent"
+                placeholder="Name of seller"
                 value={formData.fullName}
                 onChange={(e) =>
                   setFormData({ ...formData, fullName: e.target.value })
@@ -279,15 +354,48 @@ const AccredittedSellers = () => {
                 required
               />
 
-              <input
-                type="text"
-                placeholder="Manager"
-                value={formData.manager}
+              <select
+                value={formData.sellerRole}
                 onChange={(e) =>
-                  setFormData({ ...formData, manager: e.target.value })
+                  setFormData({
+                    ...formData,
+                    sellerRole: e.target.value as SellerRole,
+                    parentSellerId: null,
+                  })
                 }
                 className="border border-black px-3 py-2"
-              />
+              >
+                <option value="broker_network_manager">
+                  Broker Network Manager
+                </option>
+                <option value="broker">Broker</option>
+                <option value="manager">Manager</option>
+                <option value="agent">Agent</option>
+              </select>
+
+              {formData.sellerRole !== "broker_network_manager" && (
+                <select
+                  value={formData.parentSellerId ?? ""}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      parentSellerId: e.target.value
+                        ? Number(e.target.value)
+                        : null,
+                    })
+                  }
+                  className="border border-black px-3 py-2"
+                >
+                  <option value="">Select reports under</option>
+                  {getPossibleParentSellers(undefined, formData.sellerRole).map(
+                    (seller) => (
+                      <option key={seller.id} value={seller.id}>
+                        {seller.fullName} - {formatRole(seller.sellerRole)}
+                      </option>
+                    )
+                  )}
+                </select>
+              )}
 
               <input
                 type="date"
@@ -375,17 +483,49 @@ const AccredittedSellers = () => {
                 required
               />
 
-              <input
-                type="text"
-                value={editSeller.manager}
+              <select
+                value={editSeller.sellerRole}
                 onChange={(e) =>
                   setEditSeller({
                     ...editSeller,
-                    manager: e.target.value,
+                    sellerRole: e.target.value as SellerRole,
+                    parentSellerId: null,
                   })
                 }
                 className="border border-black px-3 py-2"
-              />
+              >
+                <option value="broker_network_manager">
+                  Broker Network Manager
+                </option>
+                <option value="broker">Broker</option>
+                <option value="manager">Manager</option>
+                <option value="agent">Agent</option>
+              </select>
+
+              {editSeller.sellerRole !== "broker_network_manager" && (
+                <select
+                  value={editSeller.parentSellerId ?? ""}
+                  onChange={(e) =>
+                    setEditSeller({
+                      ...editSeller,
+                      parentSellerId: e.target.value
+                        ? Number(e.target.value)
+                        : null,
+                    })
+                  }
+                  className="border border-black px-3 py-2"
+                >
+                  <option value="">Select reports under</option>
+                  {getPossibleParentSellers(
+                    editSeller.id,
+                    editSeller.sellerRole
+                  ).map((seller) => (
+                    <option key={seller.id} value={seller.id}>
+                      {seller.fullName} - {formatRole(seller.sellerRole)}
+                    </option>
+                  ))}
+                </select>
+              )}
 
               <input
                 type="date"
