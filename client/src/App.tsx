@@ -9,6 +9,8 @@ import Clients from "./pages/Clients"
 import ClientListings from "./pages/ClientListings"
 import AccredittedSellers from "./pages/AccredittedSellers"
 import Documents from "./pages/Documents"
+import Payments from "./pages/Payments"
+import Commissions from "./pages/Commissions"
 
 
 const App = () => {
@@ -26,6 +28,8 @@ const App = () => {
         <Route path="client/:id" element={<ClientListings/>} />
         <Route path="accreditted_sellers" element={<AccredittedSellers/>} />
         <Route path="documents" element={<Documents/>} />
+        <Route path="payments" element={<Payments/>} />
+        <Route path="commissions" element={<Commissions/>} />
       </Route>
     </>
   ))
