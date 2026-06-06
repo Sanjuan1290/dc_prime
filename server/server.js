@@ -2,6 +2,7 @@ import 'express-async-errors'
 import express from 'express'
 import cors from 'cors'
 import cookieParser from 'cookie-parser'
+import { db } from './db/connect.js'
 
 const app = express()
 
@@ -44,6 +45,16 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 3000
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`)
+const startServer = async () => {
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`)
+    await db.query('SELECT 1')
+    console.log('🟢 Database connected successfully')
+  })
+}
+
+startServer().catch((error) => {
+    console.error('Failed to start server:', error.message)
+    console.log('🔴 Database connection failed')
+    process.exit(1)
 })
