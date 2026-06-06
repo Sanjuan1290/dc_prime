@@ -3,12 +3,12 @@ import express from 'express'
 import cors from 'cors'
 import cookieParser from 'cookie-parser'
 import { db } from './db/connect.js'
+import usersRouter from './routers/users.router.js'
 
 const app = express()
 
 // Middlewares
 app.use(express.json())
-app.use(express.urlencoded({ extended: true }))
 
 app.use(cookieParser())
 
@@ -22,10 +22,7 @@ app.get('/', (req, res) => {
   res.json({ message: 'Server is running' })
 })
 
-// API routes
-// app.use('/api/v1/auth', authRoutes)
-// app.use('/api/v1/users', userRoutes)
-// app.use('/api/v1/blogs', blogRoutes)
+app.use('/api/v1', usersRouter)
 
 // 404 handler
 app.use((req, res) => {
@@ -43,18 +40,18 @@ app.use((err, req, res, next) => {
   })
 })
 
-const PORT = process.env.PORT || 3000
+const PORT = process.env.PORT || 5000
 
-const startServer = async () => {
-  app.listen(PORT, () => {
+
+app.listen(PORT, async () => {
+  try{
     console.log(`Server running on port ${PORT}`)
     await db.query('SELECT 1')
     console.log('🟢 Database connected successfully')
-  })
-}
-
-startServer().catch((error) => {
-    console.error('Failed to start server:', error.message)
+  }catch(err){
+    console.error('Failed to start server:', err.message)
     console.log('🔴 Database connection failed')
     process.exit(1)
+  }
 })
+
