@@ -38,14 +38,15 @@ const navGroups: NavGroup[] = [
     items: [
       { label: "Projects", to: "/projects", icon: FiBriefcase },
       { label: "Listings", to: "/listings", icon: FiHome, badge: "100" },
-      { label: "Reservations", to: "/reservations", icon: FiClock },
-      { label: "Clients", to: "/clients", icon: FiUsers, badge: "75" }
+      { label: "Reservations", to: "/reservations", icon: FiClock }
     ]
   },
   {
     title: "People",
     items: [
-      { label: "Attendance", to: "/attendance", icon: FiClock }
+      { label: "Attendance", to: "/attendance", icon: FiClock },
+      { label: "Clients", to: "/clients", icon: FiUsers, badge: "75" },
+      { label: "Accreditted Sellers", to: "/accreditted_sellers", icon: FiUsers, badge: "25" }
     ]
   },
   {
