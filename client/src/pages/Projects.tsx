@@ -1,5 +1,7 @@
 import { useState } from "react"
 
+type ProjectStatus = "active" | "inactive"
+
 type Project = {
   id: number
   name: string
@@ -7,13 +9,7 @@ type Project = {
   administrator: string
   taxDeclarationNo: string
   pin: string
-  status: "active" | "inactive"
-  lots: number
-  available: number
-  reserved: number
-  sold: number
-  value: string
-  balance: string
+  status: ProjectStatus
 }
 
 const Projects = () => {
@@ -22,36 +18,26 @@ const Projects = () => {
       id: 1,
       name: "Luntiang Aguinaldo",
       location: "Gen. Emilio Aguinaldo, Cavite",
-      administrator: "Christopher Prime",
-      taxDeclarationNo: "TD-001",
-      pin: "PIN-001",
+      administrator: "IMELDA",
+      taxDeclarationNo: "AA-06-0005-00105",
+      pin: "022-06-0005-003-04",
       status: "active",
-      lots: 100,
-      available: 29,
-      reserved: 0,
-      sold: 69,
-      value: "₱89,582,770.00",
-      balance: "₱10,255,034.49",
     },
     {
       id: 2,
       name: "bailen project",
       location: "Bailen, Cavite",
-      administrator: "",
-      taxDeclarationNo: "",
-      pin: "",
+      administrator: "IMELDA",
+      taxDeclarationNo: "AA-06-0005-00105",
+      pin: "022-06-0005-003-04",
       status: "active",
-      lots: 0,
-      available: 0,
-      reserved: 0,
-      sold: 0,
-      value: "₱0.00",
-      balance: "₱0.00",
     },
   ])
 
+  const [searchInput, setSearchInput] = useState("")
   const [isAddOpen, setIsAddOpen] = useState(false)
-  const [selectedProject, setSelectedProject] = useState<Project | null>(null)
+  const [viewProject, setViewProject] = useState<Project | null>(null)
+  const [editProject, setEditProject] = useState<Project | null>(null)
 
   const [formData, setFormData] = useState({
     name: "",
@@ -59,7 +45,7 @@ const Projects = () => {
     administrator: "",
     taxDeclarationNo: "",
     pin: "",
-    status: "active" as "active" | "inactive",
+    status: "active" as ProjectStatus,
   })
 
   const resetForm = () => {
@@ -79,12 +65,6 @@ const Projects = () => {
     const newProject: Project = {
       id: projects.length + 1,
       ...formData,
-      lots: 0,
-      available: 0,
-      reserved: 0,
-      sold: 0,
-      value: "₱0.00",
-      balance: "₱0.00",
     }
 
     setProjects((prev) => [...prev, newProject])
@@ -95,21 +75,30 @@ const Projects = () => {
   const handleUpdateProject = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
 
-    if (!selectedProject) return
+    if (!editProject) return
 
     setProjects((prev) =>
       prev.map((project) =>
-        project.id === selectedProject.id ? selectedProject : project
+        project.id === editProject.id ? editProject : project
       )
     )
 
-    setSelectedProject(null)
+    setEditProject(null)
   }
 
-  const getSoldPercentage = (project: Project) => {
-    if (project.lots === 0) return 0
-    return Math.round((project.sold / project.lots) * 100)
-  }
+  const filteredProjects = projects.filter((project) => {
+    const search = searchInput.toLowerCase().trim()
+
+    return (
+      search === "" ||
+      project.name.toLowerCase().includes(search) ||
+      project.location.toLowerCase().includes(search) ||
+      project.administrator.toLowerCase().includes(search) ||
+      project.taxDeclarationNo.toLowerCase().includes(search) ||
+      project.pin.toLowerCase().includes(search) ||
+      project.status.toLowerCase().includes(search)
+    )
+  })
 
   return (
     <div className="p-4">
@@ -118,22 +107,6 @@ const Projects = () => {
         <p className="text-sm text-gray-600">
           Company projects from MySQL with editable project records
         </p>
-      </div>
-
-      <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <div className="border border-black px-4 py-3">
-          <p className="text-sm">Projects</p>
-          <h3 className="text-2xl font-bold">{projects.length}</h3>
-          <p className="text-sm text-gray-600">
-            {projects.filter((project) => project.status === "active").length} active
-          </p>
-        </div>
-
-        <div className="border border-black px-4 py-3">
-          <p className="text-sm">Listed Value</p>
-          <h3 className="text-2xl font-bold">₱89,582,770.00</h3>
-          <p className="text-sm text-gray-600">Current inventory value</p>
-        </div>
       </div>
 
       <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -147,11 +120,16 @@ const Projects = () => {
         <div className="flex flex-col gap-2 md:flex-row">
           <input
             type="text"
-            placeholder="Search by name, unit ID, reference..."
-            className="border border-black px-3 py-2 md:w-80"
+            placeholder="Search by name, location, administrator, tax no, pin..."
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            className="border border-black px-3 py-2 md:w-96"
           />
 
-          <button className="border border-black px-4 py-2 hover:bg-gray-200">
+          <button
+            onClick={() => setSearchInput("")}
+            className="border border-black px-4 py-2 hover:bg-gray-200"
+          >
             Reset
           </button>
         </div>
@@ -161,80 +139,86 @@ const Projects = () => {
         <table className="w-full border border-black text-sm">
           <thead>
             <tr className="border-b border-black">
-              <th className="border-r border-black px-4 py-2 text-left">Project ↕</th>
-              <th className="border-r border-black px-4 py-2 text-left">Location ↕</th>
-              <th className="border-r border-black px-4 py-2 text-left">Status ↕</th>
-              <th className="border-r border-black px-4 py-2 text-left">Lots ↕</th>
-              <th className="border-r border-black px-4 py-2 text-left">Available ↕</th>
-              <th className="border-r border-black px-4 py-2 text-left">Reserved ↕</th>
-              <th className="border-r border-black px-4 py-2 text-left">Sold ↕</th>
-              <th className="border-r border-black px-4 py-2 text-left">Value ↕</th>
-              <th className="border-r border-black px-4 py-2 text-left">Balance ↕</th>
-              <th className="px-4 py-2 text-left">Actions ↕</th>
+              <th className="border-r border-black px-4 py-2 text-left">
+                Name ↕
+              </th>
+              <th className="border-r border-black px-4 py-2 text-left">
+                Location ↕
+              </th>
+              <th className="border-r border-black px-4 py-2 text-left">
+                Administrator ↕
+              </th>
+              <th className="border-r border-black px-4 py-2 text-left">
+                Tax Declaration No. ↕
+              </th>
+              <th className="border-r border-black px-4 py-2 text-left">
+                PIN ↕
+              </th>
+              <th className="border-r border-black px-4 py-2 text-left">
+                Status ↕
+              </th>
+              <th className="px-4 py-2 text-left">
+                Actions ↕
+              </th>
             </tr>
           </thead>
 
           <tbody>
-            {projects.map((project) => (
+            {filteredProjects.map((project) => (
               <tr key={project.id} className="border-b border-black">
                 <td className="border-r border-black px-4 py-2">
-                  <p className="font-semibold">{project.name}</p>
-                  <p className="text-sm text-gray-600">
-                    {getSoldPercentage(project)}% sold
-                  </p>
+                  {project.name}
                 </td>
 
                 <td className="border-r border-black px-4 py-2">
                   {project.location}
                 </td>
 
+                <td className="border-r border-black px-4 py-2">
+                  {project.administrator || "-"}
+                </td>
+
+                <td className="border-r border-black px-4 py-2">
+                  {project.taxDeclarationNo || "-"}
+                </td>
+
+                <td className="border-r border-black px-4 py-2">
+                  {project.pin || "-"}
+                </td>
+
                 <td className="border-r border-black px-4 py-2 capitalize">
                   {project.status}
                 </td>
 
-                <td className="border-r border-black px-4 py-2">{project.lots}</td>
-                <td className="border-r border-black px-4 py-2">{project.available}</td>
-                <td className="border-r border-black px-4 py-2">{project.reserved}</td>
-                <td className="border-r border-black px-4 py-2">{project.sold}</td>
-                <td className="border-r border-black px-4 py-2">{project.value}</td>
-                <td className="border-r border-black px-4 py-2">{project.balance}</td>
-
                 <td className="px-4 py-2">
-                  <button
-                    onClick={() => setSelectedProject(project)}
-                    className="border border-black px-3 py-1 hover:bg-gray-200"
-                  >
-                    View
-                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setViewProject(project)}
+                      className="border border-black px-3 py-1 hover:bg-gray-200"
+                    >
+                      Details
+                    </button>
+
+                    <button
+                      onClick={() => setEditProject(project)}
+                      className="border border-black px-3 py-1 hover:bg-gray-200"
+                    >
+                      Edit
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
+
+            {filteredProjects.length === 0 && (
+              <tr>
+                <td colSpan={7} className="px-4 py-6 text-center text-gray-600">
+                  No projects found
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
-      </div>
-
-      <div className="mt-4 flex flex-col gap-3 text-sm md:flex-row md:items-center md:justify-between">
-        <p>Showing 1-{projects.length} of {projects.length} records</p>
-
-        <div className="flex items-center gap-2">
-          <select className="border border-black px-2 py-1">
-            <option>20 / page</option>
-            <option>50 / page</option>
-            <option>100 / page</option>
-          </select>
-
-          <button className="border border-black px-3 py-1 hover:bg-gray-200">
-            Previous
-          </button>
-
-          <button className="border border-black bg-gray-200 px-3 py-1">
-            1
-          </button>
-
-          <button className="border border-black px-3 py-1 hover:bg-gray-200">
-            Next
-          </button>
-        </div>
       </div>
 
       {isAddOpen && (
@@ -302,7 +286,7 @@ const Projects = () => {
                 onChange={(e) =>
                   setFormData({
                     ...formData,
-                    status: e.target.value as "active" | "inactive",
+                    status: e.target.value as ProjectStatus,
                   })
                 }
                 className="border border-black px-3 py-2"
@@ -335,20 +319,53 @@ const Projects = () => {
         </div>
       )}
 
-      {selectedProject && (
+      {viewProject && (
         <div className="fixed inset-0 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-lg border border-black bg-white p-4">
-            <h2 className="mb-4 text-2xl font-bold">View Project</h2>
+            <h2 className="mb-4 text-2xl font-bold">Project Details</h2>
+
+            <div className="flex flex-col gap-2">
+              <p><b>Name:</b> {viewProject.name}</p>
+              <p><b>Location:</b> {viewProject.location || "-"}</p>
+              <p><b>Administrator:</b> {viewProject.administrator || "-"}</p>
+              <p><b>Tax Declaration No.:</b> {viewProject.taxDeclarationNo || "-"}</p>
+              <p><b>PIN:</b> {viewProject.pin || "-"}</p>
+              <p><b>Status:</b> {viewProject.status}</p>
+            </div>
+
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => {
+                  setEditProject(viewProject)
+                  setViewProject(null)
+                }}
+                className="border border-black px-4 py-2 hover:bg-gray-200"
+              >
+                Edit
+              </button>
+
+              <button
+                onClick={() => setViewProject(null)}
+                className="border border-black px-4 py-2 hover:bg-gray-200"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editProject && (
+        <div className="fixed inset-0 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-lg border border-black bg-white p-4">
+            <h2 className="mb-4 text-2xl font-bold">Edit Project</h2>
 
             <form onSubmit={handleUpdateProject} className="flex flex-col gap-3">
               <input
                 type="text"
-                value={selectedProject.name}
+                value={editProject.name}
                 onChange={(e) =>
-                  setSelectedProject({
-                    ...selectedProject,
-                    name: e.target.value,
-                  })
+                  setEditProject({ ...editProject, name: e.target.value })
                 }
                 className="border border-black px-3 py-2"
                 required
@@ -356,22 +373,19 @@ const Projects = () => {
 
               <input
                 type="text"
-                value={selectedProject.location}
+                value={editProject.location}
                 onChange={(e) =>
-                  setSelectedProject({
-                    ...selectedProject,
-                    location: e.target.value,
-                  })
+                  setEditProject({ ...editProject, location: e.target.value })
                 }
                 className="border border-black px-3 py-2"
               />
 
               <input
                 type="text"
-                value={selectedProject.administrator}
+                value={editProject.administrator}
                 onChange={(e) =>
-                  setSelectedProject({
-                    ...selectedProject,
+                  setEditProject({
+                    ...editProject,
                     administrator: e.target.value,
                   })
                 }
@@ -380,10 +394,10 @@ const Projects = () => {
 
               <input
                 type="text"
-                value={selectedProject.taxDeclarationNo}
+                value={editProject.taxDeclarationNo}
                 onChange={(e) =>
-                  setSelectedProject({
-                    ...selectedProject,
+                  setEditProject({
+                    ...editProject,
                     taxDeclarationNo: e.target.value,
                   })
                 }
@@ -392,22 +406,19 @@ const Projects = () => {
 
               <input
                 type="text"
-                value={selectedProject.pin}
+                value={editProject.pin}
                 onChange={(e) =>
-                  setSelectedProject({
-                    ...selectedProject,
-                    pin: e.target.value,
-                  })
+                  setEditProject({ ...editProject, pin: e.target.value })
                 }
                 className="border border-black px-3 py-2"
               />
 
               <select
-                value={selectedProject.status}
+                value={editProject.status}
                 onChange={(e) =>
-                  setSelectedProject({
-                    ...selectedProject,
-                    status: e.target.value as "active" | "inactive",
+                  setEditProject({
+                    ...editProject,
+                    status: e.target.value as ProjectStatus,
                   })
                 }
                 className="border border-black px-3 py-2"
@@ -419,10 +430,10 @@ const Projects = () => {
               <div className="mt-2 flex justify-end gap-2">
                 <button
                   type="button"
-                  onClick={() => setSelectedProject(null)}
+                  onClick={() => setEditProject(null)}
                   className="border border-black px-4 py-2 hover:bg-gray-200"
                 >
-                  Close
+                  Cancel
                 </button>
 
                 <button
