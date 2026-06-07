@@ -3,6 +3,7 @@ import express from 'express'
 import cors from 'cors'
 import cookieParser from 'cookie-parser'
 import { db } from './db/connect.js'
+
 import usersRouter from './routers/users.router.js'
 import projectsRouter from './routers/projects.router.js'
 import listingsRouter from './routers/listings.router.js'
@@ -21,6 +22,8 @@ import settingsRouter from './routers/settings.router.js'
 import useCurrentUser from './utils/useCurrentUser.js'
 
 const app = express()
+
+app.set('trust proxy', 1)
 
 app.use(express.json())
 app.use(cookieParser())

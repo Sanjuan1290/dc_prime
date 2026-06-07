@@ -1,4 +1,5 @@
 import { db } from '../db/connect.js'
+import { formatIpForDisplay } from '../utils/getClientIp.js'
 
 const isMissing = (value) => {
   return value === undefined || value === null || value === ''
@@ -22,6 +23,13 @@ const auditLogJoins = `
   LEFT JOIN users u ON u.id = al.user_id
 `
 
+const mapAuditLogs = (auditLogs) => {
+  return auditLogs.map((log) => ({
+    ...log,
+    ip_address: formatIpForDisplay(log.ip_address)
+  }))
+}
+
 const getAuditLogsForWhereClause = async (whereClause = '', params = []) => {
   const [auditLogs] = await db.query(
     `
@@ -34,7 +42,7 @@ const getAuditLogsForWhereClause = async (whereClause = '', params = []) => {
     params
   )
 
-  return auditLogs
+  return mapAuditLogs(auditLogs)
 }
 
 export const getAuditLogs = async (req, res) => {

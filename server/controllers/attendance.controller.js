@@ -1,16 +1,56 @@
 import { db } from '../db/connect.js'
 import { createAuditLog } from '../utils/createAuditLog.js'
+import { getClientIp } from '../utils/getClientIp.js'
 
 const allowedDayStatuses = ['present', 'absent', 'rest_day', 'offset']
+
+const defaultSchedule = {
+  timeIn: '09:00',
+  timeOut: '18:00',
+  breakMinutes: 60
+}
+
+const duplicateAttendanceMessage =
+  'Attendance already exists for this employee and date'
 
 const isMissing = (value) => {
   return value === undefined || value === null || value === ''
 }
 
+const nullableValue = (value) => {
+  if (isMissing(value)) return null
+  return value
+}
+
+const getLocalDate = () => {
+  const date = new Date()
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+
+  return `${year}-${month}-${day}`
+}
+
+const getDayName = (dateValue = getLocalDate()) => {
+  const date = new Date(`${dateValue}T00:00:00`)
+
+  return date.toLocaleDateString('en-US', {
+    weekday: 'long'
+  })
+}
+
+const getCurrentTimeString = () => {
+  const date = new Date()
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+
+  return `${hours}:${minutes}`
+}
+
 const timeToMinutes = (time) => {
   if (!time) return null
 
-  const [hours, minutes] = String(time).split(':').map(Number)
+  const [hours, minutes] = String(time).slice(0, 5).split(':').map(Number)
 
   if (Number.isNaN(hours) || Number.isNaN(minutes)) return null
 
@@ -19,6 +59,15 @@ const timeToMinutes = (time) => {
 
 const minutesToHours = (minutes) => {
   return Number((minutes / 60).toFixed(2))
+}
+
+const isAfterCutoff = () => {
+  const currentMinutes = timeToMinutes(getCurrentTimeString())
+  const cutoffMinutes = timeToMinutes(defaultSchedule.timeOut)
+
+  if (currentMinutes === null || cutoffMinutes === null) return false
+
+  return currentMinutes >= cutoffMinutes
 }
 
 const getWorkHours = (timeIn, timeOut, breakMinutes = 60) => {
@@ -48,6 +97,45 @@ const getAttendanceStatus = (timeIn, scheduleTimeIn, dayStatus = 'present') => {
   return timeInMinutes > scheduleInMinutes ? 'late' : 'on_time'
 }
 
+const validateTimeFields = ({
+  time_in,
+  time_out,
+  schedule_time_in,
+  schedule_time_out
+}) => {
+  const timeInMinutes = timeToMinutes(time_in)
+  const timeOutMinutes = timeToMinutes(time_out)
+  const scheduleInMinutes = timeToMinutes(schedule_time_in)
+  const scheduleOutMinutes = timeToMinutes(schedule_time_out)
+
+  if (
+    timeInMinutes !== null &&
+    timeOutMinutes !== null &&
+    timeOutMinutes <= timeInMinutes
+  ) {
+    return {
+      isValid: false,
+      message: 'Time out must be greater than time in'
+    }
+  }
+
+  if (
+    scheduleInMinutes !== null &&
+    scheduleOutMinutes !== null &&
+    scheduleOutMinutes <= scheduleInMinutes
+  ) {
+    return {
+      isValid: false,
+      message: 'Schedule time out must be greater than schedule time in'
+    }
+  }
+
+  return {
+    isValid: true,
+    message: null
+  }
+}
+
 const checkEmployeeExists = async (employeeId) => {
   const [rows] = await db.query(
     `
@@ -67,6 +155,52 @@ const checkEmployeeExists = async (employeeId) => {
   return rows[0]
 }
 
+const isEmployeeRestDay = async (employeeId, dateValue = getLocalDate()) => {
+  const dayName = getDayName(dateValue)
+
+  const [rows] = await db.query(
+    `
+    SELECT id
+    FROM rest_days
+    WHERE employee_id = ?
+      AND day_name = ?
+      AND is_rest_day = TRUE
+    LIMIT 1
+    `,
+    [employeeId, dayName]
+  )
+
+  return rows.length > 0
+}
+
+const hasDuplicateAttendance = async ({
+  employeeId,
+  attendanceDate,
+  excludeAttendanceId = null
+}) => {
+  const params = [employeeId, attendanceDate]
+  let excludeClause = ''
+
+  if (excludeAttendanceId) {
+    excludeClause = 'AND id <> ?'
+    params.push(excludeAttendanceId)
+  }
+
+  const [rows] = await db.query(
+    `
+    SELECT id
+    FROM attendance
+    WHERE employee_id = ?
+      AND attendance_date = ?
+      ${excludeClause}
+    LIMIT 1
+    `,
+    params
+  )
+
+  return rows.length > 0
+}
+
 const buildAttendanceRecord = (record) => {
   return {
     ...record,
@@ -79,7 +213,7 @@ const buildAttendanceRecord = (record) => {
       record.time_in,
       record.schedule_time_in,
       record.day_status
-    ),
+    )
   }
 }
 
@@ -105,7 +239,7 @@ export const getAttendance = async (req, res) => {
     employee_id,
     date_from,
     date_to,
-    day_status,
+    day_status
   } = req.query
 
   const conditions = []
@@ -164,7 +298,7 @@ export const getAttendance = async (req, res) => {
   const attendance = rows.map(buildAttendanceRecord)
 
   res.status(200).json({
-    attendance,
+    attendance
   })
 }
 
@@ -187,12 +321,12 @@ export const getAttendanceRecord = async (req, res) => {
 
   if (!record) {
     return res.status(404).json({
-      message: 'Attendance record not found',
+      message: 'Attendance record not found'
     })
   }
 
   res.status(200).json({
-    attendanceRecord: buildAttendanceRecord(record),
+    attendanceRecord: buildAttendanceRecord(record)
   })
 }
 
@@ -204,7 +338,7 @@ export const getAttendanceByEmployee = async (req, res) => {
 
   if (!employee) {
     return res.status(404).json({
-      message: 'Employee not found',
+      message: 'Employee not found'
     })
   }
 
@@ -237,7 +371,7 @@ export const getAttendanceByEmployee = async (req, res) => {
 
   res.status(200).json({
     employee,
-    attendance,
+    attendance
   })
 }
 
@@ -248,26 +382,26 @@ export const createAttendance = async (req, res) => {
     day_status = 'present',
     time_in,
     time_out,
-    schedule_time_in,
-    schedule_time_out,
-    break_minutes = 60,
+    schedule_time_in = defaultSchedule.timeIn,
+    schedule_time_out = defaultSchedule.timeOut,
+    break_minutes = defaultSchedule.breakMinutes
   } = req.body
 
   if (!employee_id) {
     return res.status(400).json({
-      message: 'Employee is required',
+      message: 'Employee is required'
     })
   }
 
   if (!attendance_date) {
     return res.status(400).json({
-      message: 'Attendance date is required',
+      message: 'Attendance date is required'
     })
   }
 
   if (!allowedDayStatuses.includes(day_status)) {
     return res.status(400).json({
-      message: 'Invalid day status',
+      message: 'Invalid day status'
     })
   }
 
@@ -275,39 +409,37 @@ export const createAttendance = async (req, res) => {
 
   if (!employee) {
     return res.status(404).json({
-      message: 'Employee not found',
+      message: 'Employee not found'
     })
   }
 
-  const timeInMinutes = timeToMinutes(time_in)
-  const timeOutMinutes = timeToMinutes(time_out)
+  const finalDayStatus = await isEmployeeRestDay(employee_id, attendance_date)
+    ? 'rest_day'
+    : day_status
 
-  if (
-    timeInMinutes !== null &&
-    timeOutMinutes !== null &&
-    timeOutMinutes <= timeInMinutes
-  ) {
+  const timeValidation = validateTimeFields({
+    time_in,
+    time_out,
+    schedule_time_in,
+    schedule_time_out
+  })
+
+  if (!timeValidation.isValid) {
     return res.status(400).json({
-      message: 'Time out must be greater than time in',
+      message: timeValidation.message
     })
   }
 
-  const [existingRows] = await db.query(
-    `
-    SELECT id
-    FROM attendance
-    WHERE employee_id = ?
-      AND attendance_date = ?
-    LIMIT 1
-    `,
-    [employee_id, attendance_date]
-  )
-
-  if (existingRows.length > 0) {
+  if (await hasDuplicateAttendance({
+    employeeId: employee_id,
+    attendanceDate: attendance_date
+  })) {
     return res.status(409).json({
-      message: 'Attendance already exists for this employee and date',
+      message: duplicateAttendanceMessage
     })
   }
+
+  const shouldClearTimes = finalDayStatus !== 'present'
 
   const [result] = await db.query(
     `
@@ -325,12 +457,12 @@ export const createAttendance = async (req, res) => {
     [
       employee_id,
       attendance_date,
-      day_status,
-      time_in || null,
-      time_out || null,
-      schedule_time_in || null,
-      schedule_time_out || null,
-      Number(break_minutes || 0),
+      finalDayStatus,
+      shouldClearTimes ? null : nullableValue(time_in),
+      shouldClearTimes ? null : nullableValue(time_out),
+      schedule_time_in || defaultSchedule.timeIn,
+      schedule_time_out || defaultSchedule.timeOut,
+      Number(break_minutes || defaultSchedule.breakMinutes)
     ]
   )
 
@@ -339,12 +471,200 @@ export const createAttendance = async (req, res) => {
     action: 'create',
     module: 'Attendance',
     description: `Created attendance for ${employee.full_name} on ${attendance_date}`,
-    ipAddress: req.ip,
+    ipAddress: getClientIp(req)
   })
 
   res.status(201).json({
     message: 'Attendance created successfully',
+    attendanceId: result.insertId
+  })
+}
+
+export const createDefaultAttendance = async (req, res) => {
+  const { employee_id } = req.body
+  const today = getLocalDate()
+
+  if (!employee_id) {
+    return res.status(400).json({
+      message: 'Employee is required'
+    })
+  }
+
+  const employee = await checkEmployeeExists(employee_id)
+
+  if (!employee) {
+    return res.status(404).json({
+      message: 'Employee not found'
+    })
+  }
+
+  if (await hasDuplicateAttendance({
+    employeeId: employee_id,
+    attendanceDate: today
+  })) {
+    return res.status(409).json({
+      message: duplicateAttendanceMessage
+    })
+  }
+
+  const isRestDay = await isEmployeeRestDay(employee_id, today)
+  const dayStatus = isRestDay ? 'rest_day' : 'present'
+
+  const [result] = await db.query(
+    `
+    INSERT INTO attendance (
+      employee_id,
+      attendance_date,
+      day_status,
+      time_in,
+      time_out,
+      schedule_time_in,
+      schedule_time_out,
+      break_minutes
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+    [
+      employee_id,
+      today,
+      dayStatus,
+      isRestDay ? null : defaultSchedule.timeIn,
+      isRestDay ? null : defaultSchedule.timeOut,
+      defaultSchedule.timeIn,
+      defaultSchedule.timeOut,
+      defaultSchedule.breakMinutes
+    ]
+  )
+
+  await createAuditLog({
+    userId: req.user.id,
+    action: 'create',
+    module: 'Attendance',
+    description: isRestDay
+      ? `Created rest day attendance for ${employee.full_name} on ${today}`
+      : `Created default attendance for ${employee.full_name} on ${today}`,
+    ipAddress: getClientIp(req)
+  })
+
+  res.status(201).json({
+    message: isRestDay
+      ? 'Today is this employee rest day. Rest day attendance was recorded.'
+      : 'Default attendance created successfully',
     attendanceId: result.insertId,
+    dayStatus
+  })
+}
+
+export const generateTodayAttendance = async (req, res) => {
+  const today = getLocalDate()
+  const currentIsAfterCutoff = isAfterCutoff()
+
+  const [employees] = await db.query(
+    `
+    SELECT
+      id,
+      full_name
+    FROM employees
+    WHERE status = 'active'
+    ORDER BY full_name ASC
+    `
+  )
+
+  let createdRestDays = 0
+  let createdAbsents = 0
+  let skippedExisting = 0
+  let skippedBeforeCutoff = 0
+
+  for (const employee of employees) {
+    const alreadyExists = await hasDuplicateAttendance({
+      employeeId: employee.id,
+      attendanceDate: today
+    })
+
+    if (alreadyExists) {
+      skippedExisting += 1
+      continue
+    }
+
+    const isRestDay = await isEmployeeRestDay(employee.id, today)
+
+    if (isRestDay) {
+      await db.query(
+        `
+        INSERT INTO attendance (
+          employee_id,
+          attendance_date,
+          day_status,
+          time_in,
+          time_out,
+          schedule_time_in,
+          schedule_time_out,
+          break_minutes
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        [
+          employee.id,
+          today,
+          'rest_day',
+          null,
+          null,
+          defaultSchedule.timeIn,
+          defaultSchedule.timeOut,
+          defaultSchedule.breakMinutes
+        ]
+      )
+
+      createdRestDays += 1
+      continue
+    }
+
+    if (!currentIsAfterCutoff) {
+      skippedBeforeCutoff += 1
+      continue
+    }
+
+    await db.query(
+      `
+      INSERT INTO attendance (
+        employee_id,
+        attendance_date,
+        day_status,
+        time_in,
+        time_out,
+        schedule_time_in,
+        schedule_time_out,
+        break_minutes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        employee.id,
+        today,
+        'absent',
+        null,
+        null,
+        defaultSchedule.timeIn,
+        defaultSchedule.timeOut,
+        defaultSchedule.breakMinutes
+      ]
+    )
+
+    createdAbsents += 1
+  }
+
+  await createAuditLog({
+    userId: req.user.id,
+    action: 'create',
+    module: 'Attendance',
+    description: `Generated today attendance for ${today}`,
+    ipAddress: getClientIp(req)
+  })
+
+  res.status(200).json({
+    message: 'Today attendance generation finished',
+    date: today,
+    createdRestDays,
+    createdAbsents,
+    skippedExisting,
+    skippedBeforeCutoff
   })
 }
 
@@ -357,9 +677,9 @@ export const updateAttendance = async (req, res) => {
     day_status = 'present',
     time_in,
     time_out,
-    schedule_time_in,
-    schedule_time_out,
-    break_minutes = 60,
+    schedule_time_in = defaultSchedule.timeIn,
+    schedule_time_out = defaultSchedule.timeOut,
+    break_minutes = defaultSchedule.breakMinutes
   } = req.body
 
   const [attendanceRows] = await db.query(
@@ -374,25 +694,25 @@ export const updateAttendance = async (req, res) => {
 
   if (attendanceRows.length === 0) {
     return res.status(404).json({
-      message: 'Attendance record not found',
+      message: 'Attendance record not found'
     })
   }
 
   if (!employee_id) {
     return res.status(400).json({
-      message: 'Employee is required',
+      message: 'Employee is required'
     })
   }
 
   if (!attendance_date) {
     return res.status(400).json({
-      message: 'Attendance date is required',
+      message: 'Attendance date is required'
     })
   }
 
   if (!allowedDayStatuses.includes(day_status)) {
     return res.status(400).json({
-      message: 'Invalid day status',
+      message: 'Invalid day status'
     })
   }
 
@@ -400,40 +720,34 @@ export const updateAttendance = async (req, res) => {
 
   if (!employee) {
     return res.status(404).json({
-      message: 'Employee not found',
+      message: 'Employee not found'
     })
   }
 
-  const timeInMinutes = timeToMinutes(time_in)
-  const timeOutMinutes = timeToMinutes(time_out)
+  const timeValidation = validateTimeFields({
+    time_in,
+    time_out,
+    schedule_time_in,
+    schedule_time_out
+  })
 
-  if (
-    timeInMinutes !== null &&
-    timeOutMinutes !== null &&
-    timeOutMinutes <= timeInMinutes
-  ) {
+  if (!timeValidation.isValid) {
     return res.status(400).json({
-      message: 'Time out must be greater than time in',
+      message: timeValidation.message
     })
   }
 
-  const [duplicateRows] = await db.query(
-    `
-    SELECT id
-    FROM attendance
-    WHERE employee_id = ?
-      AND attendance_date = ?
-      AND id <> ?
-    LIMIT 1
-    `,
-    [employee_id, attendance_date, id]
-  )
-
-  if (duplicateRows.length > 0) {
+  if (await hasDuplicateAttendance({
+    employeeId: employee_id,
+    attendanceDate: attendance_date,
+    excludeAttendanceId: id
+  })) {
     return res.status(409).json({
-      message: 'Attendance already exists for this employee and date',
+      message: duplicateAttendanceMessage
     })
   }
+
+  const shouldClearTimes = day_status !== 'present'
 
   await db.query(
     `
@@ -453,12 +767,12 @@ export const updateAttendance = async (req, res) => {
       employee_id,
       attendance_date,
       day_status,
-      time_in || null,
-      time_out || null,
-      schedule_time_in || null,
-      schedule_time_out || null,
-      Number(break_minutes || 0),
-      id,
+      shouldClearTimes ? null : nullableValue(time_in),
+      shouldClearTimes ? null : nullableValue(time_out),
+      schedule_time_in || defaultSchedule.timeIn,
+      schedule_time_out || defaultSchedule.timeOut,
+      Number(break_minutes || defaultSchedule.breakMinutes),
+      id
     ]
   )
 
@@ -467,11 +781,11 @@ export const updateAttendance = async (req, res) => {
     action: 'update',
     module: 'Attendance',
     description: `Updated attendance ${id}`,
-    ipAddress: req.ip,
+    ipAddress: getClientIp(req)
   })
 
   res.status(200).json({
-    message: 'Attendance updated successfully',
+    message: 'Attendance updated successfully'
   })
 }
 
@@ -483,7 +797,7 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
 
   if (!employee) {
     return res.status(404).json({
-      message: 'Employee not found',
+      message: 'Employee not found'
     })
   }
 
@@ -546,17 +860,9 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
     let lateMinutes = 0
     let computedStatus = record.day_status
 
-    if (record.day_status === 'absent') {
-      absentDays += 1
-    }
-
-    if (record.day_status === 'rest_day') {
-      restDays += 1
-    }
-
-    if (record.day_status === 'offset') {
-      offsetDays += 1
-    }
+    if (record.day_status === 'absent') absentDays += 1
+    if (record.day_status === 'rest_day') restDays += 1
+    if (record.day_status === 'offset') offsetDays += 1
 
     if (
       record.day_status === 'present' &&
@@ -607,7 +913,7 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
       worked_hours_with_ot: minutesToHours(workedMinutes),
       regular_hours: minutesToHours(regularMinutes),
       overtime_hours: minutesToHours(overtimeMinutes),
-      late_hours: minutesToHours(lateMinutes),
+      late_hours: minutesToHours(lateMinutes)
     }
   })
 
@@ -629,8 +935,8 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
       bonusCandidate,
       bonusNote: bonusCandidate
         ? 'Candidate for 30-day bonus. Final approval still depends on admin review of lates and company rules.'
-        : 'Not a bonus candidate based on current attendance records.',
+        : 'Not a bonus candidate based on current attendance records.'
     },
-    logs,
+    logs
   })
 }

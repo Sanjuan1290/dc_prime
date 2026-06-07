@@ -37,26 +37,62 @@ type NavItem = {
   icon: IconType
 }
 
-const navItems: NavItem[] = [
-  { label: "Dashboard", to: "/dashboard", icon: FiHome },
-  { label: "Projects", to: "/projects", icon: FiMap },
-  { label: "Listings", to: "/listings", icon: FiGrid },
-  { label: "Clients", to: "/clients", icon: FiUsers },
-  { label: "Accreditted Sellers", to: "/accreditted_sellers", icon: FiUsers },
-  { label: "Documents", to: "/documents", icon: FiFileText },
-  { label: "Payments", to: "/payments", icon: FiCreditCard },
-  { label: "Commissions", to: "/commissions", icon: FiDollarSign },
-  { label: "Employees", to: "/employees", icon: FiUserCheck },
-  { label: "Attendance", to: "/attendance", icon: FiClock },
-  { label: "Reports", to: "/reports", icon: FiBarChart2 },
-  { label: "Audit Logs", to: "/audit-logs", icon: FiActivity },
-  { label: "Settings", to: "/settings", icon: FiSettings },
+type NavGroup = {
+  title: string
+  items: NavItem[]
+}
+
+const navGroups: NavGroup[] = [
+  {
+    title: "Overview",
+    items: [{ label: "Dashboard", to: "/dashboard", icon: FiHome }],
+  },
+  {
+    title: "Management",
+    items: [
+      { label: "Projects", to: "/projects", icon: FiMap },
+      { label: "Listings", to: "/listings", icon: FiGrid },
+      { label: "Clients", to: "/clients", icon: FiUsers },
+      {
+        label: "Accreditted Sellers",
+        to: "/accreditted_sellers",
+        icon: FiUserCheck,
+      },
+    ],
+  },
+  {
+    title: "Finance",
+    items: [
+      { label: "Payments", to: "/payments", icon: FiCreditCard },
+      { label: "Commissions", to: "/commissions", icon: FiDollarSign },
+    ],
+  },
+  {
+    title: "Compliance",
+    items: [
+      { label: "Documents", to: "/documents", icon: FiFileText },
+      { label: "Audit Logs", to: "/audit-logs", icon: FiActivity },
+    ],
+  },
+  {
+    title: "Records",
+    items: [
+      { label: "Reports", to: "/reports", icon: FiBarChart2 },
+      { label: "Employees", to: "/employees", icon: FiUsers },
+      { label: "Attendance", to: "/attendance", icon: FiClock },
+    ],
+  },
+  {
+    title: "Administration",
+    items: [{ label: "Settings", to: "/settings", icon: FiSettings }],
+  },
 ]
 
 const SystemLayout = () => {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
+
   const { data } = useCurrentUser()
   const currentUser = (data as CurrentUserResponse | null)?.user
 
@@ -65,6 +101,7 @@ const SystemLayout = () => {
       method: "POST",
       credentials: "include",
     })
+
     queryClient.clear()
     navigate("/")
   }
@@ -76,11 +113,13 @@ const SystemLayout = () => {
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-sm font-bold text-white shadow-sm">
             DC
           </div>
+
           <div>
             <p className="text-sm font-bold text-slate-900">D&C Prime</p>
             <p className="text-xs text-slate-500">Realty admin</p>
           </div>
         </div>
+
         <Button
           className="lg:hidden"
           icon={<FiX />}
@@ -89,29 +128,39 @@ const SystemLayout = () => {
         />
       </div>
 
-      <nav className="flex-1 space-y-1 overflow-y-auto p-3">
-        {navItems.map((item) => {
-          const Icon = item.icon
+      <nav className="flex-1 overflow-y-auto p-3">
+        {navGroups.map((group) => (
+          <div key={group.title} className="mb-4">
+            <p className="mb-2 px-3 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+              {group.title}
+            </p>
 
-          return (
-            <NavLink
-              className={({ isActive }) =>
-                [
-                  "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition",
-                  isActive
-                    ? "bg-blue-50 text-blue-700"
-                    : "text-slate-600 hover:bg-slate-50 hover:text-slate-900",
-                ].join(" ")
-              }
-              key={item.to}
-              onClick={() => setIsSidebarOpen(false)}
-              to={item.to}
-            >
-              <Icon className="h-4 w-4 shrink-0" />
-              <span>{item.label}</span>
-            </NavLink>
-          )
-        })}
+            <div className="space-y-1">
+              {group.items.map((item) => {
+                const Icon = item.icon
+
+                return (
+                  <NavLink
+                    className={({ isActive }) =>
+                      [
+                        "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition",
+                        isActive
+                          ? "bg-blue-50 text-blue-700"
+                          : "text-slate-600 hover:bg-slate-50 hover:text-slate-900",
+                      ].join(" ")
+                    }
+                    key={item.to}
+                    onClick={() => setIsSidebarOpen(false)}
+                    to={item.to}
+                  >
+                    <Icon className="h-4 w-4 shrink-0" />
+                    <span className="truncate">{item.label}</span>
+                  </NavLink>
+                )
+              })}
+            </div>
+          </div>
+        ))}
       </nav>
 
       <div className="border-t border-slate-200 p-4">
@@ -119,10 +168,12 @@ const SystemLayout = () => {
           <p className="truncate text-sm font-semibold text-slate-900">
             {currentUser?.full_name || "Signed in user"}
           </p>
+
           <p className="truncate text-xs text-slate-500">
             {currentUser?.email || currentUser?.role || "Secure session"}
           </p>
         </div>
+
         <Button
           className="w-full"
           icon={<FiLogOut />}
@@ -149,6 +200,7 @@ const SystemLayout = () => {
             onClick={() => setIsSidebarOpen(false)}
             type="button"
           />
+
           <div className="relative h-full">{sidebar}</div>
         </div>
       ) : null}
@@ -164,6 +216,7 @@ const SystemLayout = () => {
             >
               Menu
             </Button>
+
             <div className="hidden lg:block">
               <p className="text-sm font-semibold text-slate-900">
                 Internal admin system
@@ -172,10 +225,12 @@ const SystemLayout = () => {
                 Connected to live MySQL data
               </p>
             </div>
+
             <div className="min-w-0 text-right">
               <p className="truncate text-sm font-semibold text-slate-900">
                 {currentUser?.full_name || "D&C Prime"}
               </p>
+
               <p className="truncate text-xs text-slate-500">
                 {currentUser?.role || "Authorized user"}
               </p>

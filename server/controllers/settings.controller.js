@@ -1,5 +1,6 @@
 import { db } from '../db/connect.js'
 import { createAuditLog } from '../utils/createAuditLog.js'
+import { getClientIp } from '../utils/getClientIp.js'
 
 const allowedSettingKeys = [
   'company_name',
@@ -144,7 +145,7 @@ export const updateSettings = async (req, res) => {
     action: 'update',
     module: 'Settings',
     description: 'Updated system settings',
-    ipAddress: req.ip
+    ipAddress: getClientIp(req)
   })
 
   res.status(200).json({
@@ -178,7 +179,7 @@ export const updateSetting = async (req, res) => {
     action: 'update',
     module: 'Settings',
     description: `Updated setting ${key}`,
-    ipAddress: req.ip
+    ipAddress: getClientIp(req)
   })
 
   res.status(200).json({
