@@ -1,99 +1,179 @@
-import { useState } from "react"
+import { useState, type FormEvent } from "react"
 import { useNavigate } from "react-router-dom"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api/v1"
 
 type Client = {
   id: number
-  fullName: string
-  spouseCoOwnerName: string
-  email: string
-  contactNo: string
-  address: string
-  units: number
-  balance: number
+  full_name: string
+  spouse_co_owner_name: string | null
+  email: string | null
+  contact_no: string | null
+  address: string | null
+  created_at: string
+  updated_at: string
+  units_count: number | string
+  balance: number | string
 }
+
+type ClientFormData = {
+  full_name: string
+  spouse_co_owner_name: string
+  email: string
+  contact_no: string
+  address: string
+}
+
+type ClientsResponse = {
+  clients: Client[]
+}
+
+const emptyFormData: ClientFormData = {
+  full_name: "",
+  spouse_co_owner_name: "",
+  email: "",
+  contact_no: "",
+  address: "",
+}
+
+const getErrorMessage = async (response: Response) => {
+  try {
+    const data = await response.json()
+
+    if (typeof data.message === "string") {
+      return data.message
+    }
+  } catch {
+    return "Request failed"
+  }
+
+  return "Request failed"
+}
+
+const fetchClients = async () => {
+  const response = await fetch(`${API_URL}/clients`, {
+    credentials: "include",
+  })
+
+  if (!response.ok) {
+    throw new Error(await getErrorMessage(response))
+  }
+
+  const data = (await response.json()) as ClientsResponse
+
+  return data.clients
+}
+
+const createClient = async (clientData: ClientFormData) => {
+  const response = await fetch(`${API_URL}/clients`, {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(clientData),
+  })
+
+  if (!response.ok) {
+    throw new Error(await getErrorMessage(response))
+  }
+}
+
+const updateClient = async ({
+  id,
+  clientData,
+}: {
+  id: number
+  clientData: ClientFormData
+}) => {
+  const response = await fetch(`${API_URL}/clients/${id}`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(clientData),
+  })
+
+  if (!response.ok) {
+    throw new Error(await getErrorMessage(response))
+  }
+}
+
+const clientToFormData = (client: Client): ClientFormData => ({
+  full_name: client.full_name,
+  spouse_co_owner_name: client.spouse_co_owner_name || "",
+  email: client.email || "",
+  contact_no: client.contact_no || "",
+  address: client.address || "",
+})
 
 const Clients = () => {
   const navigate = useNavigate()
-
-  const [clients, setClients] = useState<Client[]>([
-    {
-      id: 1,
-      fullName: "AHMED, SARAH NACINO",
-      spouseCoOwnerName: "aaron NACINO",
-      email: "msx.sarah0929@gmail.com",
-      contactNo: "0969-129-1596",
-      address: "BIÑAN LAGUNA",
-      units: 1,
-      balance: 932000,
-    },
-    {
-      id: 2,
-      fullName: "ALAMER, JAZZIE",
-      spouseCoOwnerName: "aaron jazzie",
-      email: "alamermarkchristopher21@gmail.com",
-      contactNo: "0927-437-5425",
-      address: "GEN. TRI CAVITE",
-      units: 1,
-      balance: 214500,
-    },
-  ])
-
+  const queryClient = useQueryClient()
   const [searchInput, setSearchInput] = useState("")
   const [isAddOpen, setIsAddOpen] = useState(false)
   const [editClient, setEditClient] = useState<Client | null>(null)
+  const [formData, setFormData] = useState<ClientFormData>(emptyFormData)
+  const [editFormData, setEditFormData] = useState<ClientFormData>(emptyFormData)
 
-  const [formData, setFormData] = useState({
-    fullName: "",
-    spouseCoOwnerName: "",
-    email: "",
-    contactNo: "",
-    address: "",
+  const {
+    data: clients = [],
+    isLoading,
+    error,
+  } = useQuery({
+    queryKey: ["clients"],
+    queryFn: fetchClients,
   })
 
-  const formatMoney = (amount: number) => {
+  const createClientMutation = useMutation({
+    mutationFn: createClient,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["clients"] })
+      setIsAddOpen(false)
+      resetForm()
+    },
+  })
+
+  const updateClientMutation = useMutation({
+    mutationFn: updateClient,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["clients"] })
+      setEditClient(null)
+    },
+  })
+
+  const formatMoney = (amount: number | string) => {
     return new Intl.NumberFormat("en-PH", {
       style: "currency",
       currency: "PHP",
-    }).format(amount)
+    }).format(Number(amount || 0))
   }
 
   const resetForm = () => {
-    setFormData({
-      fullName: "",
-      spouseCoOwnerName: "",
-      email: "",
-      contactNo: "",
-      address: "",
-    })
+    setFormData(emptyFormData)
   }
 
-  const handleAddClient = (e: React.FormEvent<HTMLFormElement>) => {
+  const openEditModal = (client: Client) => {
+    setEditClient(client)
+    setEditFormData(clientToFormData(client))
+  }
+
+  const handleAddClient = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
-
-    const newClient: Client = {
-      id: clients.length + 1,
-      ...formData,
-      units: 0,
-      balance: 0,
-    }
-
-    setClients((prev) => [...prev, newClient])
-    resetForm()
-    setIsAddOpen(false)
+    createClientMutation.mutate(formData)
   }
 
-  const handleUpdateClient = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleUpdateClient = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
 
     if (!editClient) return
 
-    setClients((prev) =>
-      prev.map((client) =>
-        client.id === editClient.id ? editClient : client
-      )
-    )
-
-    setEditClient(null)
+    updateClientMutation.mutate({
+      id: editClient.id,
+      clientData: editFormData,
+    })
   }
 
   const filteredClients = clients.filter((client) => {
@@ -101,10 +181,11 @@ const Clients = () => {
 
     return (
       search === "" ||
-      client.fullName.toLowerCase().includes(search) ||
-      client.email.toLowerCase().includes(search) ||
-      client.contactNo.toLowerCase().includes(search) ||
-      client.address.toLowerCase().includes(search)
+      client.full_name.toLowerCase().includes(search) ||
+      (client.spouse_co_owner_name || "").toLowerCase().includes(search) ||
+      (client.email || "").toLowerCase().includes(search) ||
+      (client.contact_no || "").toLowerCase().includes(search) ||
+      (client.address || "").toLowerCase().includes(search)
     )
   })
 
@@ -113,7 +194,7 @@ const Clients = () => {
       <div className="mb-6">
         <h1 className="text-3xl font-bold">Client Master List</h1>
         <p className="text-sm text-gray-600">
-          Live client records imported from company files and editable in MySQL
+          Live client records from MySQL with editable client records
         </p>
       </div>
 
@@ -128,7 +209,7 @@ const Clients = () => {
         <div className="flex flex-col gap-2 md:flex-row">
           <input
             type="text"
-            placeholder="Search client name, email, contact, or address..."
+            placeholder="Search client name, spouse, email, contact, or address..."
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             className="border border-black px-3 py-2 md:w-96"
@@ -143,91 +224,105 @@ const Clients = () => {
         </div>
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full border border-black text-sm">
-          <thead>
-            <tr className="border-b border-black">
-              <th className="border-r border-black px-4 py-2 text-left">
-                Client Name ↕
-              </th>
-              <th className="border-r border-black px-4 py-2 text-left">
-                Email ↕
-              </th>
-              <th className="border-r border-black px-4 py-2 text-left">
-                Contact ↕
-              </th>
-              <th className="border-r border-black px-4 py-2 text-left">
-                Units ↕
-              </th>
-              <th className="border-r border-black px-4 py-2 text-left">
-                Balance ↕
-              </th>
-              <th className="border-r border-black px-4 py-2 text-left">
-                Address ↕
-              </th>
-              <th className="px-4 py-2 text-left">
-                Actions ↕
-              </th>
-            </tr>
-          </thead>
+      {isLoading && (
+        <div className="border border-black px-4 py-6 text-center text-gray-600">
+          Loading clients...
+        </div>
+      )}
 
-          <tbody>
-            {filteredClients.map((client) => (
-              <tr key={client.id} className="border-b border-black">
-                <td className="border-r border-black px-4 py-2">
-                  {client.fullName}
-                </td>
+      {error && !isLoading && (
+        <div className="border border-black px-4 py-6 text-center text-gray-600">
+          Failed to load clients
+        </div>
+      )}
 
-                <td className="border-r border-black px-4 py-2">
-                  {client.email || "-"}
-                </td>
-
-                <td className="border-r border-black px-4 py-2">
-                  {client.contactNo || "-"}
-                </td>
-
-                <td className="border-r border-black px-4 py-2">
-                  {client.units}
-                </td>
-
-                <td className="border-r border-black px-4 py-2">
-                  {formatMoney(client.balance)}
-                </td>
-
-                <td className="border-r border-black px-4 py-2">
-                  {client.address || "-"}
-                </td>
-
-                <td className="px-4 py-2">
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => setEditClient(client)}
-                      className="border border-black px-3 py-1 hover:bg-gray-200"
-                    >
-                      Edit
-                    </button>
-
-                    <button
-                      onClick={() => navigate(`/client/${client.id}`)}
-                      className="border border-black px-3 py-1 hover:bg-gray-200"
-                    >
-                      Unit List
-                    </button>
-                  </div>
-                </td>
+      {!isLoading && !error && (
+        <div className="overflow-x-auto">
+          <table className="w-full border border-black text-sm">
+            <thead>
+              <tr className="border-b border-black">
+                <th className="border-r border-black px-4 py-2 text-left">
+                  Client Name
+                </th>
+                <th className="border-r border-black px-4 py-2 text-left">
+                  Email
+                </th>
+                <th className="border-r border-black px-4 py-2 text-left">
+                  Contact
+                </th>
+                <th className="border-r border-black px-4 py-2 text-left">
+                  Units
+                </th>
+                <th className="border-r border-black px-4 py-2 text-left">
+                  Balance
+                </th>
+                <th className="border-r border-black px-4 py-2 text-left">
+                  Address
+                </th>
+                <th className="px-4 py-2 text-left">
+                  Actions
+                </th>
               </tr>
-            ))}
+            </thead>
 
-            {filteredClients.length === 0 && (
-              <tr>
-                <td colSpan={7} className="px-4 py-6 text-center text-gray-600">
-                  No clients found
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+            <tbody>
+              {filteredClients.map((client) => (
+                <tr key={client.id} className="border-b border-black">
+                  <td className="border-r border-black px-4 py-2">
+                    {client.full_name}
+                  </td>
+
+                  <td className="border-r border-black px-4 py-2">
+                    {client.email || "-"}
+                  </td>
+
+                  <td className="border-r border-black px-4 py-2">
+                    {client.contact_no || "-"}
+                  </td>
+
+                  <td className="border-r border-black px-4 py-2">
+                    {Number(client.units_count || 0)}
+                  </td>
+
+                  <td className="border-r border-black px-4 py-2">
+                    {formatMoney(client.balance)}
+                  </td>
+
+                  <td className="border-r border-black px-4 py-2">
+                    {client.address || "-"}
+                  </td>
+
+                  <td className="px-4 py-2">
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => openEditModal(client)}
+                        className="border border-black px-3 py-1 hover:bg-gray-200"
+                      >
+                        Edit
+                      </button>
+
+                      <button
+                        onClick={() => navigate(`/client/${client.id}`)}
+                        className="border border-black px-3 py-1 hover:bg-gray-200"
+                      >
+                        Unit List
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+
+              {filteredClients.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="px-4 py-6 text-center text-gray-600">
+                    No clients found
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {isAddOpen && (
         <div className="fixed inset-0 flex items-center justify-center bg-black/40 p-4">
@@ -238,9 +333,9 @@ const Clients = () => {
               <input
                 type="text"
                 placeholder="Full name"
-                value={formData.fullName}
+                value={formData.full_name}
                 onChange={(e) =>
-                  setFormData({ ...formData, fullName: e.target.value })
+                  setFormData({ ...formData, full_name: e.target.value })
                 }
                 className="border border-black px-3 py-2"
                 required
@@ -249,11 +344,11 @@ const Clients = () => {
               <input
                 type="text"
                 placeholder="Spouse / Co-owner name"
-                value={formData.spouseCoOwnerName}
+                value={formData.spouse_co_owner_name}
                 onChange={(e) =>
                   setFormData({
                     ...formData,
-                    spouseCoOwnerName: e.target.value,
+                    spouse_co_owner_name: e.target.value,
                   })
                 }
                 className="border border-black px-3 py-2"
@@ -272,9 +367,9 @@ const Clients = () => {
               <input
                 type="text"
                 placeholder="Contact no."
-                value={formData.contactNo}
+                value={formData.contact_no}
                 onChange={(e) =>
-                  setFormData({ ...formData, contactNo: e.target.value })
+                  setFormData({ ...formData, contact_no: e.target.value })
                 }
                 className="border border-black px-3 py-2"
               />
@@ -288,6 +383,12 @@ const Clients = () => {
                 }
                 className="border border-black px-3 py-2"
               />
+
+              {createClientMutation.isError && (
+                <p className="text-sm text-red-600">
+                  {createClientMutation.error.message}
+                </p>
+              )}
 
               <div className="mt-2 flex justify-end gap-2">
                 <button
@@ -303,9 +404,10 @@ const Clients = () => {
 
                 <button
                   type="submit"
-                  className="border border-black px-4 py-2 hover:bg-gray-200"
+                  disabled={createClientMutation.isPending}
+                  className="border border-black px-4 py-2 hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  Save Client
+                  {createClientMutation.isPending ? "Saving..." : "Save Client"}
                 </button>
               </div>
             </form>
@@ -321,9 +423,9 @@ const Clients = () => {
             <form onSubmit={handleUpdateClient} className="flex flex-col gap-3">
               <input
                 type="text"
-                value={editClient.fullName}
+                value={editFormData.full_name}
                 onChange={(e) =>
-                  setEditClient({ ...editClient, fullName: e.target.value })
+                  setEditFormData({ ...editFormData, full_name: e.target.value })
                 }
                 className="border border-black px-3 py-2"
                 required
@@ -331,11 +433,11 @@ const Clients = () => {
 
               <input
                 type="text"
-                value={editClient.spouseCoOwnerName}
+                value={editFormData.spouse_co_owner_name}
                 onChange={(e) =>
-                  setEditClient({
-                    ...editClient,
-                    spouseCoOwnerName: e.target.value,
+                  setEditFormData({
+                    ...editFormData,
+                    spouse_co_owner_name: e.target.value,
                   })
                 }
                 className="border border-black px-3 py-2"
@@ -343,30 +445,36 @@ const Clients = () => {
 
               <input
                 type="email"
-                value={editClient.email}
+                value={editFormData.email}
                 onChange={(e) =>
-                  setEditClient({ ...editClient, email: e.target.value })
+                  setEditFormData({ ...editFormData, email: e.target.value })
                 }
                 className="border border-black px-3 py-2"
               />
 
               <input
                 type="text"
-                value={editClient.contactNo}
+                value={editFormData.contact_no}
                 onChange={(e) =>
-                  setEditClient({ ...editClient, contactNo: e.target.value })
+                  setEditFormData({ ...editFormData, contact_no: e.target.value })
                 }
                 className="border border-black px-3 py-2"
               />
 
               <input
                 type="text"
-                value={editClient.address}
+                value={editFormData.address}
                 onChange={(e) =>
-                  setEditClient({ ...editClient, address: e.target.value })
+                  setEditFormData({ ...editFormData, address: e.target.value })
                 }
                 className="border border-black px-3 py-2"
               />
+
+              {updateClientMutation.isError && (
+                <p className="text-sm text-red-600">
+                  {updateClientMutation.error.message}
+                </p>
+              )}
 
               <div className="mt-2 flex justify-end gap-2">
                 <button
@@ -379,9 +487,10 @@ const Clients = () => {
 
                 <button
                   type="submit"
-                  className="border border-black px-4 py-2 hover:bg-gray-200"
+                  disabled={updateClientMutation.isPending}
+                  className="border border-black px-4 py-2 hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  Save Changes
+                  {updateClientMutation.isPending ? "Saving..." : "Save Changes"}
                 </button>
               </div>
             </form>

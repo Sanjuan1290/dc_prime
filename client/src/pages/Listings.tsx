@@ -1,129 +1,236 @@
-import { useState } from "react"
+import { useState, type FormEvent } from "react"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api/v1"
+
+type ListingStatus = "available" | "reserved" | "hold" | "sold" | "inactive" | string
+
+type Listing = {
+  id: number
+  project_id: number
+  project_name: string
+  cadastral_lot_no: string | null
+  unit_id: string
+  lot_type: string | null
+  promo_discount: number | string
+  downpayment: number | string
+  reservation_fee: number | string
+  price_per_sqm: number | string
+  lot_area_sqm: number | string
+  net_selling_price: number | string
+  legal_misc_fee: number | string
+  status: ListingStatus
+  created_at: string
+  updated_at: string
+}
 
 type Project = {
   id: number
   name: string
 }
 
-type ListingStatus = "available" | "reserved" | "hold" | "sold" | "inactive"
-
-type Listing = {
-  id: number
-  projectId: number
-  projectName: string
-  cadastralLotNo: string
-  unitId: string
-  lotType: string
-  promoDiscount: number
+type ListingFormData = {
+  project_id: number
+  cadastral_lot_no: string
+  unit_id: string
+  lot_type: string
+  promo_discount: number
   downpayment: number
-  reservationFee: number
-  pricePerSqm: number
-  lotAreaSqm: number
-  netSellingPrice: number
-  legalMiscFee: number
+  reservation_fee: number
+  price_per_sqm: number
+  lot_area_sqm: number
+  net_selling_price: number
+  legal_misc_fee: number
   status: ListingStatus
 }
 
+type ListingsResponse = {
+  listings: Listing[]
+}
+
+type ProjectsResponse = {
+  projects: Project[]
+}
+
+const defaultListingFormData: ListingFormData = {
+  project_id: 0,
+  cadastral_lot_no: "",
+  unit_id: "",
+  lot_type: "",
+  promo_discount: 0,
+  downpayment: 0,
+  reservation_fee: 0,
+  price_per_sqm: 0,
+  lot_area_sqm: 0,
+  net_selling_price: 0,
+  legal_misc_fee: 0,
+  status: "available",
+}
+
+const statusFilters = [
+  { label: "All", value: "all" },
+  { label: "Available", value: "available" },
+  { label: "Reserved", value: "reserved" },
+  { label: "Hold", value: "hold" },
+  { label: "Sold", value: "sold" },
+  { label: "Inactive", value: "inactive" },
+]
+
+const getErrorMessage = async (response: Response) => {
+  try {
+    const data = await response.json()
+
+    if (typeof data.message === "string") {
+      return data.message
+    }
+  } catch {
+    return "Request failed"
+  }
+
+  return "Request failed"
+}
+
+const fetchListings = async () => {
+  const response = await fetch(`${API_URL}/listings`, {
+    credentials: "include",
+  })
+
+  if (!response.ok) {
+    throw new Error(await getErrorMessage(response))
+  }
+
+  const data = (await response.json()) as ListingsResponse
+
+  return data.listings
+}
+
+const fetchProjects = async () => {
+  const response = await fetch(`${API_URL}/projects`, {
+    credentials: "include",
+  })
+
+  if (!response.ok) {
+    throw new Error(await getErrorMessage(response))
+  }
+
+  const data = (await response.json()) as ProjectsResponse
+
+  return data.projects
+}
+
+const createListing = async (listingData: ListingFormData) => {
+  const response = await fetch(`${API_URL}/listings`, {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(listingData),
+  })
+
+  if (!response.ok) {
+    throw new Error(await getErrorMessage(response))
+  }
+}
+
+const updateListing = async ({
+  id,
+  listingData,
+}: {
+  id: number
+  listingData: ListingFormData
+}) => {
+  const response = await fetch(`${API_URL}/listings/${id}`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(listingData),
+  })
+
+  if (!response.ok) {
+    throw new Error(await getErrorMessage(response))
+  }
+}
+
+const listingToFormData = (listing: Listing): ListingFormData => ({
+  project_id: listing.project_id,
+  cadastral_lot_no: listing.cadastral_lot_no || "",
+  unit_id: listing.unit_id,
+  lot_type: listing.lot_type || "",
+  promo_discount: Number(listing.promo_discount || 0),
+  downpayment: Number(listing.downpayment || 0),
+  reservation_fee: Number(listing.reservation_fee || 0),
+  price_per_sqm: Number(listing.price_per_sqm || 0),
+  lot_area_sqm: Number(listing.lot_area_sqm || 0),
+  net_selling_price: Number(listing.net_selling_price || 0),
+  legal_misc_fee: Number(listing.legal_misc_fee || 0),
+  status: listing.status,
+})
+
 const Listings = () => {
-  const projects: Project[] = [
-    {
-      id: 1,
-      name: "Luntiang Aguinaldo",
-    },
-    {
-      id: 2,
-      name: "bailen project",
-    },
-  ]
-
-  const [listings, setListings] = useState<Listing[]>([
-    {
-      id: 1,
-      projectId: 1,
-      projectName: "Luntiang Aguinaldo",
-      cadastralLotNo: "CAD-0505",
-      unitId: "LA-0505",
-      lotType: "Residential",
-      promoDiscount: 0,
-      downpayment: 300000,
-      reservationFee: 10000,
-      pricePerSqm: 2500,
-      lotAreaSqm: 1200,
-      netSellingPrice: 3000000,
-      legalMiscFee: 300000,
-      status: "available",
-    },
-    {
-      id: 2,
-      projectId: 1,
-      projectName: "Luntiang Aguinaldo",
-      cadastralLotNo: "CAD-0506",
-      unitId: "LA-0506",
-      lotType: "Residential",
-      promoDiscount: 0,
-      downpayment: 411750,
-      reservationFee: 10000,
-      pricePerSqm: 2500,
-      lotAreaSqm: 1647,
-      netSellingPrice: 4117500,
-      legalMiscFee: 411750,
-      status: "available",
-    },
-  ])
-
+  const queryClient = useQueryClient()
   const [searchInput, setSearchInput] = useState("")
-  const [statusFilter, setStatusFilter] = useState<"all" | ListingStatus>("all")
+  const [statusFilter, setStatusFilter] = useState("all")
   const [projectFilter, setProjectFilter] = useState("all")
   const [lotTypeFilter, setLotTypeFilter] = useState("all")
-
   const [isAddOpen, setIsAddOpen] = useState(false)
   const [viewListing, setViewListing] = useState<Listing | null>(null)
   const [editListing, setEditListing] = useState<Listing | null>(null)
+  const [formData, setFormData] = useState<ListingFormData>(defaultListingFormData)
+  const [editFormData, setEditFormData] = useState<ListingFormData>(defaultListingFormData)
 
-  const [formData, setFormData] = useState({
-    projectId: 1,
-    cadastralLotNo: "",
-    unitId: "",
-    lotType: "",
-    promoDiscount: 0,
-    downpayment: 0,
-    reservationFee: 0,
-    pricePerSqm: 0,
-    lotAreaSqm: 0,
-    netSellingPrice: 0,
-    legalMiscFee: 0,
-    status: "available" as ListingStatus,
+  const {
+    data: listings = [],
+    isLoading,
+    error,
+  } = useQuery({
+    queryKey: ["listings"],
+    queryFn: fetchListings,
   })
 
-  const formatMoney = (amount: number) => {
+  const { data: projects = [] } = useQuery({
+    queryKey: ["projects"],
+    queryFn: fetchProjects,
+  })
+
+  const createListingMutation = useMutation({
+    mutationFn: createListing,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["listings"] })
+      setIsAddOpen(false)
+      resetForm()
+    },
+  })
+
+  const updateListingMutation = useMutation({
+    mutationFn: updateListing,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["listings"] })
+      setEditListing(null)
+    },
+  })
+
+  const formatMoney = (amount: number | string) => {
     return new Intl.NumberFormat("en-PH", {
       style: "currency",
       currency: "PHP",
-    }).format(amount)
+    }).format(Number(amount || 0))
   }
 
-  const formatNumber = (value: number) => {
-    return new Intl.NumberFormat("en-PH").format(value)
+  const formatNumber = (value: number | string) => {
+    return new Intl.NumberFormat("en-PH").format(Number(value || 0))
   }
 
-  const getProjectName = (projectId: number) => {
-    return projects.find((project) => project.id === projectId)?.name || ""
+  const projectFormDefault = () => {
+    return projects[0]?.id ?? 0
   }
 
   const resetForm = () => {
     setFormData({
-      projectId: 1,
-      cadastralLotNo: "",
-      unitId: "",
-      lotType: "",
-      promoDiscount: 0,
-      downpayment: 0,
-      reservationFee: 0,
-      pricePerSqm: 0,
-      lotAreaSqm: 0,
-      netSellingPrice: 0,
-      legalMiscFee: 0,
-      status: "available",
+      ...defaultListingFormData,
+      project_id: projectFormDefault(),
     })
   }
 
@@ -134,37 +241,33 @@ const Listings = () => {
     setLotTypeFilter("all")
   }
 
-  const handleAddListing = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault()
-
-    const newListing: Listing = {
-      id: listings.length + 1,
-      ...formData,
-      projectName: getProjectName(formData.projectId),
-    }
-
-    setListings((prev) => [...prev, newListing])
-    resetForm()
-    setIsAddOpen(false)
+  const openAddModal = () => {
+    setFormData({
+      ...defaultListingFormData,
+      project_id: projectFormDefault(),
+    })
+    setIsAddOpen(true)
   }
 
-  const handleUpdateListing = (e: React.FormEvent<HTMLFormElement>) => {
+  const openEditModal = (listing: Listing) => {
+    setEditListing(listing)
+    setEditFormData(listingToFormData(listing))
+  }
+
+  const handleAddListing = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    createListingMutation.mutate(formData)
+  }
+
+  const handleUpdateListing = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
 
     if (!editListing) return
 
-    setListings((prev) =>
-      prev.map((listing) =>
-        listing.id === editListing.id
-          ? {
-              ...editListing,
-              projectName: getProjectName(editListing.projectId),
-            }
-          : listing
-      )
-    )
-
-    setEditListing(null)
+    updateListingMutation.mutate({
+      id: editListing.id,
+      listingData: editFormData,
+    })
   }
 
   const filteredListings = listings.filter((listing) => {
@@ -172,96 +275,62 @@ const Listings = () => {
 
     const matchesSearch =
       search === "" ||
-      listing.unitId.toLowerCase().includes(search) ||
-      listing.projectName.toLowerCase().includes(search) ||
-      listing.lotType.toLowerCase().includes(search) ||
-      listing.cadastralLotNo.toLowerCase().includes(search) ||
+      listing.unit_id.toLowerCase().includes(search) ||
+      listing.project_name.toLowerCase().includes(search) ||
+      (listing.cadastral_lot_no || "").toLowerCase().includes(search) ||
+      (listing.lot_type || "").toLowerCase().includes(search) ||
       listing.status.toLowerCase().includes(search)
 
     const matchesStatus =
       statusFilter === "all" || listing.status === statusFilter
 
     const matchesProject =
-      projectFilter === "all" || listing.projectId === Number(projectFilter)
+      projectFilter === "all" || listing.project_id === Number(projectFilter)
 
     const matchesLotType =
-      lotTypeFilter === "all" || listing.lotType === lotTypeFilter
+      lotTypeFilter === "all" || listing.lot_type === lotTypeFilter
 
     return matchesSearch && matchesStatus && matchesProject && matchesLotType
   })
 
-  const countByStatus = (status: ListingStatus) => {
+  const countByStatus = (status: string) => {
     return listings.filter((listing) => listing.status === status).length
   }
 
   const lotTypes = [
-    ...new Set(listings.map((listing) => listing.lotType)),
-  ].filter(Boolean)
+    ...new Set(listings.map((listing) => listing.lot_type).filter(Boolean)),
+  ] as string[]
 
   return (
     <div className="p-4">
       <div className="mb-6">
         <h1 className="text-3xl font-bold">Listings / Units</h1>
         <p className="text-sm text-gray-600">
-          Live inventory imported from company files and editable in MySQL
+          Live inventory from MySQL with editable listing records
         </p>
       </div>
 
       <div className="mb-4 flex flex-wrap gap-2">
-        <button
-          onClick={() => setStatusFilter("all")}
-          className="border border-black px-3 py-1 hover:bg-gray-200"
-        >
-          All({listings.length})
-        </button>
-
-        <button
-          onClick={() => setStatusFilter("available")}
-          className="border border-black px-3 py-1 hover:bg-gray-200"
-        >
-          Available({countByStatus("available")})
-        </button>
-
-        <button
-          onClick={() => setStatusFilter("reserved")}
-          className="border border-black px-3 py-1 hover:bg-gray-200"
-        >
-          Reserved({countByStatus("reserved")})
-        </button>
-
-        <button
-          onClick={() => setStatusFilter("hold")}
-          className="border border-black px-3 py-1 hover:bg-gray-200"
-        >
-          Hold({countByStatus("hold")})
-        </button>
-
-        <button
-          onClick={() => setStatusFilter("sold")}
-          className="border border-black px-3 py-1 hover:bg-gray-200"
-        >
-          Sold({countByStatus("sold")})
-        </button>
-
-        <button
-          onClick={() => setStatusFilter("inactive")}
-          className="border border-black px-3 py-1 hover:bg-gray-200"
-        >
-          Inactive({countByStatus("inactive")})
-        </button>
-
-        <button
-          onClick={resetFilters}
-          className="border border-black px-3 py-1 hover:bg-gray-200"
-        >
-          Reset
-        </button>
+        {statusFilters.map((status) => (
+          <button
+            key={status.value}
+            onClick={() => setStatusFilter(status.value)}
+            className={`border border-black px-3 py-1 hover:bg-gray-200 ${
+              statusFilter === status.value ? "bg-gray-200" : ""
+            }`}
+          >
+            {status.label}
+            {status.value === "all"
+              ? `(${listings.length})`
+              : `(${countByStatus(status.value)})`}
+          </button>
+        ))}
       </div>
 
       <div className="mb-4 flex flex-col gap-2 md:flex-row md:items-center">
         <input
           type="text"
-          placeholder="Search by unit ID, project, lot type, cadastral lot no..."
+          placeholder="Search by unit ID, project, cadastral lot no, lot type, status..."
           value={searchInput}
           onChange={(e) => setSearchInput(e.target.value)}
           className="border border-black px-3 py-2 md:w-96"
@@ -294,112 +363,140 @@ const Listings = () => {
         </select>
 
         <button
-          onClick={() => setIsAddOpen(true)}
+          onClick={resetFilters}
+          className="w-fit border border-black px-4 py-2 hover:bg-gray-200"
+        >
+          Reset
+        </button>
+
+        <button
+          onClick={openAddModal}
           className="w-fit border border-black px-4 py-2 hover:bg-gray-200"
         >
           Add
         </button>
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full border border-black text-sm">
-          <thead>
-            <tr className="border-b border-black">
-              <th className="border-r border-black px-4 py-2 text-left">
-                Unit ID ↕
-              </th>
-              <th className="border-r border-black px-4 py-2 text-left">
-                Project ↕
-              </th>
-              <th className="border-r border-black px-4 py-2 text-left">
-                Lot Type ↕
-              </th>
-              <th className="border-r border-black px-4 py-2 text-left">
-                Area ↕
-              </th>
-              <th className="border-r border-black px-4 py-2 text-left">
-                Price / SQM ↕
-              </th>
-              <th className="border-r border-black px-4 py-2 text-left">
-                Net Price ↕
-              </th>
-              <th className="border-r border-black px-4 py-2 text-left">
-                Legal / Misc ↕
-              </th>
-              <th className="border-r border-black px-4 py-2 text-left">
-                Status ↕
-              </th>
-              <th className="px-4 py-2 text-left">
-                Actions ↕
-              </th>
-            </tr>
-          </thead>
+      {isLoading && (
+        <div className="border border-black px-4 py-6 text-center text-gray-600">
+          Loading listings...
+        </div>
+      )}
 
-          <tbody>
-            {filteredListings.map((listing) => (
-              <tr key={listing.id} className="border-b border-black">
-                <td className="border-r border-black px-4 py-2">
-                  {listing.unitId}
-                </td>
+      {error && !isLoading && (
+        <div className="border border-black px-4 py-6 text-center text-gray-600">
+          Failed to load listings
+        </div>
+      )}
 
-                <td className="border-r border-black px-4 py-2">
-                  {listing.projectName}
-                </td>
-
-                <td className="border-r border-black px-4 py-2">
-                  {listing.lotType}
-                </td>
-
-                <td className="border-r border-black px-4 py-2">
-                  {formatNumber(listing.lotAreaSqm)} sqm
-                </td>
-
-                <td className="border-r border-black px-4 py-2">
-                  {formatMoney(listing.pricePerSqm)}
-                </td>
-
-                <td className="border-r border-black px-4 py-2">
-                  {formatMoney(listing.netSellingPrice)}
-                </td>
-
-                <td className="border-r border-black px-4 py-2">
-                  {formatMoney(listing.legalMiscFee)}
-                </td>
-
-                <td className="border-r border-black px-4 py-2 capitalize">
-                  {listing.status}
-                </td>
-
-                <td className="px-4 py-2">
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => setViewListing(listing)}
-                      className="border border-black px-3 py-1 hover:bg-gray-200"
-                    >
-                      Details
-                    </button>
-
-                    <button
-                      onClick={() => setEditListing(listing)}
-                      className="border border-black px-3 py-1 hover:bg-gray-200"
-                    >
-                      Edit
-                    </button>
-                  </div>
-                </td>
+      {!isLoading && !error && (
+        <div className="overflow-x-auto">
+          <table className="w-full border border-black text-sm">
+            <thead>
+              <tr className="border-b border-black">
+                <th className="border-r border-black px-4 py-2 text-left">
+                  Unit ID
+                </th>
+                <th className="border-r border-black px-4 py-2 text-left">
+                  Project
+                </th>
+                <th className="border-r border-black px-4 py-2 text-left">
+                  Cadastral Lot No.
+                </th>
+                <th className="border-r border-black px-4 py-2 text-left">
+                  Lot Type
+                </th>
+                <th className="border-r border-black px-4 py-2 text-left">
+                  Area
+                </th>
+                <th className="border-r border-black px-4 py-2 text-left">
+                  Price / SQM
+                </th>
+                <th className="border-r border-black px-4 py-2 text-left">
+                  Net Price
+                </th>
+                <th className="border-r border-black px-4 py-2 text-left">
+                  Legal / Misc
+                </th>
+                <th className="border-r border-black px-4 py-2 text-left">
+                  Status
+                </th>
+                <th className="px-4 py-2 text-left">
+                  Actions
+                </th>
               </tr>
-            ))}
+            </thead>
 
-            {filteredListings.length === 0 && (
-              <tr>
-                <td colSpan={9} className="px-4 py-6 text-center text-gray-600">
-                  No listings found
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+            <tbody>
+              {filteredListings.map((listing) => (
+                <tr key={listing.id} className="border-b border-black">
+                  <td className="border-r border-black px-4 py-2">
+                    {listing.unit_id}
+                  </td>
+
+                  <td className="border-r border-black px-4 py-2">
+                    {listing.project_name}
+                  </td>
+
+                  <td className="border-r border-black px-4 py-2">
+                    {listing.cadastral_lot_no || "-"}
+                  </td>
+
+                  <td className="border-r border-black px-4 py-2">
+                    {listing.lot_type || "-"}
+                  </td>
+
+                  <td className="border-r border-black px-4 py-2">
+                    {formatNumber(listing.lot_area_sqm)} sqm
+                  </td>
+
+                  <td className="border-r border-black px-4 py-2">
+                    {formatMoney(listing.price_per_sqm)}
+                  </td>
+
+                  <td className="border-r border-black px-4 py-2">
+                    {formatMoney(listing.net_selling_price)}
+                  </td>
+
+                  <td className="border-r border-black px-4 py-2">
+                    {formatMoney(listing.legal_misc_fee)}
+                  </td>
+
+                  <td className="border-r border-black px-4 py-2 capitalize">
+                    {listing.status}
+                  </td>
+
+                  <td className="px-4 py-2">
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setViewListing(listing)}
+                        className="border border-black px-3 py-1 hover:bg-gray-200"
+                      >
+                        Details
+                      </button>
+
+                      <button
+                        onClick={() => openEditModal(listing)}
+                        className="border border-black px-3 py-1 hover:bg-gray-200"
+                      >
+                        Edit
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+
+              {filteredListings.length === 0 && (
+                <tr>
+                  <td colSpan={10} className="px-4 py-6 text-center text-gray-600">
+                    No listings found
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {isAddOpen && (
         <div className="fixed inset-0 flex items-center justify-center bg-black/40 p-4">
@@ -411,15 +508,19 @@ const Listings = () => {
               className="grid grid-cols-1 gap-3 md:grid-cols-2"
             >
               <select
-                value={formData.projectId}
+                value={formData.project_id}
                 onChange={(e) =>
                   setFormData({
                     ...formData,
-                    projectId: Number(e.target.value),
+                    project_id: Number(e.target.value),
                   })
                 }
                 className="border border-black px-3 py-2"
+                required
               >
+                <option value={0} disabled>
+                  Select project
+                </option>
                 {projects.map((project) => (
                   <option key={project.id} value={project.id}>
                     {project.name}
@@ -430,11 +531,11 @@ const Listings = () => {
               <input
                 type="text"
                 placeholder="Cadastral lot no."
-                value={formData.cadastralLotNo}
+                value={formData.cadastral_lot_no}
                 onChange={(e) =>
                   setFormData({
                     ...formData,
-                    cadastralLotNo: e.target.value,
+                    cadastral_lot_no: e.target.value,
                   })
                 }
                 className="border border-black px-3 py-2"
@@ -443,9 +544,9 @@ const Listings = () => {
               <input
                 type="text"
                 placeholder="Unit ID"
-                value={formData.unitId}
+                value={formData.unit_id}
                 onChange={(e) =>
-                  setFormData({ ...formData, unitId: e.target.value })
+                  setFormData({ ...formData, unit_id: e.target.value })
                 }
                 className="border border-black px-3 py-2"
                 required
@@ -454,9 +555,9 @@ const Listings = () => {
               <input
                 type="text"
                 placeholder="Lot type"
-                value={formData.lotType}
+                value={formData.lot_type}
                 onChange={(e) =>
-                  setFormData({ ...formData, lotType: e.target.value })
+                  setFormData({ ...formData, lot_type: e.target.value })
                 }
                 className="border border-black px-3 py-2"
               />
@@ -464,11 +565,11 @@ const Listings = () => {
               <input
                 type="number"
                 placeholder="Promo discount"
-                value={formData.promoDiscount}
+                value={formData.promo_discount}
                 onChange={(e) =>
                   setFormData({
                     ...formData,
-                    promoDiscount: Number(e.target.value),
+                    promo_discount: Number(e.target.value),
                   })
                 }
                 className="border border-black px-3 py-2"
@@ -490,11 +591,11 @@ const Listings = () => {
               <input
                 type="number"
                 placeholder="Reservation fee"
-                value={formData.reservationFee}
+                value={formData.reservation_fee}
                 onChange={(e) =>
                   setFormData({
                     ...formData,
-                    reservationFee: Number(e.target.value),
+                    reservation_fee: Number(e.target.value),
                   })
                 }
                 className="border border-black px-3 py-2"
@@ -503,11 +604,11 @@ const Listings = () => {
               <input
                 type="number"
                 placeholder="Price per sqm"
-                value={formData.pricePerSqm}
+                value={formData.price_per_sqm}
                 onChange={(e) =>
                   setFormData({
                     ...formData,
-                    pricePerSqm: Number(e.target.value),
+                    price_per_sqm: Number(e.target.value),
                   })
                 }
                 className="border border-black px-3 py-2"
@@ -516,11 +617,11 @@ const Listings = () => {
               <input
                 type="number"
                 placeholder="Lot area sqm"
-                value={formData.lotAreaSqm}
+                value={formData.lot_area_sqm}
                 onChange={(e) =>
                   setFormData({
                     ...formData,
-                    lotAreaSqm: Number(e.target.value),
+                    lot_area_sqm: Number(e.target.value),
                   })
                 }
                 className="border border-black px-3 py-2"
@@ -529,11 +630,11 @@ const Listings = () => {
               <input
                 type="number"
                 placeholder="Net selling price"
-                value={formData.netSellingPrice}
+                value={formData.net_selling_price}
                 onChange={(e) =>
                   setFormData({
                     ...formData,
-                    netSellingPrice: Number(e.target.value),
+                    net_selling_price: Number(e.target.value),
                   })
                 }
                 className="border border-black px-3 py-2"
@@ -542,11 +643,11 @@ const Listings = () => {
               <input
                 type="number"
                 placeholder="Legal misc fee"
-                value={formData.legalMiscFee}
+                value={formData.legal_misc_fee}
                 onChange={(e) =>
                   setFormData({
                     ...formData,
-                    legalMiscFee: Number(e.target.value),
+                    legal_misc_fee: Number(e.target.value),
                   })
                 }
                 className="border border-black px-3 py-2"
@@ -569,6 +670,12 @@ const Listings = () => {
                 <option value="inactive">Inactive</option>
               </select>
 
+              {createListingMutation.isError && (
+                <p className="col-span-full text-sm text-red-600">
+                  {createListingMutation.error.message}
+                </p>
+              )}
+
               <div className="col-span-full mt-2 flex justify-end gap-2">
                 <button
                   type="button"
@@ -583,9 +690,10 @@ const Listings = () => {
 
                 <button
                   type="submit"
-                  className="border border-black px-4 py-2 hover:bg-gray-200"
+                  disabled={createListingMutation.isPending}
+                  className="border border-black px-4 py-2 hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  Save Listing
+                  {createListingMutation.isPending ? "Saving..." : "Save Listing"}
                 </button>
               </div>
             </form>
@@ -599,52 +707,28 @@ const Listings = () => {
             <h2 className="mb-4 text-2xl font-bold">Listing Details</h2>
 
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              <p>
-                <b>Project:</b> {viewListing.projectName}
-              </p>
-              <p>
-                <b>Cadastral Lot No:</b> {viewListing.cadastralLotNo}
-              </p>
-              <p>
-                <b>Unit ID:</b> {viewListing.unitId}
-              </p>
-              <p>
-                <b>Lot Type:</b> {viewListing.lotType}
-              </p>
-              <p>
-                <b>Promo Discount:</b>{" "}
-                {formatMoney(viewListing.promoDiscount)}
-              </p>
-              <p>
-                <b>Downpayment:</b> {formatMoney(viewListing.downpayment)}
-              </p>
-              <p>
-                <b>Reservation Fee:</b>{" "}
-                {formatMoney(viewListing.reservationFee)}
-              </p>
-              <p>
-                <b>Price Per SQM:</b> {formatMoney(viewListing.pricePerSqm)}
-              </p>
-              <p>
-                <b>Lot Area:</b> {formatNumber(viewListing.lotAreaSqm)} sqm
-              </p>
-              <p>
-                <b>Net Selling Price:</b>{" "}
-                {formatMoney(viewListing.netSellingPrice)}
-              </p>
-              <p>
-                <b>Legal / Misc Fee:</b>{" "}
-                {formatMoney(viewListing.legalMiscFee)}
-              </p>
-              <p>
-                <b>Status:</b> {viewListing.status}
-              </p>
+              <p><b>ID:</b> {viewListing.id}</p>
+              <p><b>Project ID:</b> {viewListing.project_id}</p>
+              <p><b>Project:</b> {viewListing.project_name}</p>
+              <p><b>Cadastral Lot No.:</b> {viewListing.cadastral_lot_no || "-"}</p>
+              <p><b>Unit ID:</b> {viewListing.unit_id}</p>
+              <p><b>Lot Type:</b> {viewListing.lot_type || "-"}</p>
+              <p><b>Promo Discount:</b> {formatMoney(viewListing.promo_discount)}</p>
+              <p><b>Downpayment:</b> {formatMoney(viewListing.downpayment)}</p>
+              <p><b>Reservation Fee:</b> {formatMoney(viewListing.reservation_fee)}</p>
+              <p><b>Price Per SQM:</b> {formatMoney(viewListing.price_per_sqm)}</p>
+              <p><b>Lot Area:</b> {formatNumber(viewListing.lot_area_sqm)} sqm</p>
+              <p><b>Net Selling Price:</b> {formatMoney(viewListing.net_selling_price)}</p>
+              <p><b>Legal / Misc Fee:</b> {formatMoney(viewListing.legal_misc_fee)}</p>
+              <p><b>Status:</b> {viewListing.status}</p>
+              <p><b>Created At:</b> {viewListing.created_at}</p>
+              <p><b>Updated At:</b> {viewListing.updated_at}</p>
             </div>
 
             <div className="mt-4 flex justify-end gap-2">
               <button
                 onClick={() => {
-                  setEditListing(viewListing)
+                  openEditModal(viewListing)
                   setViewListing(null)
                 }}
                 className="border border-black px-4 py-2 hover:bg-gray-200"
@@ -673,15 +757,19 @@ const Listings = () => {
               className="grid grid-cols-1 gap-3 md:grid-cols-2"
             >
               <select
-                value={editListing.projectId}
+                value={editFormData.project_id}
                 onChange={(e) =>
-                  setEditListing({
-                    ...editListing,
-                    projectId: Number(e.target.value),
+                  setEditFormData({
+                    ...editFormData,
+                    project_id: Number(e.target.value),
                   })
                 }
                 className="border border-black px-3 py-2"
+                required
               >
+                <option value={0} disabled>
+                  Select project
+                </option>
                 {projects.map((project) => (
                   <option key={project.id} value={project.id}>
                     {project.name}
@@ -691,11 +779,11 @@ const Listings = () => {
 
               <input
                 type="text"
-                value={editListing.cadastralLotNo}
+                value={editFormData.cadastral_lot_no}
                 onChange={(e) =>
-                  setEditListing({
-                    ...editListing,
-                    cadastralLotNo: e.target.value,
+                  setEditFormData({
+                    ...editFormData,
+                    cadastral_lot_no: e.target.value,
                   })
                 }
                 className="border border-black px-3 py-2"
@@ -703,11 +791,11 @@ const Listings = () => {
 
               <input
                 type="text"
-                value={editListing.unitId}
+                value={editFormData.unit_id}
                 onChange={(e) =>
-                  setEditListing({
-                    ...editListing,
-                    unitId: e.target.value,
+                  setEditFormData({
+                    ...editFormData,
+                    unit_id: e.target.value,
                   })
                 }
                 className="border border-black px-3 py-2"
@@ -716,11 +804,11 @@ const Listings = () => {
 
               <input
                 type="text"
-                value={editListing.lotType}
+                value={editFormData.lot_type}
                 onChange={(e) =>
-                  setEditListing({
-                    ...editListing,
-                    lotType: e.target.value,
+                  setEditFormData({
+                    ...editFormData,
+                    lot_type: e.target.value,
                   })
                 }
                 className="border border-black px-3 py-2"
@@ -728,11 +816,11 @@ const Listings = () => {
 
               <input
                 type="number"
-                value={editListing.promoDiscount}
+                value={editFormData.promo_discount}
                 onChange={(e) =>
-                  setEditListing({
-                    ...editListing,
-                    promoDiscount: Number(e.target.value),
+                  setEditFormData({
+                    ...editFormData,
+                    promo_discount: Number(e.target.value),
                   })
                 }
                 className="border border-black px-3 py-2"
@@ -740,10 +828,10 @@ const Listings = () => {
 
               <input
                 type="number"
-                value={editListing.downpayment}
+                value={editFormData.downpayment}
                 onChange={(e) =>
-                  setEditListing({
-                    ...editListing,
+                  setEditFormData({
+                    ...editFormData,
                     downpayment: Number(e.target.value),
                   })
                 }
@@ -752,11 +840,11 @@ const Listings = () => {
 
               <input
                 type="number"
-                value={editListing.reservationFee}
+                value={editFormData.reservation_fee}
                 onChange={(e) =>
-                  setEditListing({
-                    ...editListing,
-                    reservationFee: Number(e.target.value),
+                  setEditFormData({
+                    ...editFormData,
+                    reservation_fee: Number(e.target.value),
                   })
                 }
                 className="border border-black px-3 py-2"
@@ -764,11 +852,11 @@ const Listings = () => {
 
               <input
                 type="number"
-                value={editListing.pricePerSqm}
+                value={editFormData.price_per_sqm}
                 onChange={(e) =>
-                  setEditListing({
-                    ...editListing,
-                    pricePerSqm: Number(e.target.value),
+                  setEditFormData({
+                    ...editFormData,
+                    price_per_sqm: Number(e.target.value),
                   })
                 }
                 className="border border-black px-3 py-2"
@@ -776,11 +864,11 @@ const Listings = () => {
 
               <input
                 type="number"
-                value={editListing.lotAreaSqm}
+                value={editFormData.lot_area_sqm}
                 onChange={(e) =>
-                  setEditListing({
-                    ...editListing,
-                    lotAreaSqm: Number(e.target.value),
+                  setEditFormData({
+                    ...editFormData,
+                    lot_area_sqm: Number(e.target.value),
                   })
                 }
                 className="border border-black px-3 py-2"
@@ -788,11 +876,11 @@ const Listings = () => {
 
               <input
                 type="number"
-                value={editListing.netSellingPrice}
+                value={editFormData.net_selling_price}
                 onChange={(e) =>
-                  setEditListing({
-                    ...editListing,
-                    netSellingPrice: Number(e.target.value),
+                  setEditFormData({
+                    ...editFormData,
+                    net_selling_price: Number(e.target.value),
                   })
                 }
                 className="border border-black px-3 py-2"
@@ -800,21 +888,21 @@ const Listings = () => {
 
               <input
                 type="number"
-                value={editListing.legalMiscFee}
+                value={editFormData.legal_misc_fee}
                 onChange={(e) =>
-                  setEditListing({
-                    ...editListing,
-                    legalMiscFee: Number(e.target.value),
+                  setEditFormData({
+                    ...editFormData,
+                    legal_misc_fee: Number(e.target.value),
                   })
                 }
                 className="border border-black px-3 py-2"
               />
 
               <select
-                value={editListing.status}
+                value={editFormData.status}
                 onChange={(e) =>
-                  setEditListing({
-                    ...editListing,
+                  setEditFormData({
+                    ...editFormData,
                     status: e.target.value as ListingStatus,
                   })
                 }
@@ -827,6 +915,12 @@ const Listings = () => {
                 <option value="inactive">Inactive</option>
               </select>
 
+              {updateListingMutation.isError && (
+                <p className="col-span-full text-sm text-red-600">
+                  {updateListingMutation.error.message}
+                </p>
+              )}
+
               <div className="col-span-full mt-2 flex justify-end gap-2">
                 <button
                   type="button"
@@ -838,9 +932,10 @@ const Listings = () => {
 
                 <button
                   type="submit"
-                  className="border border-black px-4 py-2 hover:bg-gray-200"
+                  disabled={updateListingMutation.isPending}
+                  className="border border-black px-4 py-2 hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  Save Changes
+                  {updateListingMutation.isPending ? "Saving..." : "Save Changes"}
                 </button>
               </div>
             </form>

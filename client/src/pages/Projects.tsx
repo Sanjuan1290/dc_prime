@@ -1,89 +1,174 @@
-import { useState } from "react"
+import { useState, type FormEvent } from "react"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
-type ProjectStatus = "active" | "inactive"
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api/v1"
 
 type Project = {
   id: number
   name: string
-  location: string
-  administrator: string
-  taxDeclarationNo: string
-  pin: string
-  status: ProjectStatus
+  location: string | null
+  administrator: string | null
+  tax_declaration_no: string | null
+  pin: string | null
+  status: "active" | "inactive" | string
+  ended_at: string | null
+  created_at: string
+  updated_at: string
 }
 
-const Projects = () => {
-  const [projects, setProjects] = useState<Project[]>([
-    {
-      id: 1,
-      name: "Luntiang Aguinaldo",
-      location: "Gen. Emilio Aguinaldo, Cavite",
-      administrator: "IMELDA",
-      taxDeclarationNo: "AA-06-0005-00105",
-      pin: "022-06-0005-003-04",
-      status: "active",
-    },
-    {
-      id: 2,
-      name: "bailen project",
-      location: "Bailen, Cavite",
-      administrator: "IMELDA",
-      taxDeclarationNo: "AA-06-0005-00105",
-      pin: "022-06-0005-003-04",
-      status: "active",
-    },
-  ])
+type ProjectFormData = {
+  name: string
+  location: string
+  administrator: string
+  tax_declaration_no: string
+  pin: string
+  status: "active" | "inactive"
+}
 
+type ProjectsResponse = {
+  projects: Project[]
+}
+
+const emptyFormData: ProjectFormData = {
+  name: "",
+  location: "",
+  administrator: "",
+  tax_declaration_no: "",
+  pin: "",
+  status: "active",
+}
+
+const getErrorMessage = async (response: Response) => {
+  try {
+    const data = await response.json()
+
+    if (typeof data.message === "string") {
+      return data.message
+    }
+  } catch {
+    return "Request failed"
+  }
+
+  return "Request failed"
+}
+
+const fetchProjects = async () => {
+  const response = await fetch(`${API_URL}/projects`, {
+    credentials: "include",
+  })
+
+  if (!response.ok) {
+    throw new Error(await getErrorMessage(response))
+  }
+
+  const data = (await response.json()) as ProjectsResponse
+
+  return data.projects
+}
+
+const createProject = async (projectData: ProjectFormData) => {
+  const response = await fetch(`${API_URL}/projects`, {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(projectData),
+  })
+
+  if (!response.ok) {
+    throw new Error(await getErrorMessage(response))
+  }
+}
+
+const updateProject = async ({
+  id,
+  projectData,
+}: {
+  id: number
+  projectData: ProjectFormData
+}) => {
+  const response = await fetch(`${API_URL}/projects/${id}`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(projectData),
+  })
+
+  if (!response.ok) {
+    throw new Error(await getErrorMessage(response))
+  }
+}
+
+const projectToFormData = (project: Project): ProjectFormData => ({
+  name: project.name,
+  location: project.location ?? "",
+  administrator: project.administrator ?? "",
+  tax_declaration_no: project.tax_declaration_no ?? "",
+  pin: project.pin ?? "",
+  status: project.status === "inactive" ? "inactive" : "active",
+})
+
+const Projects = () => {
+  const queryClient = useQueryClient()
   const [searchInput, setSearchInput] = useState("")
   const [isAddOpen, setIsAddOpen] = useState(false)
   const [viewProject, setViewProject] = useState<Project | null>(null)
   const [editProject, setEditProject] = useState<Project | null>(null)
+  const [formData, setFormData] = useState<ProjectFormData>(emptyFormData)
+  const [editFormData, setEditFormData] = useState<ProjectFormData>(emptyFormData)
 
-  const [formData, setFormData] = useState({
-    name: "",
-    location: "",
-    administrator: "",
-    taxDeclarationNo: "",
-    pin: "",
-    status: "active" as ProjectStatus,
+  const {
+    data: projects = [],
+    isLoading,
+    error,
+  } = useQuery({
+    queryKey: ["projects"],
+    queryFn: fetchProjects,
   })
 
   const resetForm = () => {
-    setFormData({
-      name: "",
-      location: "",
-      administrator: "",
-      taxDeclarationNo: "",
-      pin: "",
-      status: "active",
-    })
+    setFormData(emptyFormData)
   }
 
-  const handleAddProject = (e: React.FormEvent<HTMLFormElement>) => {
+  const createProjectMutation = useMutation({
+    mutationFn: createProject,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["projects"] })
+      setIsAddOpen(false)
+      resetForm()
+    },
+  })
+
+  const updateProjectMutation = useMutation({
+    mutationFn: updateProject,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["projects"] })
+      setEditProject(null)
+    },
+  })
+
+  const openEditModal = (project: Project) => {
+    setEditProject(project)
+    setEditFormData(projectToFormData(project))
+  }
+
+  const handleAddProject = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
-
-    const newProject: Project = {
-      id: projects.length + 1,
-      ...formData,
-    }
-
-    setProjects((prev) => [...prev, newProject])
-    resetForm()
-    setIsAddOpen(false)
+    createProjectMutation.mutate(formData)
   }
 
-  const handleUpdateProject = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleUpdateProject = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
 
     if (!editProject) return
 
-    setProjects((prev) =>
-      prev.map((project) =>
-        project.id === editProject.id ? editProject : project
-      )
-    )
-
-    setEditProject(null)
+    updateProjectMutation.mutate({
+      id: editProject.id,
+      projectData: editFormData,
+    })
   }
 
   const filteredProjects = projects.filter((project) => {
@@ -92,10 +177,10 @@ const Projects = () => {
     return (
       search === "" ||
       project.name.toLowerCase().includes(search) ||
-      project.location.toLowerCase().includes(search) ||
-      project.administrator.toLowerCase().includes(search) ||
-      project.taxDeclarationNo.toLowerCase().includes(search) ||
-      project.pin.toLowerCase().includes(search) ||
+      (project.location ?? "").toLowerCase().includes(search) ||
+      (project.administrator ?? "").toLowerCase().includes(search) ||
+      (project.tax_declaration_no ?? "").toLowerCase().includes(search) ||
+      (project.pin ?? "").toLowerCase().includes(search) ||
       project.status.toLowerCase().includes(search)
     )
   })
@@ -135,91 +220,105 @@ const Projects = () => {
         </div>
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full border border-black text-sm">
-          <thead>
-            <tr className="border-b border-black">
-              <th className="border-r border-black px-4 py-2 text-left">
-                Name ↕
-              </th>
-              <th className="border-r border-black px-4 py-2 text-left">
-                Location ↕
-              </th>
-              <th className="border-r border-black px-4 py-2 text-left">
-                Administrator ↕
-              </th>
-              <th className="border-r border-black px-4 py-2 text-left">
-                Tax Declaration No. ↕
-              </th>
-              <th className="border-r border-black px-4 py-2 text-left">
-                PIN ↕
-              </th>
-              <th className="border-r border-black px-4 py-2 text-left">
-                Status ↕
-              </th>
-              <th className="px-4 py-2 text-left">
-                Actions ↕
-              </th>
-            </tr>
-          </thead>
+      {isLoading && (
+        <div className="border border-black px-4 py-6 text-center text-gray-600">
+          Loading projects...
+        </div>
+      )}
 
-          <tbody>
-            {filteredProjects.map((project) => (
-              <tr key={project.id} className="border-b border-black">
-                <td className="border-r border-black px-4 py-2">
-                  {project.name}
-                </td>
+      {error && !isLoading && (
+        <div className="border border-black px-4 py-6 text-center text-gray-600">
+          Failed to load projects
+        </div>
+      )}
 
-                <td className="border-r border-black px-4 py-2">
-                  {project.location}
-                </td>
-
-                <td className="border-r border-black px-4 py-2">
-                  {project.administrator || "-"}
-                </td>
-
-                <td className="border-r border-black px-4 py-2">
-                  {project.taxDeclarationNo || "-"}
-                </td>
-
-                <td className="border-r border-black px-4 py-2">
-                  {project.pin || "-"}
-                </td>
-
-                <td className="border-r border-black px-4 py-2 capitalize">
-                  {project.status}
-                </td>
-
-                <td className="px-4 py-2">
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => setViewProject(project)}
-                      className="border border-black px-3 py-1 hover:bg-gray-200"
-                    >
-                      Details
-                    </button>
-
-                    <button
-                      onClick={() => setEditProject(project)}
-                      className="border border-black px-3 py-1 hover:bg-gray-200"
-                    >
-                      Edit
-                    </button>
-                  </div>
-                </td>
+      {!isLoading && !error && (
+        <div className="overflow-x-auto">
+          <table className="w-full border border-black text-sm">
+            <thead>
+              <tr className="border-b border-black">
+                <th className="border-r border-black px-4 py-2 text-left">
+                  Name
+                </th>
+                <th className="border-r border-black px-4 py-2 text-left">
+                  Location
+                </th>
+                <th className="border-r border-black px-4 py-2 text-left">
+                  Administrator
+                </th>
+                <th className="border-r border-black px-4 py-2 text-left">
+                  Tax Declaration No.
+                </th>
+                <th className="border-r border-black px-4 py-2 text-left">
+                  PIN
+                </th>
+                <th className="border-r border-black px-4 py-2 text-left">
+                  Status
+                </th>
+                <th className="px-4 py-2 text-left">
+                  Actions
+                </th>
               </tr>
-            ))}
+            </thead>
 
-            {filteredProjects.length === 0 && (
-              <tr>
-                <td colSpan={7} className="px-4 py-6 text-center text-gray-600">
-                  No projects found
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+            <tbody>
+              {filteredProjects.map((project) => (
+                <tr key={project.id} className="border-b border-black">
+                  <td className="border-r border-black px-4 py-2">
+                    {project.name}
+                  </td>
+
+                  <td className="border-r border-black px-4 py-2">
+                    {project.location || "-"}
+                  </td>
+
+                  <td className="border-r border-black px-4 py-2">
+                    {project.administrator || "-"}
+                  </td>
+
+                  <td className="border-r border-black px-4 py-2">
+                    {project.tax_declaration_no || "-"}
+                  </td>
+
+                  <td className="border-r border-black px-4 py-2">
+                    {project.pin || "-"}
+                  </td>
+
+                  <td className="border-r border-black px-4 py-2 capitalize">
+                    {project.status}
+                  </td>
+
+                  <td className="px-4 py-2">
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setViewProject(project)}
+                        className="border border-black px-3 py-1 hover:bg-gray-200"
+                      >
+                        Details
+                      </button>
+
+                      <button
+                        onClick={() => openEditModal(project)}
+                        className="border border-black px-3 py-1 hover:bg-gray-200"
+                      >
+                        Edit
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+
+              {filteredProjects.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="px-4 py-6 text-center text-gray-600">
+                    No projects found
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {isAddOpen && (
         <div className="fixed inset-0 flex items-center justify-center bg-black/40 p-4">
@@ -261,11 +360,11 @@ const Projects = () => {
               <input
                 type="text"
                 placeholder="Tax declaration no."
-                value={formData.taxDeclarationNo}
+                value={formData.tax_declaration_no}
                 onChange={(e) =>
                   setFormData({
                     ...formData,
-                    taxDeclarationNo: e.target.value,
+                    tax_declaration_no: e.target.value,
                   })
                 }
                 className="border border-black px-3 py-2"
@@ -286,7 +385,7 @@ const Projects = () => {
                 onChange={(e) =>
                   setFormData({
                     ...formData,
-                    status: e.target.value as ProjectStatus,
+                    status: e.target.value as ProjectFormData["status"],
                   })
                 }
                 className="border border-black px-3 py-2"
@@ -294,6 +393,12 @@ const Projects = () => {
                 <option value="active">Active</option>
                 <option value="inactive">Inactive</option>
               </select>
+
+              {createProjectMutation.isError && (
+                <p className="text-sm text-red-600">
+                  {createProjectMutation.error.message}
+                </p>
+              )}
 
               <div className="mt-2 flex justify-end gap-2">
                 <button
@@ -309,9 +414,10 @@ const Projects = () => {
 
                 <button
                   type="submit"
-                  className="border border-black px-4 py-2 hover:bg-gray-200"
+                  disabled={createProjectMutation.isPending}
+                  className="border border-black px-4 py-2 hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  Save Project
+                  {createProjectMutation.isPending ? "Saving..." : "Save Project"}
                 </button>
               </div>
             </form>
@@ -325,18 +431,22 @@ const Projects = () => {
             <h2 className="mb-4 text-2xl font-bold">Project Details</h2>
 
             <div className="flex flex-col gap-2">
+              <p><b>ID:</b> {viewProject.id}</p>
               <p><b>Name:</b> {viewProject.name}</p>
               <p><b>Location:</b> {viewProject.location || "-"}</p>
               <p><b>Administrator:</b> {viewProject.administrator || "-"}</p>
-              <p><b>Tax Declaration No.:</b> {viewProject.taxDeclarationNo || "-"}</p>
+              <p><b>Tax Declaration No.:</b> {viewProject.tax_declaration_no || "-"}</p>
               <p><b>PIN:</b> {viewProject.pin || "-"}</p>
               <p><b>Status:</b> {viewProject.status}</p>
+              <p><b>Ended At:</b> {viewProject.ended_at || "-"}</p>
+              <p><b>Created At:</b> {viewProject.created_at}</p>
+              <p><b>Updated At:</b> {viewProject.updated_at}</p>
             </div>
 
             <div className="mt-4 flex justify-end gap-2">
               <button
                 onClick={() => {
-                  setEditProject(viewProject)
+                  openEditModal(viewProject)
                   setViewProject(null)
                 }}
                 className="border border-black px-4 py-2 hover:bg-gray-200"
@@ -363,9 +473,9 @@ const Projects = () => {
             <form onSubmit={handleUpdateProject} className="flex flex-col gap-3">
               <input
                 type="text"
-                value={editProject.name}
+                value={editFormData.name}
                 onChange={(e) =>
-                  setEditProject({ ...editProject, name: e.target.value })
+                  setEditFormData({ ...editFormData, name: e.target.value })
                 }
                 className="border border-black px-3 py-2"
                 required
@@ -373,19 +483,19 @@ const Projects = () => {
 
               <input
                 type="text"
-                value={editProject.location}
+                value={editFormData.location}
                 onChange={(e) =>
-                  setEditProject({ ...editProject, location: e.target.value })
+                  setEditFormData({ ...editFormData, location: e.target.value })
                 }
                 className="border border-black px-3 py-2"
               />
 
               <input
                 type="text"
-                value={editProject.administrator}
+                value={editFormData.administrator}
                 onChange={(e) =>
-                  setEditProject({
-                    ...editProject,
+                  setEditFormData({
+                    ...editFormData,
                     administrator: e.target.value,
                   })
                 }
@@ -394,11 +504,11 @@ const Projects = () => {
 
               <input
                 type="text"
-                value={editProject.taxDeclarationNo}
+                value={editFormData.tax_declaration_no}
                 onChange={(e) =>
-                  setEditProject({
-                    ...editProject,
-                    taxDeclarationNo: e.target.value,
+                  setEditFormData({
+                    ...editFormData,
+                    tax_declaration_no: e.target.value,
                   })
                 }
                 className="border border-black px-3 py-2"
@@ -406,19 +516,19 @@ const Projects = () => {
 
               <input
                 type="text"
-                value={editProject.pin}
+                value={editFormData.pin}
                 onChange={(e) =>
-                  setEditProject({ ...editProject, pin: e.target.value })
+                  setEditFormData({ ...editFormData, pin: e.target.value })
                 }
                 className="border border-black px-3 py-2"
               />
 
               <select
-                value={editProject.status}
+                value={editFormData.status}
                 onChange={(e) =>
-                  setEditProject({
-                    ...editProject,
-                    status: e.target.value as ProjectStatus,
+                  setEditFormData({
+                    ...editFormData,
+                    status: e.target.value as ProjectFormData["status"],
                   })
                 }
                 className="border border-black px-3 py-2"
@@ -426,6 +536,12 @@ const Projects = () => {
                 <option value="active">Active</option>
                 <option value="inactive">Inactive</option>
               </select>
+
+              {updateProjectMutation.isError && (
+                <p className="text-sm text-red-600">
+                  {updateProjectMutation.error.message}
+                </p>
+              )}
 
               <div className="mt-2 flex justify-end gap-2">
                 <button
@@ -438,9 +554,10 @@ const Projects = () => {
 
                 <button
                   type="submit"
-                  className="border border-black px-4 py-2 hover:bg-gray-200"
+                  disabled={updateProjectMutation.isPending}
+                  className="border border-black px-4 py-2 hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  Save Changes
+                  {updateProjectMutation.isPending ? "Saving..." : "Save Changes"}
                 </button>
               </div>
             </form>
