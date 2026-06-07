@@ -1,7 +1,20 @@
-import { useState, type FormEvent } from "react"
+import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api/v1"
+import { FiEdit2, FiFileText, FiPlus, FiSearch } from "react-icons/fi"
+import Alert from "../components/ui/Alert"
+import Button from "../components/ui/Button"
+import EmptyState from "../components/ui/EmptyState"
+import Input from "../components/ui/Input"
+import LoadingState from "../components/ui/LoadingState"
+import Modal from "../components/ui/Modal"
+import PageHeader from "../components/ui/PageHeader"
+import Pagination from "../components/ui/Pagination"
+import Select from "../components/ui/Select"
+import StatCard from "../components/ui/StatCard"
+import StatusBadge from "../components/ui/StatusBadge"
+import TableContainer from "../components/ui/TableContainer"
+import { API_URL, getErrorMessage } from "../utils/api"
+import { paginateRows } from "../utils/pagination"
 
 type DocumentStatus = "active" | "inactive" | string
 
@@ -36,20 +49,6 @@ const emptyFormData: DocumentFormData = {
   status: "active",
 }
 
-const getErrorMessage = async (response: Response) => {
-  try {
-    const data = await response.json()
-
-    if (typeof data.message === "string") {
-      return data.message
-    }
-
-    return "Something went wrong"
-  } catch {
-    return "Something went wrong"
-  }
-}
-
 const fetchDocuments = async (): Promise<DocumentItem[]> => {
   const res = await fetch(`${API_URL}/documents`, {
     credentials: "include",
@@ -76,8 +75,6 @@ const createDocument = async (documentData: DocumentFormData) => {
   if (!res.ok) {
     throw new Error(await getErrorMessage(res))
   }
-
-  return res.json()
 }
 
 const updateDocument = async ({
@@ -99,21 +96,20 @@ const updateDocument = async ({
   if (!res.ok) {
     throw new Error(await getErrorMessage(res))
   }
-
-  return res.json()
 }
 
 const Documents = () => {
   const queryClient = useQueryClient()
-
   const [searchInput, setSearchInput] = useState("")
   const [statusFilter, setStatusFilter] = useState("all")
   const [requiredFilter, setRequiredFilter] = useState("all")
   const [reusableFilter, setReusableFilter] = useState("all")
-
   const [isAddOpen, setIsAddOpen] = useState(false)
   const [editDocument, setEditDocument] = useState<DocumentItem | null>(null)
   const [formData, setFormData] = useState<DocumentFormData>(emptyFormData)
+  const [page, setPage] = useState(1)
+  const [rowsPerPage, setRowsPerPage] = useState(10)
+  const [successMessage, setSuccessMessage] = useState("")
 
   const {
     data: documents = [],
@@ -130,6 +126,7 @@ const Documents = () => {
       queryClient.invalidateQueries({ queryKey: ["documents"] })
       setIsAddOpen(false)
       setFormData(emptyFormData)
+      setSuccessMessage("Document created successfully")
     },
   })
 
@@ -138,25 +135,22 @@ const Documents = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["documents"] })
       setEditDocument(null)
+      setSuccessMessage("Document updated successfully")
     },
   })
 
   const filteredDocuments = documents.filter((document) => {
     const search = searchInput.toLowerCase().trim()
-
     const matchesSearch =
       search === "" ||
       document.name.toLowerCase().includes(search) ||
       (document.description || "").toLowerCase().includes(search) ||
       document.status.toLowerCase().includes(search)
-
     const matchesStatus =
       statusFilter === "all" || document.status === statusFilter
-
     const matchesRequired =
       requiredFilter === "all" ||
       String(Boolean(document.is_required)) === requiredFilter
-
     const matchesReusable =
       reusableFilter === "all" ||
       String(Boolean(document.can_reuse)) === reusableFilter
@@ -164,23 +158,25 @@ const Documents = () => {
     return matchesSearch && matchesStatus && matchesRequired && matchesReusable
   })
 
+  const paginatedDocuments = paginateRows(filteredDocuments, page, rowsPerPage)
+  const requiredCount = documents.filter((document) => Boolean(document.is_required)).length
+  const reusableCount = documents.filter((document) => Boolean(document.can_reuse)).length
+  const inactiveCount = documents.filter((document) => document.status === "inactive").length
+
   const resetFilters = () => {
     setSearchInput("")
     setStatusFilter("all")
     setRequiredFilter("all")
     setReusableFilter("all")
+    setPage(1)
   }
 
-  const openEditModal = (document: DocumentItem) => {
-    setEditDocument(document)
-  }
-
-  const handleAddDocument = (e: FormEvent<HTMLFormElement>) => {
+  const handleAddDocument = (e: { preventDefault: () => void }) => {
     e.preventDefault()
     createDocumentMutation.mutate(formData)
   }
 
-  const handleUpdateDocument = (e: FormEvent<HTMLFormElement>) => {
+  const handleUpdateDocument = (e: { preventDefault: () => void }) => {
     e.preventDefault()
 
     if (!editDocument) return
@@ -197,352 +193,213 @@ const Documents = () => {
     })
   }
 
-  if (isLoading) {
-    return <p className="p-4">Loading documents...</p>
-  }
-
-  if (error) {
-    return <p className="p-4">Failed to load documents</p>
-  }
+  const formFields = (
+    data: DocumentFormData,
+    setData: (data: DocumentFormData) => void
+  ) => (
+    <div className="space-y-3">
+      <Input
+        label="Document name"
+        onChange={(e) => setData({ ...data, name: e.target.value })}
+        required
+        value={data.name}
+      />
+      <label className="block">
+        <span className="mb-1.5 block text-sm font-semibold text-slate-700">
+          Description
+        </span>
+        <textarea
+          className="min-h-24 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+          onChange={(e) => setData({ ...data, description: e.target.value })}
+          value={data.description}
+        />
+      </label>
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+        <Select
+          label="Required"
+          onChange={(e) =>
+            setData({ ...data, is_required: e.target.value === "true" })
+          }
+          value={String(data.is_required)}
+        >
+          <option value="true">Required</option>
+          <option value="false">Optional</option>
+        </Select>
+        <Select
+          label="Reusable"
+          onChange={(e) =>
+            setData({ ...data, can_reuse: e.target.value === "true" })
+          }
+          value={String(data.can_reuse)}
+        >
+          <option value="true">Reusable</option>
+          <option value="false">Not Reusable</option>
+        </Select>
+        <Select
+          label="Status"
+          onChange={(e) => setData({ ...data, status: e.target.value })}
+          value={data.status}
+        >
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+        </Select>
+      </div>
+    </div>
+  )
 
   return (
-    <div className="p-4">
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold">Documents</h1>
-        <p className="text-sm text-gray-600">
-          Manage the list of documents required from clients
-        </p>
+    <div>
+      <PageHeader
+        actions={
+          <Button icon={<FiPlus />} onClick={() => setIsAddOpen(true)} variant="primary">
+            Add Document
+          </Button>
+        }
+        icon={<FiFileText className="h-5 w-5" />}
+        subtitle="Manage the list of documents required from clients"
+        title="Documents"
+      />
+
+      <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-4">
+        <StatCard title="Total Documents" value={documents.length} />
+        <StatCard title="Required" value={requiredCount} />
+        <StatCard title="Reusable" value={reusableCount} />
+        <StatCard title="Inactive" value={inactiveCount} />
       </div>
 
-      <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <button
-          onClick={() => setIsAddOpen(true)}
-          className="w-fit border border-black px-4 py-2 hover:bg-gray-200"
-        >
-          Add Document
-        </button>
+      {successMessage ? (
+        <div className="mb-4">
+          <Alert type="success">{successMessage}</Alert>
+        </div>
+      ) : null}
 
-        <div className="flex flex-col gap-2 md:flex-row">
-          <input
-            type="text"
+      <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_160px_160px_170px_auto]">
+          <Input
+            onChange={(e) => {
+              setSearchInput(e.target.value)
+              setPage(1)
+            }}
             placeholder="Search document name, description, status..."
             value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            className="border border-black px-3 py-2 md:w-96"
           />
-
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="border border-black px-3 py-2"
-          >
+          <Select onChange={(e) => setStatusFilter(e.target.value)} value={statusFilter}>
             <option value="all">All Status</option>
             <option value="active">Active</option>
             <option value="inactive">Inactive</option>
-          </select>
-
-          <select
-            value={requiredFilter}
-            onChange={(e) => setRequiredFilter(e.target.value)}
-            className="border border-black px-3 py-2"
-          >
+          </Select>
+          <Select onChange={(e) => setRequiredFilter(e.target.value)} value={requiredFilter}>
             <option value="all">All Required</option>
             <option value="true">Required</option>
             <option value="false">Optional</option>
-          </select>
-
-          <select
-            value={reusableFilter}
-            onChange={(e) => setReusableFilter(e.target.value)}
-            className="border border-black px-3 py-2"
-          >
+          </Select>
+          <Select onChange={(e) => setReusableFilter(e.target.value)} value={reusableFilter}>
             <option value="all">All Reusable</option>
             <option value="true">Reusable</option>
             <option value="false">Not Reusable</option>
-          </select>
-
-          <button
-            onClick={resetFilters}
-            className="border border-black px-4 py-2 hover:bg-gray-200"
-          >
+          </Select>
+          <Button icon={<FiSearch />} onClick={resetFilters}>
             Reset
-          </button>
+          </Button>
         </div>
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full border border-black text-sm">
-          <thead>
-            <tr className="border-b border-black">
-              <th className="border-r border-black px-4 py-2 text-left">
-                Name ↕
-              </th>
-              <th className="border-r border-black px-4 py-2 text-left">
-                Description ↕
-              </th>
-              <th className="border-r border-black px-4 py-2 text-left">
-                Required ↕
-              </th>
-              <th className="border-r border-black px-4 py-2 text-left">
-                Reusable ↕
-              </th>
-              <th className="border-r border-black px-4 py-2 text-left">
-                Status ↕
-              </th>
-              <th className="px-4 py-2 text-left">Actions ↕</th>
-            </tr>
-          </thead>
+      {isLoading ? <LoadingState message="Loading documents..." /> : null}
+      {error && !isLoading ? (
+        <Alert type="error">Failed to load documents</Alert>
+      ) : null}
 
-          <tbody>
-            {filteredDocuments.map((document) => (
-              <tr key={document.id} className="border-b border-black">
-                <td className="border-r border-black px-4 py-2">
-                  {document.name}
-                </td>
+      {!isLoading && !error ? (
+        filteredDocuments.length === 0 ? (
+          <EmptyState title="No documents found" />
+        ) : (
+          <>
+            <TableContainer>
+              <table className="min-w-full divide-y divide-slate-200 text-sm">
+                <thead className="bg-slate-50">
+                  <tr>
+                    {["Name", "Description", "Required", "Reusable", "Status", "Actions"].map((heading) => (
+                      <th className="px-4 py-3 text-left font-semibold text-slate-600" key={heading}>
+                        {heading}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white">
+                  {paginatedDocuments.map((document) => (
+                    <tr className="transition hover:bg-slate-50" key={document.id}>
+                      <td className="px-4 py-3 font-semibold text-slate-900">{document.name}</td>
+                      <td className="px-4 py-3 text-slate-600">{document.description || "-"}</td>
+                      <td className="px-4 py-3 text-slate-600">{Boolean(document.is_required) ? "Yes" : "No"}</td>
+                      <td className="px-4 py-3 text-slate-600">{Boolean(document.can_reuse) ? "Yes" : "No"}</td>
+                      <td className="px-4 py-3"><StatusBadge status={document.status} /></td>
+                      <td className="px-4 py-3">
+                        <Button icon={<FiEdit2 />} onClick={() => setEditDocument(document)}>
+                          Edit
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </TableContainer>
+            <Pagination
+              onPageChange={setPage}
+              onRowsPerPageChange={setRowsPerPage}
+              page={page}
+              rowsPerPage={rowsPerPage}
+              totalRows={filteredDocuments.length}
+            />
+          </>
+        )
+      ) : null}
 
-                <td className="border-r border-black px-4 py-2">
-                  {document.description || "-"}
-                </td>
+      {isAddOpen ? (
+        <Modal onClose={() => setIsAddOpen(false)} title="Add Document">
+          <form className="space-y-4" onSubmit={handleAddDocument}>
+            {formFields(formData, setFormData)}
+            {createDocumentMutation.isError ? (
+              <Alert type="error">{createDocumentMutation.error.message}</Alert>
+            ) : null}
+            <div className="flex justify-end gap-2">
+              <Button onClick={() => setIsAddOpen(false)}>Cancel</Button>
+              <Button disabled={createDocumentMutation.isPending} type="submit" variant="primary">
+                {createDocumentMutation.isPending ? "Saving..." : "Save Document"}
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      ) : null}
 
-                <td className="border-r border-black px-4 py-2">
-                  {Boolean(document.is_required) ? "Yes" : "No"}
-                </td>
-
-                <td className="border-r border-black px-4 py-2">
-                  {Boolean(document.can_reuse) ? "Yes" : "No"}
-                </td>
-
-                <td className="border-r border-black px-4 py-2 capitalize">
-                  {document.status}
-                </td>
-
-                <td className="px-4 py-2">
-                  <button
-                    onClick={() => openEditModal(document)}
-                    className="border border-black px-3 py-1 hover:bg-gray-200"
-                  >
-                    Edit
-                  </button>
-                </td>
-              </tr>
-            ))}
-
-            {filteredDocuments.length === 0 && (
-              <tr>
-                <td colSpan={6} className="px-4 py-6 text-center text-gray-600">
-                  No documents found
-                </td>
-              </tr>
+      {editDocument ? (
+        <Modal onClose={() => setEditDocument(null)} title="Edit Document">
+          <form className="space-y-4" onSubmit={handleUpdateDocument}>
+            {formFields(
+              {
+                name: editDocument.name,
+                description: editDocument.description || "",
+                is_required: Boolean(editDocument.is_required),
+                can_reuse: Boolean(editDocument.can_reuse),
+                status: editDocument.status,
+              },
+              (nextData) =>
+                setEditDocument({
+                  ...editDocument,
+                  ...nextData,
+                })
             )}
-          </tbody>
-        </table>
-      </div>
-
-      {isAddOpen && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-lg border border-black bg-white p-4">
-            <h2 className="mb-4 text-2xl font-bold">Add Document</h2>
-
-            <form onSubmit={handleAddDocument} className="flex flex-col gap-3">
-              <input
-                type="text"
-                placeholder="Document name"
-                value={formData.name}
-                onChange={(e) =>
-                  setFormData({ ...formData, name: e.target.value })
-                }
-                className="border border-black px-3 py-2"
-                required
-              />
-
-              <textarea
-                placeholder="Description"
-                value={formData.description}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    description: e.target.value,
-                  })
-                }
-                className="min-h-24 border border-black px-3 py-2"
-              />
-
-              <select
-                value={String(formData.is_required)}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    is_required: e.target.value === "true",
-                  })
-                }
-                className="border border-black px-3 py-2"
-              >
-                <option value="true">Required</option>
-                <option value="false">Optional</option>
-              </select>
-
-              <select
-                value={String(formData.can_reuse)}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    can_reuse: e.target.value === "true",
-                  })
-                }
-                className="border border-black px-3 py-2"
-              >
-                <option value="true">Reusable</option>
-                <option value="false">Not Reusable</option>
-              </select>
-
-              <select
-                value={formData.status}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    status: e.target.value as DocumentStatus,
-                  })
-                }
-                className="border border-black px-3 py-2"
-              >
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
-              </select>
-
-              {createDocumentMutation.isError && (
-                <p className="border border-black px-4 py-2 text-red-600">
-                  {createDocumentMutation.error.message}
-                </p>
-              )}
-
-              <div className="mt-2 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setFormData(emptyFormData)
-                    setIsAddOpen(false)
-                  }}
-                  className="border border-black px-4 py-2 hover:bg-gray-200"
-                >
-                  Cancel
-                </button>
-
-                <button
-                  type="submit"
-                  disabled={createDocumentMutation.isPending}
-                  className="border border-black px-4 py-2 hover:bg-gray-200 disabled:opacity-50"
-                >
-                  {createDocumentMutation.isPending
-                    ? "Saving..."
-                    : "Save Document"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {editDocument && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-lg border border-black bg-white p-4">
-            <h2 className="mb-4 text-2xl font-bold">Edit Document</h2>
-
-            <form onSubmit={handleUpdateDocument} className="flex flex-col gap-3">
-              <input
-                type="text"
-                value={editDocument.name}
-                onChange={(e) =>
-                  setEditDocument({
-                    ...editDocument,
-                    name: e.target.value,
-                  })
-                }
-                className="border border-black px-3 py-2"
-                required
-              />
-
-              <textarea
-                value={editDocument.description || ""}
-                onChange={(e) =>
-                  setEditDocument({
-                    ...editDocument,
-                    description: e.target.value,
-                  })
-                }
-                className="min-h-24 border border-black px-3 py-2"
-              />
-
-              <select
-                value={String(Boolean(editDocument.is_required))}
-                onChange={(e) =>
-                  setEditDocument({
-                    ...editDocument,
-                    is_required: e.target.value === "true",
-                  })
-                }
-                className="border border-black px-3 py-2"
-              >
-                <option value="true">Required</option>
-                <option value="false">Optional</option>
-              </select>
-
-              <select
-                value={String(Boolean(editDocument.can_reuse))}
-                onChange={(e) =>
-                  setEditDocument({
-                    ...editDocument,
-                    can_reuse: e.target.value === "true",
-                  })
-                }
-                className="border border-black px-3 py-2"
-              >
-                <option value="true">Reusable</option>
-                <option value="false">Not Reusable</option>
-              </select>
-
-              <select
-                value={editDocument.status}
-                onChange={(e) =>
-                  setEditDocument({
-                    ...editDocument,
-                    status: e.target.value as DocumentStatus,
-                  })
-                }
-                className="border border-black px-3 py-2"
-              >
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
-              </select>
-
-              {updateDocumentMutation.isError && (
-                <p className="border border-black px-4 py-2 text-red-600">
-                  {updateDocumentMutation.error.message}
-                </p>
-              )}
-
-              <div className="mt-2 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setEditDocument(null)}
-                  className="border border-black px-4 py-2 hover:bg-gray-200"
-                >
-                  Cancel
-                </button>
-
-                <button
-                  type="submit"
-                  disabled={updateDocumentMutation.isPending}
-                  className="border border-black px-4 py-2 hover:bg-gray-200 disabled:opacity-50"
-                >
-                  {updateDocumentMutation.isPending
-                    ? "Saving..."
-                    : "Save Changes"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+            {updateDocumentMutation.isError ? (
+              <Alert type="error">{updateDocumentMutation.error.message}</Alert>
+            ) : null}
+            <div className="flex justify-end gap-2">
+              <Button onClick={() => setEditDocument(null)}>Cancel</Button>
+              <Button disabled={updateDocumentMutation.isPending} type="submit" variant="primary">
+                {updateDocumentMutation.isPending ? "Saving..." : "Save Changes"}
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      ) : null}
     </div>
   )
 }

@@ -1,83 +1,126 @@
+import { useState } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "react-router-dom"
-import { useState } from "react"
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api/v1'
+import { FiAlertCircle, FiLock, FiMail } from "react-icons/fi"
+import Alert from "../components/ui/Alert"
+import Button from "../components/ui/Button"
+import Input from "../components/ui/Input"
+import { API_URL, getErrorMessage } from "../utils/api"
 
 const Login = () => {
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-
+  const [email, setEmail] = useState("")
+  const [password, setPassword] = useState("")
   const queryClient = useQueryClient()
   const navigate = useNavigate()
 
   const loginMutation = useMutation({
-    mutationKey: ['login'],
+    mutationKey: ["login"],
     mutationFn: async () => {
       const res = await fetch(`${API_URL}/login`, {
-        method: 'POST',
-        credentials: 'include',
+        method: "POST",
+        credentials: "include",
         headers: {
-          'Content-Type': 'application/json'
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
           email,
-          password
-        })
+          password,
+        }),
       })
 
-      const data = await res.json()
-
       if (!res.ok) {
-        throw new Error(data.message)
+        throw new Error(await getErrorMessage(res))
       }
 
-      return data
+      return res.json()
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['token'] })
-      navigate('/dashboard')
-    }
+      queryClient.invalidateQueries({ queryKey: ["token"] })
+      navigate("/dashboard")
+    },
   })
 
   return (
-    <div>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault()
-          loginMutation.mutate()
-        }}
-        className="flex flex-col gap-2"
-      >
-        <h1>Login</h1>
-
-        <input
-          type="email"
-          placeholder="Enter your email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-        />
-
-        <input
-          type="password"
-          placeholder="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-        />
-
-        {loginMutation.isError && (
-          <p className="text-red-500">
-            {loginMutation.error.message}
+    <div className="flex min-h-[calc(100vh-9rem)] w-full items-center justify-center py-8">
+      <section className="grid w-full max-w-5xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl md:grid-cols-[1fr_1.1fr]">
+        <div className="hidden bg-slate-900 p-8 text-white md:flex md:flex-col md:justify-between">
+          <div>
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-600 text-sm font-bold">
+              DC
+            </div>
+            <h1 className="mt-8 text-3xl font-bold leading-tight">
+              D&C Prime Realty internal system
+            </h1>
+            <p className="mt-3 text-sm leading-6 text-slate-300">
+              Manage projects, listings, clients, collections, payroll, and
+              operational reports from one secure workspace.
+            </p>
+          </div>
+          <p className="text-xs text-slate-400">
+            Secure access for approved users only
           </p>
-        )}
+        </div>
 
-        <button
-          className="border border-black px-4 py-1 hover:bg-gray-400"
-          disabled={loginMutation.isPending}
-        >
-          {loginMutation.isPending ? 'Signing in...' : 'Sign in'}
-        </button>
-      </form>
+        <div className="p-6 sm:p-10">
+          <div className="mb-8">
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-blue-600">
+              Welcome back
+            </p>
+            <h2 className="mt-2 text-3xl font-bold text-slate-900">
+              Sign in
+            </h2>
+            <p className="mt-2 text-sm text-slate-500">
+              Use your D&C Prime admin credentials to continue.
+            </p>
+          </div>
+
+          <form
+            onSubmit={(e) => {
+              e.preventDefault()
+              loginMutation.mutate()
+            }}
+            className="space-y-4"
+          >
+            <div className="relative">
+              <FiMail className="pointer-events-none absolute left-3 top-10 h-4 w-4 text-slate-400" />
+              <Input
+                className="pl-9"
+                label="Email"
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="admin@gmail.com"
+                type="email"
+                value={email}
+              />
+            </div>
+
+            <div className="relative">
+              <FiLock className="pointer-events-none absolute left-3 top-10 h-4 w-4 text-slate-400" />
+              <Input
+                className="pl-9"
+                label="Password"
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Enter your password"
+                type="password"
+                value={password}
+              />
+            </div>
+
+            {loginMutation.isError ? (
+              <Alert type="error">{loginMutation.error.message}</Alert>
+            ) : null}
+
+            <Button
+              className="w-full"
+              disabled={loginMutation.isPending}
+              icon={<FiAlertCircle className="hidden" />}
+              type="submit"
+              variant="primary"
+            >
+              {loginMutation.isPending ? "Signing in..." : "Sign in"}
+            </Button>
+          </form>
+        </div>
+      </section>
     </div>
   )
 }

@@ -1,143 +1,192 @@
-import { NavLink, Outlet } from "react-router-dom"
+import { useState } from "react"
+import { NavLink, Outlet, useNavigate } from "react-router-dom"
 import type { IconType } from "react-icons"
 import {
+  FiActivity,
   FiBarChart2,
-  FiBriefcase,
   FiClock,
   FiCreditCard,
+  FiDollarSign,
   FiFileText,
   FiGrid,
   FiHome,
-  FiPercent,
+  FiLogOut,
+  FiMap,
+  FiMenu,
   FiSettings,
-  FiUserPlus,
-  FiUsers
+  FiUserCheck,
+  FiUsers,
+  FiX,
 } from "react-icons/fi"
+import { useQueryClient } from "@tanstack/react-query"
+import Button from "../components/ui/Button"
+import { API_URL } from "../utils/api"
+import useCurrentUser from "../utils/useCurrentUser"
+
+type CurrentUserResponse = {
+  user?: {
+    email?: string
+    full_name?: string
+    role?: string
+  }
+}
 
 type NavItem = {
   label: string
   to: string
   icon: IconType
-  badge?: string
 }
 
-type NavGroup = {
-  title: string
-  items: NavItem[]
-}
-
-const navGroups: NavGroup[] = [
-  {
-    title: "Overview",
-    items: [
-      { label: "Dashboard", to: "/dashboard", icon: FiGrid }
-    ]
-  },
-  {
-    title: "Management",
-    items: [
-      { label: "Projects", to: "/projects", icon: FiBriefcase },
-      { label: "Listings", to: "/listings", icon: FiHome, badge: "100" }
-    ]
-  },
-  {
-    title: "People",
-    items: [
-      { label: "Attendance", to: "/attendance", icon: FiClock },
-      { label: "Clients", to: "/clients", icon: FiUsers, badge: "75" },
-      { label: "Accreditted Sellers", to: "/accreditted_sellers", icon: FiUsers, badge: "25" },
-      { label: "Employees", to: "/employees", icon: FiUsers, badge: "8" }
-    ]
-  },
-  {
-    title: "Finance",
-    items: [
-      { label: "Payments", to: "/payments", icon: FiCreditCard },
-      { label: "Commissions", to: "/commissions", icon: FiPercent }
-    ]
-  },
-  {
-    title: "Compliance",
-    items: [
-      { label: "Documents", to: "/documents", icon: FiFileText }
-    ]
-  },
-  {
-    title: "Insights",
-    items: [
-      { label: "Reports", to: "/reports", icon: FiBarChart2 }
-    ]
-  },
-  {
-    title: "Admin",
-    items: [
-      { label: "User management", to: "/user-management", icon: FiUserPlus },
-      { label: "Audit logs", to: "/audit-logs", icon: FiBarChart2 },
-      { label: "Settings", to: "/settings", icon: FiSettings },
-    ]
-  }
+const navItems: NavItem[] = [
+  { label: "Dashboard", to: "/dashboard", icon: FiHome },
+  { label: "Projects", to: "/projects", icon: FiMap },
+  { label: "Listings", to: "/listings", icon: FiGrid },
+  { label: "Clients", to: "/clients", icon: FiUsers },
+  { label: "Accreditted Sellers", to: "/accreditted_sellers", icon: FiUsers },
+  { label: "Documents", to: "/documents", icon: FiFileText },
+  { label: "Payments", to: "/payments", icon: FiCreditCard },
+  { label: "Commissions", to: "/commissions", icon: FiDollarSign },
+  { label: "Employees", to: "/employees", icon: FiUserCheck },
+  { label: "Attendance", to: "/attendance", icon: FiClock },
+  { label: "Reports", to: "/reports", icon: FiBarChart2 },
+  { label: "Audit Logs", to: "/audit-logs", icon: FiActivity },
+  { label: "Settings", to: "/settings", icon: FiSettings },
 ]
 
 const SystemLayout = () => {
-  return (
-    <div className="min-h-screen bg-[#f5f6fb] text-slate-950 lg:flex">
-      <aside className="bg-[#181628] text-slate-300 shadow-xl shadow-slate-950/20 lg:sticky lg:top-0 lg:h-screen lg:w-56 lg:shrink-0">
-        <div className="border-b border-white/10 px-3 pb-4 pt-5">
-          <div className="mb-4 h-0.5 w-20 rounded-full bg-[#d6b548]" />
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-[#d6b548] text-xs font-extrabold text-white shadow-lg shadow-black/20">
-              DC
-            </div>
-            <div className="min-w-0">
-              <p className="truncate text-base font-bold leading-tight text-white">D&C Prime</p>
-              <p className="truncate text-xs text-slate-400">Realty Admin</p>
-            </div>
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
+  const { data } = useCurrentUser()
+  const currentUser = (data as CurrentUserResponse | null)?.user
+
+  const handleLogout = async () => {
+    await fetch(`${API_URL}/logout`, {
+      method: "POST",
+      credentials: "include",
+    })
+    queryClient.clear()
+    navigate("/")
+  }
+
+  const sidebar = (
+    <aside className="flex h-full w-72 flex-col border-r border-slate-200 bg-white shadow-sm lg:w-64">
+      <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-sm font-bold text-white shadow-sm">
+            DC
+          </div>
+          <div>
+            <p className="text-sm font-bold text-slate-900">D&C Prime</p>
+            <p className="text-xs text-slate-500">Realty admin</p>
           </div>
         </div>
+        <Button
+          className="lg:hidden"
+          icon={<FiX />}
+          onClick={() => setIsSidebarOpen(false)}
+          variant="ghost"
+        />
+      </div>
 
-        <nav className="flex gap-3 overflow-x-auto px-2 py-4 lg:block lg:h-[calc(100vh-88px)] lg:overflow-y-auto lg:overflow-x-hidden">
-          {navGroups.map((group) => (
-            <div className="min-w-48 border-white/10 lg:min-w-0 lg:border-b lg:py-4 first:lg:pt-0 last:lg:border-b-0" key={group.title}>
-              <p className="px-2 pb-2 text-[10px] font-black uppercase tracking-[0.22em] text-slate-500">
-                {group.title}
+      <nav className="flex-1 space-y-1 overflow-y-auto p-3">
+        {navItems.map((item) => {
+          const Icon = item.icon
+
+          return (
+            <NavLink
+              className={({ isActive }) =>
+                [
+                  "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition",
+                  isActive
+                    ? "bg-blue-50 text-blue-700"
+                    : "text-slate-600 hover:bg-slate-50 hover:text-slate-900",
+                ].join(" ")
+              }
+              key={item.to}
+              onClick={() => setIsSidebarOpen(false)}
+              to={item.to}
+            >
+              <Icon className="h-4 w-4 shrink-0" />
+              <span>{item.label}</span>
+            </NavLink>
+          )
+        })}
+      </nav>
+
+      <div className="border-t border-slate-200 p-4">
+        <div className="mb-3 rounded-xl bg-slate-50 p-3">
+          <p className="truncate text-sm font-semibold text-slate-900">
+            {currentUser?.full_name || "Signed in user"}
+          </p>
+          <p className="truncate text-xs text-slate-500">
+            {currentUser?.email || currentUser?.role || "Secure session"}
+          </p>
+        </div>
+        <Button
+          className="w-full"
+          icon={<FiLogOut />}
+          onClick={handleLogout}
+          variant="secondary"
+        >
+          Logout
+        </Button>
+      </div>
+    </aside>
+  )
+
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-900">
+      <div className="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:block">
+        {sidebar}
+      </div>
+
+      {isSidebarOpen ? (
+        <div className="fixed inset-0 z-50 lg:hidden">
+          <button
+            aria-label="Close sidebar"
+            className="absolute inset-0 bg-slate-950/50"
+            onClick={() => setIsSidebarOpen(false)}
+            type="button"
+          />
+          <div className="relative h-full">{sidebar}</div>
+        </div>
+      ) : null}
+
+      <div className="lg:pl-64">
+        <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/90 px-4 py-3 backdrop-blur sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between gap-3">
+            <Button
+              className="lg:hidden"
+              icon={<FiMenu />}
+              onClick={() => setIsSidebarOpen(true)}
+              variant="secondary"
+            >
+              Menu
+            </Button>
+            <div className="hidden lg:block">
+              <p className="text-sm font-semibold text-slate-900">
+                Internal admin system
               </p>
-
-              <div className="space-y-1">
-                {group.items.map((item) => {
-                  const Icon = item.icon
-
-                  return (
-                    <NavLink
-                      className={({ isActive }) =>
-                        [
-                          "flex h-10 items-center gap-3 rounded-md px-3 text-sm font-bold transition",
-                          isActive
-                            ? "bg-[#3b394e] text-white shadow-sm"
-                            : "text-slate-300 hover:bg-white/5 hover:text-white"
-                        ].join(" ")
-                      }
-                      key={item.label}
-                      to={item.to}
-                    >
-                      <Icon className="h-4 w-4 shrink-0 text-slate-400" />
-                      <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                      {item.badge ? (
-                        <span className="rounded-full bg-[#5a586e] px-2 py-0.5 text-[10px] font-black leading-none text-white">
-                          {item.badge}
-                        </span>
-                      ) : null}
-                    </NavLink>
-                  )
-                })}
-              </div>
+              <p className="text-xs text-slate-500">
+                Connected to live MySQL data
+              </p>
             </div>
-          ))}
-        </nav>
-      </aside>
+            <div className="min-w-0 text-right">
+              <p className="truncate text-sm font-semibold text-slate-900">
+                {currentUser?.full_name || "D&C Prime"}
+              </p>
+              <p className="truncate text-xs text-slate-500">
+                {currentUser?.role || "Authorized user"}
+              </p>
+            </div>
+          </div>
+        </header>
 
-      <main className="min-w-0 flex-1 px-5 py-6 sm:px-8 lg:px-10">
-        <Outlet />
-      </main>
+        <main className="px-4 py-6 sm:px-6 lg:px-8">
+          <Outlet />
+        </main>
+      </div>
     </div>
   )
 }

@@ -1,7 +1,21 @@
-import { useState, type FormEvent } from "react"
+import { useMemo, useState, type FormEvent } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api/v1"
+import { FiEdit2, FiRefreshCw, FiSearch, FiUserPlus, FiUsers } from "react-icons/fi"
+import Alert from "../components/ui/Alert"
+import Button from "../components/ui/Button"
+import EmptyState from "../components/ui/EmptyState"
+import Input from "../components/ui/Input"
+import LoadingState from "../components/ui/LoadingState"
+import Modal from "../components/ui/Modal"
+import PageHeader from "../components/ui/PageHeader"
+import Pagination from "../components/ui/Pagination"
+import Select from "../components/ui/Select"
+import StatCard from "../components/ui/StatCard"
+import StatusBadge from "../components/ui/StatusBadge"
+import TableContainer from "../components/ui/TableContainer"
+import { API_URL, getErrorMessage } from "../utils/api"
+import { formatDate, formatNumber, formatText } from "../utils/formatters"
+import { paginateRows } from "../utils/pagination"
 
 type SellerStatus = "active" | "inactive" | string
 
@@ -64,19 +78,12 @@ const emptyFormData: SellerFormData = {
   status: "active",
 }
 
-const getErrorMessage = async (response: Response) => {
-  try {
-    const data = await response.json()
-
-    if (typeof data.message === "string") {
-      return data.message
-    }
-
-    return "Something went wrong"
-  } catch {
-    return "Something went wrong"
-  }
-}
+const sellerRoles: SellerRole[] = [
+  "broker_network_manager",
+  "broker",
+  "manager",
+  "agent",
+]
 
 const fetchSellers = async (): Promise<AccreditedSeller[]> => {
   const res = await fetch(`${API_URL}/accredited-sellers`, {
@@ -167,6 +174,8 @@ const AccredittedSellers = () => {
   const [searchInput, setSearchInput] = useState("")
   const [statusFilter, setStatusFilter] = useState("all")
   const [roleFilter, setRoleFilter] = useState("all")
+  const [page, setPage] = useState(1)
+  const [rowsPerPage, setRowsPerPage] = useState(10)
 
   const [isAddOpen, setIsAddOpen] = useState(false)
   const [editSeller, setEditSeller] = useState<AccreditedSeller | null>(null)
@@ -223,26 +232,43 @@ const AccredittedSellers = () => {
     },
   })
 
-  const formatRole = (role: SellerRole | null) => {
-    if (!role) return "-"
+  const filteredSellers = useMemo(() => {
+    return sellers.filter((seller) => {
+      const search = searchInput.toLowerCase().trim()
 
-    return role
-      .replaceAll("_", " ")
-      .split(" ")
-      .map((word) => word[0]?.toUpperCase() + word.slice(1))
-      .join(" ")
-  }
+      const matchesSearch =
+        search === "" ||
+        seller.full_name.toLowerCase().includes(search) ||
+        (seller.email || "").toLowerCase().includes(search) ||
+        (seller.contact_no || "").toLowerCase().includes(search) ||
+        seller.seller_role.toLowerCase().includes(search) ||
+        seller.status.toLowerCase().includes(search) ||
+        (seller.parent_seller_name || "").toLowerCase().includes(search)
 
-  const formatDate = (date: string) => {
-    if (!date) return "-"
+      const matchesStatus =
+        statusFilter === "all" || seller.status === statusFilter
 
-    return date.slice(0, 10)
-  }
+      const matchesRole =
+        roleFilter === "all" || seller.seller_role === roleFilter
+
+      return matchesSearch && matchesStatus && matchesRole
+    })
+  }, [roleFilter, searchInput, sellers, statusFilter])
+
+  const paginatedSellers = paginateRows(filteredSellers, page, rowsPerPage)
+  const activeCount = sellers.filter((seller) => seller.status === "active").length
+  const managerCount = sellers.filter((seller) =>
+    ["broker_network_manager", "broker", "manager"].includes(
+      seller.seller_role
+    )
+  ).length
+  const linkedCount = sellers.filter((seller) => seller.linked_user_name).length
 
   const resetFilters = () => {
     setSearchInput("")
     setStatusFilter("all")
     setRoleFilter("all")
+    setPage(1)
   }
 
   const resetForm = () => {
@@ -252,10 +278,6 @@ const AccredittedSellers = () => {
   const openAddModal = () => {
     resetForm()
     setIsAddOpen(true)
-  }
-
-  const openEditModal = (seller: AccreditedSeller) => {
-    setEditSeller(seller)
   }
 
   const handleAddSeller = (e: FormEvent<HTMLFormElement>) => {
@@ -292,438 +314,340 @@ const AccredittedSellers = () => {
     })
   }
 
-  const filteredSellers = sellers.filter((seller) => {
-    const search = searchInput.toLowerCase().trim()
-
-    const matchesSearch =
-      search === "" ||
-      seller.full_name.toLowerCase().includes(search) ||
-      (seller.email || "").toLowerCase().includes(search) ||
-      (seller.contact_no || "").toLowerCase().includes(search) ||
-      seller.seller_role.toLowerCase().includes(search) ||
-      seller.status.toLowerCase().includes(search) ||
-      (seller.parent_seller_name || "").toLowerCase().includes(search)
-
-    const matchesStatus =
-      statusFilter === "all" || seller.status === statusFilter
-
-    const matchesRole =
-      roleFilter === "all" || seller.seller_role === roleFilter
-
-    return matchesSearch && matchesStatus && matchesRole
-  })
-
   if (isLoading) {
-    return <p className="p-4">Loading accredited sellers...</p>
+    return <LoadingState label="Loading accredited sellers..." />
   }
 
   if (error) {
-    return <p className="p-4">Failed to load accredited sellers</p>
+    return <Alert title="Failed to load accredited sellers" variant="error" />
   }
 
   return (
-    <div className="p-4">
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold">Accredited Sellers</h1>
-        <p className="text-sm text-gray-600">
-          Seller hierarchy records from MySQL
-        </p>
+    <div className="p-4 sm:p-6">
+      <PageHeader
+        icon={<FiUsers />}
+        title="Accredited Sellers"
+        subtitle="Live seller hierarchy records from MySQL"
+        actions={
+          <Button icon={<FiUserPlus />} onClick={openAddModal} variant="primary">
+            Add Seller
+          </Button>
+        }
+      />
+
+      <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-4">
+        <StatCard label="Total Sellers" value={formatNumber(sellers.length)} />
+        <StatCard label="Active Sellers" value={formatNumber(activeCount)} />
+        <StatCard label="Leadership Roles" value={formatNumber(managerCount)} />
+        <StatCard label="Linked Users" value={formatNumber(linkedCount)} />
       </div>
 
-      <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <button
-          onClick={openAddModal}
-          className="w-fit border border-black px-4 py-2 hover:bg-gray-200"
+      <div className="mb-4 grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_180px_220px_auto]">
+        <Input
+          icon={<FiSearch />}
+          placeholder="Search seller, role, parent, contact, or email..."
+          value={searchInput}
+          onChange={(e) => {
+            setSearchInput(e.target.value)
+            setPage(1)
+          }}
+        />
+        <Select
+          value={statusFilter}
+          onChange={(e) => {
+            setStatusFilter(e.target.value)
+            setPage(1)
+          }}
         >
-          Add Seller
-        </button>
-
-        <div className="flex flex-col gap-2 md:flex-row">
-          <input
-            type="text"
-            placeholder="Search status, seller, role, parent, contact, email..."
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            className="border border-black px-3 py-2 md:w-96"
-          />
-
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="border border-black px-3 py-2"
-          >
-            <option value="all">All Status</option>
-            <option value="active">Active</option>
-            <option value="inactive">Inactive</option>
-          </select>
-
-          <select
-            value={roleFilter}
-            onChange={(e) => setRoleFilter(e.target.value)}
-            className="border border-black px-3 py-2"
-          >
-            <option value="all">All Roles</option>
-            <option value="broker_network_manager">
-              Broker Network Manager
+          <option value="all">All Status</option>
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+        </Select>
+        <Select
+          value={roleFilter}
+          onChange={(e) => {
+            setRoleFilter(e.target.value)
+            setPage(1)
+          }}
+        >
+          <option value="all">All Roles</option>
+          {sellerRoles.map((role) => (
+            <option key={role} value={role}>
+              {formatText(role)}
             </option>
-            <option value="broker">Broker</option>
-            <option value="manager">Manager</option>
-            <option value="agent">Agent</option>
-          </select>
-
-          <button
-            onClick={resetFilters}
-            className="border border-black px-4 py-2 hover:bg-gray-200"
-          >
-            Reset
-          </button>
-        </div>
+          ))}
+        </Select>
+        <Button icon={<FiRefreshCw />} onClick={resetFilters}>
+          Reset
+        </Button>
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full border border-black text-sm">
-          <thead>
-            <tr className="border-b border-black">
-              <th className="border-r border-black px-4 py-2 text-left">
-                Status ↕
+      <TableContainer>
+        <table className="min-w-full divide-y divide-slate-200 text-sm">
+          <thead className="bg-slate-50">
+            <tr>
+              <th className="px-4 py-3 text-left font-semibold text-slate-600">
+                Status
               </th>
-              <th className="border-r border-black px-4 py-2 text-left">
-                Name of Seller ↕
+              <th className="px-4 py-3 text-left font-semibold text-slate-600">
+                Name of Seller
               </th>
-              <th className="border-r border-black px-4 py-2 text-left">
-                Seller Role ↕
+              <th className="px-4 py-3 text-left font-semibold text-slate-600">
+                Seller Role
               </th>
-              <th className="border-r border-black px-4 py-2 text-left">
-                Reports Under ↕
+              <th className="px-4 py-3 text-left font-semibold text-slate-600">
+                Reports Under
               </th>
-              <th className="border-r border-black px-4 py-2 text-left">
-                Linked User ↕
+              <th className="px-4 py-3 text-left font-semibold text-slate-600">
+                Linked User
               </th>
-              <th className="border-r border-black px-4 py-2 text-left">
-                Accreditation Date ↕
+              <th className="px-4 py-3 text-left font-semibold text-slate-600">
+                Accreditation Date
               </th>
-              <th className="border-r border-black px-4 py-2 text-left">
-                Contact No. ↕
+              <th className="px-4 py-3 text-left font-semibold text-slate-600">
+                Contact No.
               </th>
-              <th className="border-r border-black px-4 py-2 text-left">
-                Email ↕
+              <th className="px-4 py-3 text-left font-semibold text-slate-600">
+                Email
               </th>
-              <th className="px-4 py-2 text-left">Actions ↕</th>
+              <th className="px-4 py-3 text-left font-semibold text-slate-600">
+                Actions
+              </th>
             </tr>
           </thead>
-
-          <tbody>
-            {filteredSellers.map((seller) => (
-              <tr key={seller.id} className="border-b border-black">
-                <td className="border-r border-black px-4 py-2 uppercase">
-                  {seller.status}
+          <tbody className="divide-y divide-slate-100 bg-white">
+            {paginatedSellers.map((seller) => (
+              <tr key={seller.id} className="hover:bg-slate-50">
+                <td className="px-4 py-3">
+                  <StatusBadge status={seller.status} />
                 </td>
-
-                <td className="border-r border-black px-4 py-2">
+                <td className="px-4 py-3 font-semibold text-slate-900">
                   {seller.full_name}
                 </td>
-
-                <td className="border-r border-black px-4 py-2">
-                  {formatRole(seller.seller_role)}
+                <td className="px-4 py-3 text-slate-600">
+                  {formatText(seller.seller_role)}
                 </td>
-
-                <td className="border-r border-black px-4 py-2">
+                <td className="px-4 py-3 text-slate-600">
                   {seller.parent_seller_name || "-"}
                 </td>
-
-                <td className="border-r border-black px-4 py-2">
+                <td className="px-4 py-3 text-slate-600">
                   {seller.linked_user_name || "-"}
                 </td>
-
-                <td className="border-r border-black px-4 py-2">
+                <td className="px-4 py-3 text-slate-600">
                   {formatDate(seller.created_at)}
                 </td>
-
-                <td className="border-r border-black px-4 py-2">
+                <td className="px-4 py-3 text-slate-600">
                   {seller.contact_no || "-"}
                 </td>
-
-                <td className="border-r border-black px-4 py-2">
+                <td className="px-4 py-3 text-slate-600">
                   {seller.email || "-"}
                 </td>
-
-                <td className="px-4 py-2">
-                  <button
-                    onClick={() => openEditModal(seller)}
-                    className="border border-black px-3 py-1 hover:bg-gray-200"
+                <td className="px-4 py-3">
+                  <Button
+                    icon={<FiEdit2 />}
+                    onClick={() => setEditSeller(seller)}
+                    variant="secondary"
                   >
                     Edit
-                  </button>
+                  </Button>
                 </td>
               </tr>
             ))}
-
-            {filteredSellers.length === 0 && (
-              <tr>
-                <td colSpan={9} className="px-4 py-6 text-center text-gray-600">
-                  No accredited sellers found
-                </td>
-              </tr>
-            )}
           </tbody>
         </table>
+        {filteredSellers.length === 0 ? (
+          <EmptyState
+            title="No accredited sellers found"
+            description="Try clearing filters or adding a seller."
+          />
+        ) : null}
+      </TableContainer>
+
+      <Pagination
+        page={page}
+        rowsPerPage={rowsPerPage}
+        totalRows={filteredSellers.length}
+        onPageChange={setPage}
+        onRowsPerPageChange={setRowsPerPage}
+      />
+
+      {isAddOpen ? (
+        <Modal
+          title="Add Seller"
+          onClose={() => {
+            resetForm()
+            setIsAddOpen(false)
+          }}
+        >
+          <SellerForm
+            error={
+              createSellerMutation.error instanceof Error
+                ? createSellerMutation.error.message
+                : ""
+            }
+            isPending={createSellerMutation.isPending}
+            onCancel={() => {
+              resetForm()
+              setIsAddOpen(false)
+            }}
+            onSubmit={handleAddSeller}
+            parentOptions={addPossibleParents}
+            sellerData={formData}
+            setSellerData={setFormData}
+            submitLabel="Save Seller"
+          />
+        </Modal>
+      ) : null}
+
+      {editSeller ? (
+        <Modal title="Edit Seller" onClose={() => setEditSeller(null)}>
+          <SellerForm
+            error={
+              updateSellerMutation.error instanceof Error
+                ? updateSellerMutation.error.message
+                : ""
+            }
+            isPending={updateSellerMutation.isPending}
+            onCancel={() => setEditSeller(null)}
+            onSubmit={handleUpdateSeller}
+            parentOptions={editPossibleParents}
+            sellerData={{
+              user_id: editSeller.user_id,
+              full_name: editSeller.full_name,
+              email: editSeller.email || "",
+              contact_no: editSeller.contact_no || "",
+              seller_role: editSeller.seller_role,
+              parent_seller_id: editSeller.parent_seller_id,
+              status: editSeller.status,
+            }}
+            setSellerData={(nextData) =>
+              setEditSeller({
+                ...editSeller,
+                user_id: nextData.user_id,
+                full_name: nextData.full_name,
+                email: nextData.email,
+                contact_no: nextData.contact_no,
+                seller_role: nextData.seller_role,
+                parent_seller_id: nextData.parent_seller_id,
+                status: nextData.status,
+              })
+            }
+            submitLabel="Save Changes"
+          />
+        </Modal>
+      ) : null}
+    </div>
+  )
+}
+
+type SellerFormProps = {
+  error: string
+  isPending: boolean
+  onCancel: () => void
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void
+  parentOptions: PossibleParentSeller[]
+  sellerData: SellerFormData
+  setSellerData: (sellerData: SellerFormData) => void
+  submitLabel: string
+}
+
+const SellerForm = ({
+  error,
+  isPending,
+  onCancel,
+  onSubmit,
+  parentOptions,
+  sellerData,
+  setSellerData,
+  submitLabel,
+}: SellerFormProps) => {
+  return (
+    <form onSubmit={onSubmit} className="space-y-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <Input
+          label="Name of Seller"
+          value={sellerData.full_name}
+          onChange={(e) =>
+            setSellerData({ ...sellerData, full_name: e.target.value })
+          }
+          required
+        />
+        <Select
+          label="Status"
+          value={sellerData.status}
+          onChange={(e) =>
+            setSellerData({
+              ...sellerData,
+              status: e.target.value as SellerStatus,
+            })
+          }
+        >
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+        </Select>
+        <Select
+          label="Seller Role"
+          value={sellerData.seller_role}
+          onChange={(e) =>
+            setSellerData({
+              ...sellerData,
+              seller_role: e.target.value as SellerRole,
+              parent_seller_id: null,
+            })
+          }
+        >
+          {sellerRoles.map((role) => (
+            <option key={role} value={role}>
+              {formatText(role)}
+            </option>
+          ))}
+        </Select>
+        {sellerData.seller_role !== "broker_network_manager" ? (
+          <Select
+            label="Reports Under"
+            value={sellerData.parent_seller_id ?? ""}
+            onChange={(e) =>
+              setSellerData({
+                ...sellerData,
+                parent_seller_id: e.target.value ? Number(e.target.value) : null,
+              })
+            }
+            required
+          >
+            <option value="">Select reports under</option>
+            {parentOptions.map((seller) => (
+              <option key={seller.id} value={seller.id}>
+                {seller.full_name} - {formatText(seller.seller_role)}
+              </option>
+            ))}
+          </Select>
+        ) : null}
+        <Input
+          label="Contact No."
+          value={sellerData.contact_no}
+          onChange={(e) =>
+            setSellerData({ ...sellerData, contact_no: e.target.value })
+          }
+        />
+        <Input
+          label="Email"
+          type="email"
+          value={sellerData.email}
+          onChange={(e) =>
+            setSellerData({ ...sellerData, email: e.target.value })
+          }
+        />
       </div>
 
-      {isAddOpen && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-lg border border-black bg-white p-4">
-            <h2 className="mb-4 text-2xl font-bold">Add Seller</h2>
+      {error ? <Alert title={error} variant="error" /> : null}
 
-            <form onSubmit={handleAddSeller} className="flex flex-col gap-3">
-              <select
-                value={formData.status}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    status: e.target.value as SellerStatus,
-                  })
-                }
-                className="border border-black px-3 py-2"
-              >
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
-              </select>
-
-              <input
-                type="text"
-                placeholder="Name of seller"
-                value={formData.full_name}
-                onChange={(e) =>
-                  setFormData({ ...formData, full_name: e.target.value })
-                }
-                className="border border-black px-3 py-2"
-                required
-              />
-
-              <select
-                value={formData.seller_role}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    seller_role: e.target.value as SellerRole,
-                    parent_seller_id: null,
-                  })
-                }
-                className="border border-black px-3 py-2"
-              >
-                <option value="broker_network_manager">
-                  Broker Network Manager
-                </option>
-                <option value="broker">Broker</option>
-                <option value="manager">Manager</option>
-                <option value="agent">Agent</option>
-              </select>
-
-              {formData.seller_role !== "broker_network_manager" && (
-                <select
-                  value={formData.parent_seller_id ?? ""}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      parent_seller_id: e.target.value
-                        ? Number(e.target.value)
-                        : null,
-                    })
-                  }
-                  className="border border-black px-3 py-2"
-                  required
-                >
-                  <option value="">Select reports under</option>
-
-                  {addPossibleParents.map((seller) => (
-                    <option key={seller.id} value={seller.id}>
-                      {seller.full_name} - {formatRole(seller.seller_role)}
-                    </option>
-                  ))}
-                </select>
-              )}
-
-              <input
-                type="text"
-                placeholder="Contact no."
-                value={formData.contact_no}
-                onChange={(e) =>
-                  setFormData({ ...formData, contact_no: e.target.value })
-                }
-                className="border border-black px-3 py-2"
-              />
-
-              <input
-                type="email"
-                placeholder="Email"
-                value={formData.email}
-                onChange={(e) =>
-                  setFormData({ ...formData, email: e.target.value })
-                }
-                className="border border-black px-3 py-2"
-              />
-
-              {createSellerMutation.isError && (
-                <p className="border border-black px-4 py-2 text-red-600">
-                  {createSellerMutation.error.message}
-                </p>
-              )}
-
-              <div className="mt-2 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    resetForm()
-                    setIsAddOpen(false)
-                  }}
-                  className="border border-black px-4 py-2 hover:bg-gray-200"
-                >
-                  Cancel
-                </button>
-
-                <button
-                  type="submit"
-                  disabled={createSellerMutation.isPending}
-                  className="border border-black px-4 py-2 hover:bg-gray-200 disabled:opacity-50"
-                >
-                  {createSellerMutation.isPending ? "Saving..." : "Save Seller"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {editSeller && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-lg border border-black bg-white p-4">
-            <h2 className="mb-4 text-2xl font-bold">Edit Seller</h2>
-
-            <form onSubmit={handleUpdateSeller} className="flex flex-col gap-3">
-              <select
-                value={editSeller.status}
-                onChange={(e) =>
-                  setEditSeller({
-                    ...editSeller,
-                    status: e.target.value as SellerStatus,
-                  })
-                }
-                className="border border-black px-3 py-2"
-              >
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
-              </select>
-
-              <input
-                type="text"
-                value={editSeller.full_name}
-                onChange={(e) =>
-                  setEditSeller({
-                    ...editSeller,
-                    full_name: e.target.value,
-                  })
-                }
-                className="border border-black px-3 py-2"
-                required
-              />
-
-              <select
-                value={editSeller.seller_role}
-                onChange={(e) =>
-                  setEditSeller({
-                    ...editSeller,
-                    seller_role: e.target.value as SellerRole,
-                    parent_seller_id: null,
-                  })
-                }
-                className="border border-black px-3 py-2"
-              >
-                <option value="broker_network_manager">
-                  Broker Network Manager
-                </option>
-                <option value="broker">Broker</option>
-                <option value="manager">Manager</option>
-                <option value="agent">Agent</option>
-              </select>
-
-              {editSeller.seller_role !== "broker_network_manager" && (
-                <select
-                  value={editSeller.parent_seller_id ?? ""}
-                  onChange={(e) =>
-                    setEditSeller({
-                      ...editSeller,
-                      parent_seller_id: e.target.value
-                        ? Number(e.target.value)
-                        : null,
-                    })
-                  }
-                  className="border border-black px-3 py-2"
-                  required
-                >
-                  <option value="">Select reports under</option>
-
-                  {editPossibleParents.map((seller) => (
-                    <option key={seller.id} value={seller.id}>
-                      {seller.full_name} - {formatRole(seller.seller_role)}
-                    </option>
-                  ))}
-                </select>
-              )}
-
-              <input
-                type="text"
-                value={editSeller.contact_no || ""}
-                onChange={(e) =>
-                  setEditSeller({
-                    ...editSeller,
-                    contact_no: e.target.value,
-                  })
-                }
-                className="border border-black px-3 py-2"
-              />
-
-              <input
-                type="email"
-                value={editSeller.email || ""}
-                onChange={(e) =>
-                  setEditSeller({
-                    ...editSeller,
-                    email: e.target.value,
-                  })
-                }
-                className="border border-black px-3 py-2"
-              />
-
-              {updateSellerMutation.isError && (
-                <p className="border border-black px-4 py-2 text-red-600">
-                  {updateSellerMutation.error.message}
-                </p>
-              )}
-
-              <div className="mt-2 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setEditSeller(null)}
-                  className="border border-black px-4 py-2 hover:bg-gray-200"
-                >
-                  Cancel
-                </button>
-
-                <button
-                  type="submit"
-                  disabled={updateSellerMutation.isPending}
-                  className="border border-black px-4 py-2 hover:bg-gray-200 disabled:opacity-50"
-                >
-                  {updateSellerMutation.isPending
-                    ? "Saving..."
-                    : "Save Changes"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
+      <div className="flex justify-end gap-2">
+        <Button onClick={onCancel}>Cancel</Button>
+        <Button disabled={isPending} type="submit" variant="primary">
+          {isPending ? "Saving..." : submitLabel}
+        </Button>
+      </div>
+    </form>
   )
 }
 

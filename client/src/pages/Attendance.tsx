@@ -1,7 +1,27 @@
-import { useState, type FormEvent } from "react"
+import { useMemo, useState, type FormEvent } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api/v1"
+import {
+  FiCalendar,
+  FiEdit2,
+  FiPlus,
+  FiRefreshCw,
+  FiSearch,
+} from "react-icons/fi"
+import Alert from "../components/ui/Alert"
+import Button from "../components/ui/Button"
+import EmptyState from "../components/ui/EmptyState"
+import Input from "../components/ui/Input"
+import LoadingState from "../components/ui/LoadingState"
+import Modal from "../components/ui/Modal"
+import PageHeader from "../components/ui/PageHeader"
+import Pagination from "../components/ui/Pagination"
+import Select from "../components/ui/Select"
+import StatCard from "../components/ui/StatCard"
+import StatusBadge from "../components/ui/StatusBadge"
+import TableContainer from "../components/ui/TableContainer"
+import { API_URL, getErrorMessage } from "../utils/api"
+import { formatDate, formatNumber, formatTime, getLocalDate } from "../utils/formatters"
+import { paginateRows } from "../utils/pagination"
 
 type Employee = {
   id: number
@@ -27,7 +47,14 @@ type AttendanceRecord = {
   schedule_time_out: string | null
   break_minutes: number
   work_hours: number | null
-  attendance_status: "no_time_in" | "late" | "on_time" | "absent" | "rest_day" | "offset" | string
+  attendance_status:
+    | "no_time_in"
+    | "late"
+    | "on_time"
+    | "absent"
+    | "rest_day"
+    | "offset"
+    | string
   created_at: string
   updated_at: string
 }
@@ -51,40 +78,15 @@ type EmployeesResponse = {
   employees: Employee[]
 }
 
-const getLocalDate = () => {
-  const date = new Date()
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, "0")
-  const day = String(date.getDate()).padStart(2, "0")
-
-  return `${year}-${month}-${day}`
-}
-
-const today = getLocalDate()
-
 const emptyFormData: AttendanceFormData = {
   employee_id: 0,
-  attendance_date: today,
+  attendance_date: getLocalDate(),
   day_status: "present",
   time_in: "",
   time_out: "",
   schedule_time_in: "08:00",
   schedule_time_out: "17:00",
   break_minutes: 60,
-}
-
-const getErrorMessage = async (response: Response) => {
-  try {
-    const data = await response.json()
-
-    if (typeof data.message === "string") {
-      return data.message
-    }
-
-    return "Something went wrong"
-  } catch {
-    return "Something went wrong"
-  }
 }
 
 const fetchAttendance = async (): Promise<AttendanceRecord[]> => {
@@ -153,12 +155,29 @@ const updateAttendance = async ({
   return res.json()
 }
 
+const isNonWorkingStatus = (status: string) => {
+  return status === "absent" || status === "rest_day" || status === "offset"
+}
+
+const getWorkHoursLabel = (hours: number | null) => {
+  if (hours === null || hours === undefined) return "-"
+
+  const wholeHours = Math.floor(hours)
+  const minutes = Math.round((hours - wholeHours) * 60)
+
+  if (minutes === 0) return `${wholeHours}h`
+
+  return `${wholeHours}h ${minutes}m`
+}
+
 const Attendance = () => {
   const queryClient = useQueryClient()
 
   const [searchInput, setSearchInput] = useState("")
   const [employeeFilter, setEmployeeFilter] = useState("all")
   const [dateFilter, setDateFilter] = useState("")
+  const [page, setPage] = useState(1)
+  const [rowsPerPage, setRowsPerPage] = useState(10)
 
   const [isAddOpen, setIsAddOpen] = useState(false)
   const [editAttendance, setEditAttendance] =
@@ -175,7 +194,7 @@ const Attendance = () => {
   })
 
   const { data: employees = [] } = useQuery<Employee[]>({
-    queryKey: ["employees"],
+    queryKey: ["employees", "active"],
     queryFn: fetchEmployees,
   })
 
@@ -214,61 +233,8 @@ const Attendance = () => {
   }
 
   const openAddModal = () => {
-    setFormData({
-      ...emptyFormData,
-      attendance_date: getLocalDate(),
-      employee_id: employees[0]?.id || 0,
-    })
+    resetForm()
     setIsAddOpen(true)
-  }
-
-  const formatDate = (date: string | null) => {
-    if (!date) return "-"
-
-    if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-      return date
-    }
-
-    const parsedDate = new Date(date)
-
-    if (Number.isNaN(parsedDate.getTime())) {
-      return String(date).slice(0, 10)
-    }
-
-    const year = parsedDate.getFullYear()
-    const month = String(parsedDate.getMonth() + 1).padStart(2, "0")
-    const day = String(parsedDate.getDate()).padStart(2, "0")
-
-    return `${year}-${month}-${day}`
-  }
-
-  const formatTime = (time: string | null) => {
-    if (!time) return "-"
-
-    return String(time).slice(0, 5)
-  }
-
-  const formatStatus = (status: string) => {
-    return status
-      .replaceAll("_", " ")
-      .split(" ")
-      .map((word) => word[0]?.toUpperCase() + word.slice(1))
-      .join(" ")
-  }
-
-  const formatWorkHours = (hours: number | null) => {
-    if (hours === null || hours === undefined) return "-"
-
-    const wholeHours = Math.floor(hours)
-    const minutes = Math.round((hours - wholeHours) * 60)
-
-    if (minutes === 0) return `${wholeHours}h`
-
-    return `${wholeHours}h ${minutes}m`
-  }
-
-  const isNonWorkingStatus = (status: string) => {
-    return status === "absent" || status === "rest_day" || status === "offset"
   }
 
   const handleAddAttendance = (e: FormEvent<HTMLFormElement>) => {
@@ -322,371 +288,266 @@ const Attendance = () => {
     setSearchInput("")
     setEmployeeFilter("all")
     setDateFilter("")
+    setPage(1)
   }
 
-  const filteredAttendance = attendance.filter((record) => {
-    const search = searchInput.toLowerCase().trim()
+  const filteredAttendance = useMemo(() => {
+    return attendance.filter((record) => {
+      const search = searchInput.toLowerCase().trim()
 
-    const matchesSearch =
-      search === "" ||
-      record.employee_name.toLowerCase().includes(search) ||
-      (record.position || "").toLowerCase().includes(search) ||
-      formatDate(record.attendance_date).toLowerCase().includes(search) ||
-      formatTime(record.time_in).toLowerCase().includes(search) ||
-      formatTime(record.time_out).toLowerCase().includes(search) ||
-      record.attendance_status.toLowerCase().includes(search) ||
-      record.day_status.toLowerCase().includes(search)
+      const matchesSearch =
+        search === "" ||
+        record.employee_name.toLowerCase().includes(search) ||
+        (record.position || "").toLowerCase().includes(search) ||
+        formatDate(record.attendance_date).toLowerCase().includes(search) ||
+        formatTime(record.time_in).toLowerCase().includes(search) ||
+        formatTime(record.time_out).toLowerCase().includes(search) ||
+        record.attendance_status.toLowerCase().includes(search) ||
+        record.day_status.toLowerCase().includes(search)
 
-    const matchesEmployee =
-      employeeFilter === "all" || String(record.employee_id) === employeeFilter
+      const matchesEmployee =
+        employeeFilter === "all" || String(record.employee_id) === employeeFilter
 
-    const matchesDate =
-      dateFilter === "" || formatDate(record.attendance_date) === dateFilter
+      const matchesDate =
+        dateFilter === "" || formatDate(record.attendance_date) === dateFilter
 
-    return matchesSearch && matchesEmployee && matchesDate
-  })
+      return matchesSearch && matchesEmployee && matchesDate
+    })
+  }, [attendance, dateFilter, employeeFilter, searchInput])
+
+  const paginatedAttendance = paginateRows(filteredAttendance, page, rowsPerPage)
+  const presentCount = attendance.filter(
+    (record) => record.day_status === "present"
+  ).length
+  const lateCount = attendance.filter(
+    (record) => record.attendance_status === "late"
+  ).length
+  const absentCount = attendance.filter(
+    (record) => record.day_status === "absent"
+  ).length
 
   if (isLoading) {
-    return <p className="p-4">Loading attendance...</p>
+    return <LoadingState label="Loading attendance..." />
   }
 
   if (error) {
-    return <p className="p-4">Failed to load attendance</p>
+    return <Alert title="Failed to load attendance" variant="error" />
   }
 
   return (
-    <div className="p-4">
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold">Attendance</h1>
-        <p className="text-sm text-gray-600">
-          Record employee time in, time out, and attendance date
-        </p>
+    <div className="p-4 sm:p-6">
+      <PageHeader
+        icon={<FiCalendar />}
+        title="Attendance"
+        subtitle="Record employee time in, time out, schedules, and attendance date"
+        actions={
+          <Button icon={<FiPlus />} onClick={openAddModal} variant="primary">
+            Add Attendance
+          </Button>
+        }
+      />
+
+      <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-4">
+        <StatCard label="Total Records" value={formatNumber(attendance.length)} />
+        <StatCard label="Present Days" value={formatNumber(presentCount)} />
+        <StatCard label="Late Records" value={formatNumber(lateCount)} />
+        <StatCard label="Absent Days" value={formatNumber(absentCount)} />
       </div>
 
-      <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <button
-          onClick={openAddModal}
-          className="w-fit border border-black px-4 py-2 hover:bg-gray-200"
+      <div className="mb-4 grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1fr)_220px_180px_auto]">
+        <Input
+          icon={<FiSearch />}
+          placeholder="Search employee, position, date, time, or status..."
+          value={searchInput}
+          onChange={(e) => {
+            setSearchInput(e.target.value)
+            setPage(1)
+          }}
+        />
+        <Select
+          value={employeeFilter}
+          onChange={(e) => {
+            setEmployeeFilter(e.target.value)
+            setPage(1)
+          }}
         >
-          Add Attendance
-        </button>
-
-        <div className="flex flex-col gap-2 md:flex-row">
-          <input
-            type="text"
-            placeholder="Search employee, position, date, time, status..."
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            className="border border-black px-3 py-2 md:w-96"
-          />
-
-          <select
-            value={employeeFilter}
-            onChange={(e) => setEmployeeFilter(e.target.value)}
-            className="border border-black px-3 py-2"
-          >
-            <option value="all">All Employees</option>
-            {employees.map((employee) => (
-              <option key={employee.id} value={employee.id}>
-                {employee.full_name}
-              </option>
-            ))}
-          </select>
-
-          <input
-            type="date"
-            value={dateFilter}
-            onChange={(e) => setDateFilter(e.target.value)}
-            className="border border-black px-3 py-2"
-          />
-
-          <button
-            onClick={resetFilters}
-            className="border border-black px-4 py-2 hover:bg-gray-200"
-          >
-            Reset
-          </button>
-        </div>
+          <option value="all">All Employees</option>
+          {employees.map((employee) => (
+            <option key={employee.id} value={employee.id}>
+              {employee.full_name}
+            </option>
+          ))}
+        </Select>
+        <Input
+          type="date"
+          value={dateFilter}
+          onChange={(e) => {
+            setDateFilter(e.target.value)
+            setPage(1)
+          }}
+        />
+        <Button icon={<FiRefreshCw />} onClick={resetFilters}>
+          Reset
+        </Button>
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full border border-black text-sm">
-          <thead>
-            <tr className="border-b border-black">
-              <th className="border-r border-black px-4 py-2 text-left">
-                Employee ↕
+      <TableContainer>
+        <table className="min-w-full divide-y divide-slate-200 text-sm">
+          <thead className="bg-slate-50">
+            <tr>
+              <th className="px-4 py-3 text-left font-semibold text-slate-600">
+                Employee
               </th>
-              <th className="border-r border-black px-4 py-2 text-left">
-                Position ↕
+              <th className="px-4 py-3 text-left font-semibold text-slate-600">
+                Position
               </th>
-              <th className="border-r border-black px-4 py-2 text-left">
-                Date ↕
+              <th className="px-4 py-3 text-left font-semibold text-slate-600">
+                Date
               </th>
-              <th className="border-r border-black px-4 py-2 text-left">
-                Day Status ↕
+              <th className="px-4 py-3 text-left font-semibold text-slate-600">
+                Day Status
               </th>
-              <th className="border-r border-black px-4 py-2 text-left">
-                Time In ↕
+              <th className="px-4 py-3 text-left font-semibold text-slate-600">
+                Time In
               </th>
-              <th className="border-r border-black px-4 py-2 text-left">
-                Time Out ↕
+              <th className="px-4 py-3 text-left font-semibold text-slate-600">
+                Time Out
               </th>
-              <th className="border-r border-black px-4 py-2 text-left">
-                Schedule In ↕
+              <th className="px-4 py-3 text-left font-semibold text-slate-600">
+                Schedule
               </th>
-              <th className="border-r border-black px-4 py-2 text-left">
-                Schedule Out ↕
+              <th className="px-4 py-3 text-left font-semibold text-slate-600">
+                Break
               </th>
-              <th className="border-r border-black px-4 py-2 text-left">
-                Break ↕
+              <th className="px-4 py-3 text-left font-semibold text-slate-600">
+                Work Hours
               </th>
-              <th className="border-r border-black px-4 py-2 text-left">
-                Work Hours ↕
+              <th className="px-4 py-3 text-left font-semibold text-slate-600">
+                Status
               </th>
-              <th className="border-r border-black px-4 py-2 text-left">
-                Status ↕
+              <th className="px-4 py-3 text-left font-semibold text-slate-600">
+                Actions
               </th>
-              <th className="px-4 py-2 text-left">Actions ↕</th>
             </tr>
           </thead>
-
-          <tbody>
-            {filteredAttendance.map((record) => (
-              <tr key={record.id} className="border-b border-black">
-                <td className="border-r border-black px-4 py-2">
+          <tbody className="divide-y divide-slate-100 bg-white">
+            {paginatedAttendance.map((record) => (
+              <tr key={record.id} className="hover:bg-slate-50">
+                <td className="px-4 py-3 font-semibold text-slate-900">
                   {record.employee_name}
                 </td>
-
-                <td className="border-r border-black px-4 py-2">
+                <td className="px-4 py-3 text-slate-600">
                   {record.position || "-"}
                 </td>
-
-                <td className="border-r border-black px-4 py-2">
+                <td className="px-4 py-3 text-slate-600">
                   {formatDate(record.attendance_date)}
                 </td>
-
-                <td className="border-r border-black px-4 py-2">
-                  {formatStatus(record.day_status)}
+                <td className="px-4 py-3">
+                  <StatusBadge status={record.day_status} />
                 </td>
-
-                <td className="border-r border-black px-4 py-2">
+                <td className="px-4 py-3 text-slate-600">
                   {formatTime(record.time_in)}
                 </td>
-
-                <td className="border-r border-black px-4 py-2">
+                <td className="px-4 py-3 text-slate-600">
                   {formatTime(record.time_out)}
                 </td>
-
-                <td className="border-r border-black px-4 py-2">
-                  {formatTime(record.schedule_time_in)}
-                </td>
-
-                <td className="border-r border-black px-4 py-2">
+                <td className="px-4 py-3 text-slate-600">
+                  {formatTime(record.schedule_time_in)} -{" "}
                   {formatTime(record.schedule_time_out)}
                 </td>
-
-                <td className="border-r border-black px-4 py-2">
+                <td className="px-4 py-3 text-slate-600">
                   {record.break_minutes} mins
                 </td>
-
-                <td className="border-r border-black px-4 py-2">
-                  {formatWorkHours(record.work_hours)}
+                <td className="px-4 py-3 text-slate-600">
+                  {getWorkHoursLabel(record.work_hours)}
                 </td>
-
-                <td className="border-r border-black px-4 py-2">
-                  {formatStatus(record.attendance_status)}
+                <td className="px-4 py-3">
+                  <StatusBadge status={record.attendance_status} />
                 </td>
-
-                <td className="px-4 py-2">
-                  <button
+                <td className="px-4 py-3">
+                  <Button
+                    icon={<FiEdit2 />}
                     onClick={() => setEditAttendance(record)}
-                    className="border border-black px-3 py-1 hover:bg-gray-200"
                   >
                     Edit
-                  </button>
+                  </Button>
                 </td>
               </tr>
             ))}
-
-            {filteredAttendance.length === 0 && (
-              <tr>
-                <td colSpan={12} className="px-4 py-6 text-center text-gray-600">
-                  No attendance records found
-                </td>
-              </tr>
-            )}
           </tbody>
         </table>
-      </div>
+        {filteredAttendance.length === 0 ? (
+          <EmptyState
+            title="No attendance records found"
+            description="Try adjusting the filters or adding an attendance record."
+          />
+        ) : null}
+      </TableContainer>
 
-      {isAddOpen && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-lg border border-black bg-white p-4">
-            <h2 className="mb-4 text-2xl font-bold">Add Attendance</h2>
+      <Pagination
+        page={page}
+        rowsPerPage={rowsPerPage}
+        totalRows={filteredAttendance.length}
+        onPageChange={setPage}
+        onRowsPerPageChange={setRowsPerPage}
+      />
 
-            <form onSubmit={handleAddAttendance} className="flex flex-col gap-3">
-              <select
-                value={getFormEmployeeId()}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    employee_id: Number(e.target.value),
-                  })
-                }
-                className="border border-black px-3 py-2"
-                required
+      {isAddOpen ? (
+        <Modal
+          title="Add Attendance"
+          onClose={() => {
+            resetForm()
+            setIsAddOpen(false)
+          }}
+        >
+          <form onSubmit={handleAddAttendance} className="space-y-4">
+            <AttendanceFormFields
+              employees={employees}
+              formData={{
+                ...formData,
+                employee_id: getFormEmployeeId(),
+              }}
+              setFormData={setFormData}
+            />
+
+            {createAttendanceMutation.error instanceof Error ? (
+              <Alert
+                title={createAttendanceMutation.error.message}
+                variant="error"
+              />
+            ) : null}
+
+            <div className="flex justify-end gap-2">
+              <Button
+                onClick={() => {
+                  resetForm()
+                  setIsAddOpen(false)
+                }}
               >
-                {employees.length === 0 && (
-                  <option value={0}>No active employees available</option>
-                )}
-
-                {employees.map((employee) => (
-                  <option key={employee.id} value={employee.id}>
-                    {employee.full_name}
-                  </option>
-                ))}
-              </select>
-
-              <input
-                type="date"
-                value={formData.attendance_date}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    attendance_date: e.target.value,
-                  })
+                Cancel
+              </Button>
+              <Button
+                disabled={
+                  createAttendanceMutation.isPending || employees.length === 0
                 }
-                className="border border-black px-3 py-2"
-                required
-              />
-
-              <select
-                value={formData.day_status}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    day_status: e.target.value,
-                  })
-                }
-                className="border border-black px-3 py-2"
+                type="submit"
+                variant="primary"
               >
-                <option value="present">Present</option>
-                <option value="absent">Absent</option>
-                <option value="rest_day">Rest Day</option>
-                <option value="offset">Offset</option>
-              </select>
+                {createAttendanceMutation.isPending
+                  ? "Saving..."
+                  : "Save Attendance"}
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      ) : null}
 
-              {!isNonWorkingStatus(formData.day_status) && (
-                <>
-                  <input
-                    type="time"
-                    value={formData.time_in}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        time_in: e.target.value,
-                      })
-                    }
-                    className="border border-black px-3 py-2"
-                  />
-
-                  <input
-                    type="time"
-                    value={formData.time_out}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        time_out: e.target.value,
-                      })
-                    }
-                    className="border border-black px-3 py-2"
-                  />
-                </>
-              )}
-
-              <input
-                type="time"
-                value={formData.schedule_time_in}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    schedule_time_in: e.target.value,
-                  })
-                }
-                className="border border-black px-3 py-2"
-              />
-
-              <input
-                type="time"
-                value={formData.schedule_time_out}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    schedule_time_out: e.target.value,
-                  })
-                }
-                className="border border-black px-3 py-2"
-              />
-
-              <input
-                type="number"
-                min={0}
-                placeholder="Break minutes"
-                value={formData.break_minutes}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    break_minutes: Number(e.target.value),
-                  })
-                }
-                className="border border-black px-3 py-2"
-              />
-
-              {createAttendanceMutation.isError && (
-                <p className="border border-black px-4 py-2 text-red-600">
-                  {createAttendanceMutation.error.message}
-                </p>
-              )}
-
-              <div className="mt-2 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    resetForm()
-                    setIsAddOpen(false)
-                  }}
-                  className="border border-black px-4 py-2 hover:bg-gray-200"
-                >
-                  Cancel
-                </button>
-
-                <button
-                  type="submit"
-                  disabled={
-                    createAttendanceMutation.isPending || employees.length === 0
-                  }
-                  className="border border-black px-4 py-2 hover:bg-gray-200 disabled:opacity-50"
-                >
-                  {createAttendanceMutation.isPending
-                    ? "Saving..."
-                    : "Save Attendance"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {editAttendance && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-lg border border-black bg-white p-4">
-            <h2 className="mb-4 text-2xl font-bold">Edit Attendance</h2>
-
-            <form
-              onSubmit={handleUpdateAttendance}
-              className="flex flex-col gap-3"
-            >
-              <select
+      {editAttendance ? (
+        <Modal title="Edit Attendance" onClose={() => setEditAttendance(null)}>
+          <form onSubmit={handleUpdateAttendance} className="space-y-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <Select
+                label="Employee"
                 value={editAttendance.employee_id}
                 onChange={(e) =>
                   setEditAttendance({
@@ -694,7 +555,6 @@ const Attendance = () => {
                     employee_id: Number(e.target.value),
                   })
                 }
-                className="border border-black px-3 py-2"
                 required
               >
                 {employees.map((employee) => (
@@ -702,9 +562,9 @@ const Attendance = () => {
                     {employee.full_name}
                   </option>
                 ))}
-              </select>
-
-              <input
+              </Select>
+              <Input
+                label="Attendance Date"
                 type="date"
                 value={formatDate(editAttendance.attendance_date)}
                 onChange={(e) =>
@@ -713,11 +573,10 @@ const Attendance = () => {
                     attendance_date: e.target.value,
                   })
                 }
-                className="border border-black px-3 py-2"
                 required
               />
-
-              <select
+              <Select
+                label="Day Status"
                 value={editAttendance.day_status || "present"}
                 onChange={(e) =>
                   setEditAttendance({
@@ -725,17 +584,16 @@ const Attendance = () => {
                     day_status: e.target.value,
                   })
                 }
-                className="border border-black px-3 py-2"
               >
                 <option value="present">Present</option>
                 <option value="absent">Absent</option>
                 <option value="rest_day">Rest Day</option>
                 <option value="offset">Offset</option>
-              </select>
-
-              {!isNonWorkingStatus(editAttendance.day_status) && (
+              </Select>
+              {!isNonWorkingStatus(editAttendance.day_status) ? (
                 <>
-                  <input
+                  <Input
+                    label="Time In"
                     type="time"
                     value={
                       editAttendance.time_in
@@ -748,10 +606,9 @@ const Attendance = () => {
                         time_in: e.target.value,
                       })
                     }
-                    className="border border-black px-3 py-2"
                   />
-
-                  <input
+                  <Input
+                    label="Time Out"
                     type="time"
                     value={
                       editAttendance.time_out
@@ -764,12 +621,11 @@ const Attendance = () => {
                         time_out: e.target.value,
                       })
                     }
-                    className="border border-black px-3 py-2"
                   />
                 </>
-              )}
-
-              <input
+              ) : null}
+              <Input
+                label="Schedule Time In"
                 type="time"
                 value={
                   editAttendance.schedule_time_in
@@ -782,10 +638,9 @@ const Attendance = () => {
                     schedule_time_in: e.target.value,
                   })
                 }
-                className="border border-black px-3 py-2"
               />
-
-              <input
+              <Input
+                label="Schedule Time Out"
                 type="time"
                 value={
                   editAttendance.schedule_time_out
@@ -798,10 +653,9 @@ const Attendance = () => {
                     schedule_time_out: e.target.value,
                   })
                 }
-                className="border border-black px-3 py-2"
               />
-
-              <input
+              <Input
+                label="Break Minutes"
                 type="number"
                 min={0}
                 value={Number(editAttendance.break_minutes || 0)}
@@ -811,38 +665,155 @@ const Attendance = () => {
                     break_minutes: Number(e.target.value),
                   })
                 }
-                className="border border-black px-3 py-2"
               />
+            </div>
 
-              {updateAttendanceMutation.isError && (
-                <p className="border border-black px-4 py-2 text-red-600">
-                  {updateAttendanceMutation.error.message}
-                </p>
-              )}
+            {updateAttendanceMutation.error instanceof Error ? (
+              <Alert
+                title={updateAttendanceMutation.error.message}
+                variant="error"
+              />
+            ) : null}
 
-              <div className="mt-2 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setEditAttendance(null)}
-                  className="border border-black px-4 py-2 hover:bg-gray-200"
-                >
-                  Cancel
-                </button>
+            <div className="flex justify-end gap-2">
+              <Button onClick={() => setEditAttendance(null)}>Cancel</Button>
+              <Button
+                disabled={updateAttendanceMutation.isPending}
+                type="submit"
+                variant="primary"
+              >
+                {updateAttendanceMutation.isPending
+                  ? "Saving..."
+                  : "Save Changes"}
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      ) : null}
+    </div>
+  )
+}
 
-                <button
-                  type="submit"
-                  disabled={updateAttendanceMutation.isPending}
-                  className="border border-black px-4 py-2 hover:bg-gray-200 disabled:opacity-50"
-                >
-                  {updateAttendanceMutation.isPending
-                    ? "Saving..."
-                    : "Save Changes"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+type AttendanceFormFieldsProps = {
+  employees: Employee[]
+  formData: AttendanceFormData
+  setFormData: (formData: AttendanceFormData) => void
+}
+
+const AttendanceFormFields = ({
+  employees,
+  formData,
+  setFormData,
+}: AttendanceFormFieldsProps) => {
+  return (
+    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+      <Select
+        label="Employee"
+        value={formData.employee_id}
+        onChange={(e) =>
+          setFormData({
+            ...formData,
+            employee_id: Number(e.target.value),
+          })
+        }
+        required
+      >
+        {employees.length === 0 ? (
+          <option value={0}>No active employees available</option>
+        ) : null}
+        {employees.map((employee) => (
+          <option key={employee.id} value={employee.id}>
+            {employee.full_name}
+          </option>
+        ))}
+      </Select>
+      <Input
+        label="Attendance Date"
+        type="date"
+        value={formData.attendance_date}
+        onChange={(e) =>
+          setFormData({
+            ...formData,
+            attendance_date: e.target.value,
+          })
+        }
+        required
+      />
+      <Select
+        label="Day Status"
+        value={formData.day_status}
+        onChange={(e) =>
+          setFormData({
+            ...formData,
+            day_status: e.target.value,
+          })
+        }
+      >
+        <option value="present">Present</option>
+        <option value="absent">Absent</option>
+        <option value="rest_day">Rest Day</option>
+        <option value="offset">Offset</option>
+      </Select>
+      {!isNonWorkingStatus(formData.day_status) ? (
+        <>
+          <Input
+            label="Time In"
+            type="time"
+            value={formData.time_in}
+            onChange={(e) =>
+              setFormData({
+                ...formData,
+                time_in: e.target.value,
+              })
+            }
+          />
+          <Input
+            label="Time Out"
+            type="time"
+            value={formData.time_out}
+            onChange={(e) =>
+              setFormData({
+                ...formData,
+                time_out: e.target.value,
+              })
+            }
+          />
+        </>
+      ) : null}
+      <Input
+        label="Schedule Time In"
+        type="time"
+        value={formData.schedule_time_in}
+        onChange={(e) =>
+          setFormData({
+            ...formData,
+            schedule_time_in: e.target.value,
+          })
+        }
+      />
+      <Input
+        label="Schedule Time Out"
+        type="time"
+        value={formData.schedule_time_out}
+        onChange={(e) =>
+          setFormData({
+            ...formData,
+            schedule_time_out: e.target.value,
+          })
+        }
+      />
+      <Input
+        label="Break Minutes"
+        type="number"
+        min={0}
+        value={formData.break_minutes}
+        onChange={(e) =>
+          setFormData({
+            ...formData,
+            break_minutes: Number(e.target.value),
+          })
+        }
+      />
     </div>
   )
 }

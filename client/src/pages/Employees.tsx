@@ -1,8 +1,35 @@
-import { useState } from "react"
+import { useMemo, useState, type FormEvent } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import * as XLSX from "xlsx-js-style"
-
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api/v1"
+import {
+  FiDownload,
+  FiEdit2,
+  FiEye,
+  FiPlus,
+  FiRefreshCw,
+  FiSearch,
+  FiUsers,
+} from "react-icons/fi"
+import Alert from "../components/ui/Alert"
+import Button from "../components/ui/Button"
+import EmptyState from "../components/ui/EmptyState"
+import Input from "../components/ui/Input"
+import LoadingState from "../components/ui/LoadingState"
+import Modal from "../components/ui/Modal"
+import PageHeader from "../components/ui/PageHeader"
+import Pagination from "../components/ui/Pagination"
+import Select from "../components/ui/Select"
+import StatCard from "../components/ui/StatCard"
+import StatusBadge from "../components/ui/StatusBadge"
+import TableContainer from "../components/ui/TableContainer"
+import { API_URL, getErrorMessage } from "../utils/api"
+import {
+  formatMoney,
+  formatNumber,
+  formatTime,
+  getLocalDate,
+} from "../utils/formatters"
+import { paginateRows } from "../utils/pagination"
 
 type EmployeeStatus = "active" | "inactive" | string
 
@@ -89,15 +116,6 @@ const emptyFormData: EmployeeFormData = {
   rest_days: [],
 }
 
-const getLocalDate = () => {
-  const date = new Date()
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, "0")
-  const day = String(date.getDate()).padStart(2, "0")
-
-  return `${year}-${month}-${day}`
-}
-
 const getCurrentExportRange = () => {
   const today = new Date()
   const year = today.getFullYear()
@@ -117,20 +135,6 @@ const getCurrentExportRange = () => {
   return {
     start: formatLocal(startDate),
     end: formatLocal(endDate),
-  }
-}
-
-const getErrorMessage = async (response: Response) => {
-  try {
-    const data = await response.json()
-
-    if (typeof data.message === "string") {
-      return data.message
-    }
-
-    return "Something went wrong"
-  } catch {
-    return "Something went wrong"
   }
 }
 
@@ -224,13 +228,28 @@ const parseRestDays = (restDays: string | null) => {
     .filter(Boolean)
 }
 
+const formatDateValue = (date: string | null | undefined) => {
+  if (!date) return "-"
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return date
+  }
+
+  return String(date).slice(0, 10)
+}
+
+const formatRestDays = (restDays: string | null) => {
+  return restDays || "-"
+}
+
 const Employees = () => {
   const queryClient = useQueryClient()
-
   const defaultExportRange = getCurrentExportRange()
 
   const [searchInput, setSearchInput] = useState("")
   const [statusFilter, setStatusFilter] = useState("all")
+  const [page, setPage] = useState(1)
+  const [rowsPerPage, setRowsPerPage] = useState(10)
 
   const [isAddOpen, setIsAddOpen] = useState(false)
   const [editEmployee, setEditEmployee] = useState<Employee | null>(null)
@@ -285,63 +304,11 @@ const Employees = () => {
       queryClient.invalidateQueries({ queryKey: ["employees"] })
       queryClient.invalidateQueries({ queryKey: ["attendance"] })
       queryClient.invalidateQueries({
-        queryKey: [
-          "employee-attendance-summary",
-          viewMoreEmployee?.id,
-          exportStartDate,
-          exportEndDate,
-        ],
+        queryKey: ["employee-attendance-summary"],
       })
       setEditEmployee(null)
     },
   })
-
-  const formatMoney = (amount: number | string) => {
-    return new Intl.NumberFormat("en-PH", {
-      style: "currency",
-      currency: "PHP",
-    }).format(Number(amount || 0))
-  }
-
-  const formatDate = (date: string | null) => {
-    if (!date) return "-"
-
-    if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-      return date
-    }
-
-    const parsedDate = new Date(date)
-
-    if (Number.isNaN(parsedDate.getTime())) {
-      return String(date).slice(0, 10)
-    }
-
-    const year = parsedDate.getFullYear()
-    const month = String(parsedDate.getMonth() + 1).padStart(2, "0")
-    const day = String(parsedDate.getDate()).padStart(2, "0")
-
-    return `${year}-${month}-${day}`
-  }
-
-  const formatTime = (time: string | null) => {
-    if (!time) return "-"
-
-    return String(time).slice(0, 5)
-  }
-
-  const formatRestDays = (restDays: string | null) => {
-    if (!restDays) return "-"
-
-    return restDays
-  }
-
-  const formatStatus = (status: string) => {
-    return status
-      .replaceAll("_", " ")
-      .split(" ")
-      .map((word) => word[0]?.toUpperCase() + word.slice(1))
-      .join(" ")
-  }
 
   const toggleFormRestDay = (day: string) => {
     setFormData((current) => {
@@ -375,6 +342,7 @@ const Employees = () => {
   const resetFilters = () => {
     setSearchInput("")
     setStatusFilter("all")
+    setPage(1)
   }
 
   const resetForm = () => {
@@ -386,10 +354,6 @@ const Employees = () => {
     setIsAddOpen(true)
   }
 
-  const openEditModal = (employee: Employee) => {
-    setEditEmployee(employee)
-  }
-
   const openViewMoreModal = (employee: Employee) => {
     const range = getCurrentExportRange()
     setExportStartDate(range.start)
@@ -397,12 +361,12 @@ const Employees = () => {
     setViewMoreEmployee(employee)
   }
 
-  const handleAddEmployee = (e: { preventDefault: () => void }) => {
+  const handleAddEmployee = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     createEmployeeMutation.mutate(formData)
   }
 
-  const handleUpdateEmployee = (e: { preventDefault: () => void }) => {
+  const handleUpdateEmployee = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
 
     if (!editEmployee) return
@@ -434,7 +398,7 @@ const Employees = () => {
   }
 
   const getDayName = (dateValue: string) => {
-    const date = new Date(`${formatDate(dateValue)}T00:00:00`)
+    const date = new Date(`${formatDateValue(dateValue)}T00:00:00`)
 
     if (Number.isNaN(date.getTime())) return "-"
 
@@ -444,7 +408,7 @@ const Employees = () => {
   }
 
   const getExcelDateNumber = (dateValue: string) => {
-    const safeDate = formatDate(dateValue)
+    const safeDate = formatDateValue(dateValue)
     const date = new Date(`${safeDate}T00:00:00`)
     const excelEpoch = new Date(Date.UTC(1899, 11, 30))
 
@@ -777,9 +741,12 @@ const Employees = () => {
     }
 
     for (let col = 0; col <= 13; col++) {
-      const summaryCell = worksheet[XLSX.utils.encode_cell({ r: summaryTitleRow, c: col })]
-      const bonusCell = worksheet[XLSX.utils.encode_cell({ r: bonusTitleRow, c: col })]
-      const employeeCell = worksheet[XLSX.utils.encode_cell({ r: employeeTitleRow, c: col })]
+      const summaryCell =
+        worksheet[XLSX.utils.encode_cell({ r: summaryTitleRow, c: col })]
+      const bonusCell =
+        worksheet[XLSX.utils.encode_cell({ r: bonusTitleRow, c: col })]
+      const employeeCell =
+        worksheet[XLSX.utils.encode_cell({ r: employeeTitleRow, c: col })]
 
       if (summaryCell) summaryCell.s = sectionStyle
       if (bonusCell) bonusCell.s = sectionStyle
@@ -840,273 +807,218 @@ const Employees = () => {
     )
   }
 
-  const filteredEmployees = employees.filter((employee) => {
-    const search = searchInput.toLowerCase().trim()
+  const filteredEmployees = useMemo(() => {
+    return employees.filter((employee) => {
+      const search = searchInput.toLowerCase().trim()
 
-    const matchesSearch =
-      search === "" ||
-      employee.full_name.toLowerCase().includes(search) ||
-      (employee.position || "").toLowerCase().includes(search) ||
-      employee.status.toLowerCase().includes(search) ||
-      (employee.rest_days || "").toLowerCase().includes(search)
+      const matchesSearch =
+        search === "" ||
+        employee.full_name.toLowerCase().includes(search) ||
+        (employee.position || "").toLowerCase().includes(search) ||
+        employee.status.toLowerCase().includes(search) ||
+        (employee.rest_days || "").toLowerCase().includes(search)
 
-    const matchesStatus =
-      statusFilter === "all" || employee.status === statusFilter
+      const matchesStatus =
+        statusFilter === "all" || employee.status === statusFilter
 
-    return matchesSearch && matchesStatus
-  })
+      return matchesSearch && matchesStatus
+    })
+  }, [employees, searchInput, statusFilter])
+
+  const paginatedEmployees = paginateRows(filteredEmployees, page, rowsPerPage)
+  const activeCount = employees.filter((employee) => employee.status === "active").length
+  const payrollTotal = employees.reduce(
+    (sum, employee) => sum + Number(employee.monthly_salary || 0),
+    0
+  )
+  const withRestDays = employees.filter((employee) => employee.rest_days).length
 
   if (isLoading) {
-    return <p className="p-4">Loading employees...</p>
+    return <LoadingState label="Loading employees..." />
   }
 
   if (error) {
-    return <p className="p-4">Failed to load employees</p>
+    return <Alert title="Failed to load employees" variant="error" />
   }
 
   return (
-    <div className="p-4">
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold">Employees</h1>
-        <p className="text-sm text-gray-600">
-          Manage employee records for attendance tracking
-        </p>
+    <div className="p-4 sm:p-6">
+      <PageHeader
+        icon={<FiUsers />}
+        title="Employees"
+        subtitle="Manage employee records for attendance tracking"
+        actions={
+          <Button icon={<FiPlus />} onClick={openAddModal} variant="primary">
+            Add Employee
+          </Button>
+        }
+      />
+
+      <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-4">
+        <StatCard label="Total Employees" value={formatNumber(employees.length)} />
+        <StatCard label="Active Employees" value={formatNumber(activeCount)} />
+        <StatCard label="Monthly Payroll" value={formatMoney(payrollTotal)} />
+        <StatCard label="With Rest Days" value={formatNumber(withRestDays)} />
       </div>
 
-      <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <button
-          onClick={openAddModal}
-          className="w-fit border border-black px-4 py-2 hover:bg-gray-200"
+      <div className="mb-4 grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_180px_auto]">
+        <Input
+          icon={<FiSearch />}
+          placeholder="Search employee name, position, rest day, or status..."
+          value={searchInput}
+          onChange={(e) => {
+            setSearchInput(e.target.value)
+            setPage(1)
+          }}
+        />
+        <Select
+          value={statusFilter}
+          onChange={(e) => {
+            setStatusFilter(e.target.value)
+            setPage(1)
+          }}
         >
-          Add Employee
-        </button>
-
-        <div className="flex flex-col gap-2 md:flex-row">
-          <input
-            type="text"
-            placeholder="Search employee name, position, rest day, status..."
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            className="border border-black px-3 py-2 md:w-96"
-          />
-
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="border border-black px-3 py-2"
-          >
-            <option value="all">All Status</option>
-            <option value="active">Active</option>
-            <option value="inactive">Inactive</option>
-          </select>
-
-          <button
-            onClick={resetFilters}
-            className="border border-black px-4 py-2 hover:bg-gray-200"
-          >
-            Reset
-          </button>
-        </div>
+          <option value="all">All Status</option>
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+        </Select>
+        <Button icon={<FiRefreshCw />} onClick={resetFilters}>
+          Reset
+        </Button>
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full border border-black text-sm">
-          <thead>
-            <tr className="border-b border-black">
-              <th className="border-r border-black px-4 py-2 text-left">
-                Employee Name ↕
+      <TableContainer>
+        <table className="min-w-full divide-y divide-slate-200 text-sm">
+          <thead className="bg-slate-50">
+            <tr>
+              <th className="px-4 py-3 text-left font-semibold text-slate-600">
+                Employee Name
               </th>
-              <th className="border-r border-black px-4 py-2 text-left">
-                Position ↕
+              <th className="px-4 py-3 text-left font-semibold text-slate-600">
+                Position
               </th>
-              <th className="border-r border-black px-4 py-2 text-left">
-                Monthly Salary ↕
+              <th className="px-4 py-3 text-left font-semibold text-slate-600">
+                Monthly Salary
               </th>
-              <th className="border-r border-black px-4 py-2 text-left">
-                Rest Days ↕
+              <th className="px-4 py-3 text-left font-semibold text-slate-600">
+                Rest Days
               </th>
-              <th className="border-r border-black px-4 py-2 text-left">
-                Status ↕
+              <th className="px-4 py-3 text-left font-semibold text-slate-600">
+                Status
               </th>
-              <th className="border-r border-black px-4 py-2 text-left">
-                Created At ↕
+              <th className="px-4 py-3 text-left font-semibold text-slate-600">
+                Created At
               </th>
-              <th className="px-4 py-2 text-left">Actions ↕</th>
+              <th className="px-4 py-3 text-left font-semibold text-slate-600">
+                Actions
+              </th>
             </tr>
           </thead>
-
-          <tbody>
-            {filteredEmployees.map((employee) => (
-              <tr key={employee.id} className="border-b border-black">
-                <td className="border-r border-black px-4 py-2">
+          <tbody className="divide-y divide-slate-100 bg-white">
+            {paginatedEmployees.map((employee) => (
+              <tr key={employee.id} className="hover:bg-slate-50">
+                <td className="px-4 py-3 font-semibold text-slate-900">
                   {employee.full_name}
                 </td>
-
-                <td className="border-r border-black px-4 py-2">
+                <td className="px-4 py-3 text-slate-600">
                   {employee.position || "-"}
                 </td>
-
-                <td className="border-r border-black px-4 py-2">
+                <td className="px-4 py-3 text-slate-600">
                   {formatMoney(employee.monthly_salary)}
                 </td>
-
-                <td className="border-r border-black px-4 py-2">
+                <td className="px-4 py-3 text-slate-600">
                   {formatRestDays(employee.rest_days)}
                 </td>
-
-                <td className="border-r border-black px-4 py-2 capitalize">
-                  {employee.status}
+                <td className="px-4 py-3">
+                  <StatusBadge status={employee.status} />
                 </td>
-
-                <td className="border-r border-black px-4 py-2">
-                  {formatDate(employee.created_at)}
+                <td className="px-4 py-3 text-slate-600">
+                  {formatDateValue(employee.created_at)}
                 </td>
-
-                <td className="px-4 py-2">
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => openEditModal(employee)}
-                      className="border border-black px-3 py-1 hover:bg-gray-200"
+                <td className="px-4 py-3">
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      icon={<FiEdit2 />}
+                      onClick={() => setEditEmployee(employee)}
                     >
                       Edit
-                    </button>
-
-                    <button
+                    </Button>
+                    <Button
+                      icon={<FiEye />}
                       onClick={() => openViewMoreModal(employee)}
-                      className="border border-black px-3 py-1 hover:bg-gray-200"
                     >
                       View More
-                    </button>
+                    </Button>
                   </div>
                 </td>
               </tr>
             ))}
-
-            {filteredEmployees.length === 0 && (
-              <tr>
-                <td colSpan={7} className="px-4 py-6 text-center text-gray-600">
-                  No employees found
-                </td>
-              </tr>
-            )}
           </tbody>
         </table>
-      </div>
+        {filteredEmployees.length === 0 ? (
+          <EmptyState
+            title="No employees found"
+            description="Try clearing filters or adding an employee."
+          />
+        ) : null}
+      </TableContainer>
 
-      {isAddOpen && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-lg border border-black bg-white p-4">
-            <h2 className="mb-4 text-2xl font-bold">Add Employee</h2>
+      <Pagination
+        page={page}
+        rowsPerPage={rowsPerPage}
+        totalRows={filteredEmployees.length}
+        onPageChange={setPage}
+        onRowsPerPageChange={setRowsPerPage}
+      />
 
-            <form onSubmit={handleAddEmployee} className="flex flex-col gap-3">
-              <input
-                type="text"
-                placeholder="Full name"
-                value={formData.full_name}
-                onChange={(e) =>
-                  setFormData({ ...formData, full_name: e.target.value })
-                }
-                className="border border-black px-3 py-2"
-                required
-              />
+      {isAddOpen ? (
+        <Modal
+          title="Add Employee"
+          onClose={() => {
+            resetForm()
+            setIsAddOpen(false)
+          }}
+        >
+          <form onSubmit={handleAddEmployee} className="space-y-4">
+            <EmployeeFormFields
+              formData={formData}
+              onRestDayToggle={toggleFormRestDay}
+              setFormData={setFormData}
+            />
 
-              <input
-                type="text"
-                placeholder="Position"
-                value={formData.position}
-                onChange={(e) =>
-                  setFormData({ ...formData, position: e.target.value })
-                }
-                className="border border-black px-3 py-2"
-              />
+            {createEmployeeMutation.error instanceof Error ? (
+              <Alert title={createEmployeeMutation.error.message} variant="error" />
+            ) : null}
 
-              <input
-                type="number"
-                min={0}
-                step="0.01"
-                placeholder="Monthly salary"
-                value={formData.monthly_salary}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    monthly_salary: Number(e.target.value),
-                  })
-                }
-                className="border border-black px-3 py-2"
-              />
-
-              <select
-                value={formData.status}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    status: e.target.value as EmployeeStatus,
-                  })
-                }
-                className="border border-black px-3 py-2"
+            <div className="flex justify-end gap-2">
+              <Button
+                onClick={() => {
+                  resetForm()
+                  setIsAddOpen(false)
+                }}
               >
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
-              </select>
+                Cancel
+              </Button>
+              <Button
+                disabled={createEmployeeMutation.isPending}
+                type="submit"
+                variant="primary"
+              >
+                {createEmployeeMutation.isPending
+                  ? "Saving..."
+                  : "Save Employee"}
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      ) : null}
 
-              <div className="border border-black p-3">
-                <p className="mb-2 font-semibold">Rest Days</p>
-
-                <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
-                  {days.map((day) => (
-                    <label key={day} className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={formData.rest_days.includes(day)}
-                        onChange={() => toggleFormRestDay(day)}
-                      />
-                      {day}
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              {createEmployeeMutation.isError && (
-                <p className="border border-black px-4 py-2 text-red-600">
-                  {createEmployeeMutation.error.message}
-                </p>
-              )}
-
-              <div className="mt-2 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    resetForm()
-                    setIsAddOpen(false)
-                  }}
-                  className="border border-black px-4 py-2 hover:bg-gray-200"
-                >
-                  Cancel
-                </button>
-
-                <button
-                  type="submit"
-                  disabled={createEmployeeMutation.isPending}
-                  className="border border-black px-4 py-2 hover:bg-gray-200 disabled:opacity-50"
-                >
-                  {createEmployeeMutation.isPending
-                    ? "Saving..."
-                    : "Save Employee"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {editEmployee && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-lg border border-black bg-white p-4">
-            <h2 className="mb-4 text-2xl font-bold">Edit Employee</h2>
-
-            <form onSubmit={handleUpdateEmployee} className="flex flex-col gap-3">
-              <input
-                type="text"
+      {editEmployee ? (
+        <Modal title="Edit Employee" onClose={() => setEditEmployee(null)}>
+          <form onSubmit={handleUpdateEmployee} className="space-y-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <Input
+                label="Full Name"
                 value={editEmployee.full_name}
                 onChange={(e) =>
                   setEditEmployee({
@@ -1114,12 +1026,10 @@ const Employees = () => {
                     full_name: e.target.value,
                   })
                 }
-                className="border border-black px-3 py-2"
                 required
               />
-
-              <input
-                type="text"
+              <Input
+                label="Position"
                 value={editEmployee.position || ""}
                 onChange={(e) =>
                   setEditEmployee({
@@ -1127,10 +1037,9 @@ const Employees = () => {
                     position: e.target.value,
                   })
                 }
-                className="border border-black px-3 py-2"
               />
-
-              <input
+              <Input
+                label="Monthly Salary"
                 type="number"
                 min={0}
                 step="0.01"
@@ -1141,10 +1050,9 @@ const Employees = () => {
                     monthly_salary: Number(e.target.value),
                   })
                 }
-                className="border border-black px-3 py-2"
               />
-
-              <select
+              <Select
+                label="Status"
                 value={editEmployee.status}
                 onChange={(e) =>
                   setEditEmployee({
@@ -1152,328 +1060,327 @@ const Employees = () => {
                     status: e.target.value as EmployeeStatus,
                   })
                 }
-                className="border border-black px-3 py-2"
               >
                 <option value="active">Active</option>
                 <option value="inactive">Inactive</option>
-              </select>
-
-              <div className="border border-black p-3">
-                <p className="mb-2 font-semibold">Rest Days</p>
-
-                <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
-                  {days.map((day) => (
-                    <label key={day} className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={parseRestDays(editEmployee.rest_days).includes(
-                          day
-                        )}
-                        onChange={() => toggleEditRestDay(day)}
-                      />
-                      {day}
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              {updateEmployeeMutation.isError && (
-                <p className="border border-black px-4 py-2 text-red-600">
-                  {updateEmployeeMutation.error.message}
-                </p>
-              )}
-
-              <div className="mt-2 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setEditEmployee(null)}
-                  className="border border-black px-4 py-2 hover:bg-gray-200"
-                >
-                  Cancel
-                </button>
-
-                <button
-                  type="submit"
-                  disabled={updateEmployeeMutation.isPending}
-                  className="border border-black px-4 py-2 hover:bg-gray-200 disabled:opacity-50"
-                >
-                  {updateEmployeeMutation.isPending
-                    ? "Saving..."
-                    : "Save Changes"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {viewMoreEmployee && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="flex max-h-[90vh] w-full max-w-6xl flex-col border border-black bg-white">
-            <div className="border-b border-black p-4">
-              <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
-                <div>
-                  <h2 className="text-2xl font-bold">
-                    {viewMoreEmployee.full_name}
-                  </h2>
-                  <p className="text-sm text-gray-600">
-                    Attendance summary based on the office log book format
-                  </p>
-                  <p className="text-sm text-gray-600">
-                    Showing records from {exportStartDate} to {exportEndDate}
-                  </p>
-                </div>
-
-                <div className="flex flex-wrap items-end gap-2">
-                  <div className="flex flex-col">
-                    <label className="text-xs">Start Date</label>
-                    <input
-                      type="date"
-                      value={exportStartDate}
-                      onChange={(e) => setExportStartDate(e.target.value)}
-                      className="border border-black px-3 py-2"
-                    />
-                  </div>
-
-                  <div className="flex flex-col">
-                    <label className="text-xs">End Date</label>
-                    <input
-                      type="date"
-                      value={exportEndDate}
-                      onChange={(e) => setExportEndDate(e.target.value)}
-                      className="border border-black px-3 py-2"
-                    />
-                  </div>
-
-                  <button
-                    onClick={() => {
-                      const range = getCurrentExportRange()
-                      setExportStartDate(range.start)
-                      setExportEndDate(range.end)
-                    }}
-                    className="w-fit border border-black px-4 py-2 hover:bg-gray-200"
-                  >
-                    Default Range
-                  </button>
-
-                  <button
-                    onClick={exportEmployeeAttendanceToExcel}
-                    disabled={
-                      !attendanceSummary ||
-                      isAttendanceSummaryLoading ||
-                      !exportStartDate ||
-                      !exportEndDate
-                    }
-                    className="w-fit border border-black px-4 py-2 hover:bg-gray-200 disabled:opacity-50"
-                  >
-                    Export to Excel
-                  </button>
-
-                  <button
-                    onClick={() => setViewMoreEmployee(null)}
-                    className="w-fit border border-black px-4 py-2 hover:bg-gray-200"
-                  >
-                    Close
-                  </button>
-                </div>
-              </div>
+              </Select>
             </div>
 
-            <div className="overflow-y-auto p-4">
-              {isAttendanceSummaryLoading ? (
-                <p>Loading attendance summary...</p>
-              ) : attendanceSummaryError ? (
-                <p>Failed to load attendance summary</p>
-              ) : attendanceSummary ? (
-                <>
-                  <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-4">
-                    <div className="border border-black px-4 py-3">
-                      <p className="text-sm">Total Worked w/ OT</p>
-                      <h3 className="text-2xl font-bold">
-                        {attendanceSummary.summary.totalWorkedHoursWithOt}h
-                      </h3>
-                      <p className="text-sm text-gray-600">
-                        Total hours worked including overtime
-                      </p>
-                    </div>
+            <RestDayPicker
+              selectedDays={parseRestDays(editEmployee.rest_days)}
+              onToggle={toggleEditRestDay}
+            />
 
-                    <div className="border border-black px-4 py-3">
-                      <p className="text-sm">Overtime</p>
-                      <h3 className="text-2xl font-bold">
-                        {attendanceSummary.summary.overtimeHours}h
-                      </h3>
-                      <p className="text-sm text-gray-600">
-                        Hours after scheduled time out
-                      </p>
-                    </div>
+            {updateEmployeeMutation.error instanceof Error ? (
+              <Alert title={updateEmployeeMutation.error.message} variant="error" />
+            ) : null}
 
-                    <div className="border border-black px-4 py-3">
-                      <p className="text-sm">No. of Days</p>
-                      <h3 className="text-2xl font-bold">
-                        {attendanceSummary.summary.presentDays}
-                      </h3>
-                      <p className="text-sm text-gray-600">
-                        Present working days
-                      </p>
-                    </div>
+            <div className="flex justify-end gap-2">
+              <Button onClick={() => setEditEmployee(null)}>Cancel</Button>
+              <Button
+                disabled={updateEmployeeMutation.isPending}
+                type="submit"
+                variant="primary"
+              >
+                {updateEmployeeMutation.isPending
+                  ? "Saving..."
+                  : "Save Changes"}
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      ) : null}
 
-                    <div className="border border-black px-4 py-3">
-                      <p className="text-sm">Late Days</p>
-                      <h3 className="text-2xl font-bold">
-                        {attendanceSummary.summary.lateDays}
-                      </h3>
-                      <p className="text-sm text-gray-600">
-                        Total late records
-                      </p>
-                    </div>
-                  </div>
+      {viewMoreEmployee ? (
+        <Modal
+          size="xl"
+          title={viewMoreEmployee.full_name}
+          onClose={() => setViewMoreEmployee(null)}
+        >
+          <div className="mb-4 flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+            <div>
+              <p className="text-sm text-slate-500">
+                Attendance summary based on the office log book format.
+              </p>
+              <p className="mt-1 text-sm text-slate-500">
+                Showing records from {exportStartDate} to {exportEndDate}
+              </p>
+            </div>
 
-                  <div className="mb-6 border border-black p-4">
-                    <h3 className="text-xl font-bold">30-Day Bonus Check</h3>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-[160px_160px_auto_auto]">
+              <Input
+                label="Start Date"
+                type="date"
+                value={exportStartDate}
+                onChange={(e) => setExportStartDate(e.target.value)}
+              />
+              <Input
+                label="End Date"
+                type="date"
+                value={exportEndDate}
+                onChange={(e) => setExportEndDate(e.target.value)}
+              />
+              <Button
+                icon={<FiRefreshCw />}
+                onClick={() => {
+                  const range = getCurrentExportRange()
+                  setExportStartDate(range.start)
+                  setExportEndDate(range.end)
+                }}
+              >
+                Default Range
+              </Button>
+              <Button
+                disabled={
+                  !attendanceSummary ||
+                  isAttendanceSummaryLoading ||
+                  !exportStartDate ||
+                  !exportEndDate
+                }
+                icon={<FiDownload />}
+                onClick={exportEmployeeAttendanceToExcel}
+                variant="primary"
+              >
+                Export Excel
+              </Button>
+            </div>
+          </div>
 
-                    <p className="mt-2">
-                      <b>Status:</b>{" "}
-                      {attendanceSummary.summary.bonusCandidate
+          {isAttendanceSummaryLoading ? (
+            <LoadingState label="Loading attendance summary..." />
+          ) : attendanceSummaryError ? (
+            <Alert title="Failed to load attendance summary" variant="error" />
+          ) : attendanceSummary ? (
+            <>
+              <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-4">
+                <StatCard
+                  label="Total Worked w/ OT"
+                  value={`${attendanceSummary.summary.totalWorkedHoursWithOt}h`}
+                />
+                <StatCard
+                  label="Overtime"
+                  value={`${attendanceSummary.summary.overtimeHours}h`}
+                />
+                <StatCard
+                  label="Present Days"
+                  value={attendanceSummary.summary.presentDays}
+                />
+                <StatCard
+                  label="Late Days"
+                  value={attendanceSummary.summary.lateDays}
+                />
+              </div>
+
+              <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <h3 className="text-base font-bold text-slate-900">
+                  30-Day Bonus Check
+                </h3>
+                <div className="mt-3 grid grid-cols-1 gap-3 text-sm md:grid-cols-4">
+                  <SummaryItem
+                    label="Bonus Status"
+                    value={
+                      attendanceSummary.summary.bonusCandidate
                         ? "Candidate"
-                        : "Not Candidate"}
-                    </p>
+                        : "Not Candidate"
+                    }
+                  />
+                  <SummaryItem
+                    label="Absent Days"
+                    value={attendanceSummary.summary.absentDays}
+                  />
+                  <SummaryItem
+                    label="Late Days"
+                    value={attendanceSummary.summary.lateDays}
+                  />
+                  <SummaryItem
+                    label="Late Hours"
+                    value={`${attendanceSummary.summary.totalLateHours}h`}
+                  />
+                </div>
+                <p className="mt-3 text-sm text-slate-500">
+                  {attendanceSummary.summary.bonusNote}
+                </p>
+              </div>
 
-                    <p>
-                      <b>Absent Days:</b>{" "}
-                      {attendanceSummary.summary.absentDays}
-                    </p>
+              <TableContainer>
+                <table className="min-w-full divide-y divide-slate-200 text-sm">
+                  <thead className="bg-slate-50">
+                    <tr>
+                      {[
+                        "Date",
+                        "Status",
+                        "Time In",
+                        "Time Out",
+                        "Schedule In",
+                        "Schedule Out",
+                        "Break",
+                        "Worked w/ OT",
+                        "Regular Hours",
+                        "Overtime",
+                        "Late",
+                      ].map((heading) => (
+                        <th
+                          key={heading}
+                          className="px-4 py-3 text-left font-semibold text-slate-600"
+                        >
+                          {heading}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {attendanceSummary.logs.map((log) => (
+                      <tr key={log.id} className="hover:bg-slate-50">
+                        <td className="px-4 py-3 text-slate-600">
+                          {formatDateValue(log.attendance_date)}
+                        </td>
+                        <td className="px-4 py-3">
+                          <StatusBadge status={log.computed_status} />
+                        </td>
+                        <td className="px-4 py-3 text-slate-600">
+                          {formatTime(log.time_in)}
+                        </td>
+                        <td className="px-4 py-3 text-slate-600">
+                          {formatTime(log.time_out)}
+                        </td>
+                        <td className="px-4 py-3 text-slate-600">
+                          {formatTime(log.schedule_time_in)}
+                        </td>
+                        <td className="px-4 py-3 text-slate-600">
+                          {formatTime(log.schedule_time_out)}
+                        </td>
+                        <td className="px-4 py-3 text-slate-600">
+                          {log.break_minutes} mins
+                        </td>
+                        <td className="px-4 py-3 text-slate-600">
+                          {log.worked_hours_with_ot}h
+                        </td>
+                        <td className="px-4 py-3 text-slate-600">
+                          {log.regular_hours}h
+                        </td>
+                        <td className="px-4 py-3 text-slate-600">
+                          {log.overtime_hours}h
+                        </td>
+                        <td className="px-4 py-3 text-slate-600">
+                          {log.late_hours}h
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {attendanceSummary.logs.length === 0 ? (
+                  <EmptyState title="No attendance records found for this period" />
+                ) : null}
+              </TableContainer>
+            </>
+          ) : null}
+        </Modal>
+      ) : null}
+    </div>
+  )
+}
 
-                    <p>
-                      <b>Late Days:</b> {attendanceSummary.summary.lateDays}
-                    </p>
+type EmployeeFormFieldsProps = {
+  formData: EmployeeFormData
+  onRestDayToggle: (day: string) => void
+  setFormData: (formData: EmployeeFormData) => void
+}
 
-                    <p>
-                      <b>Total Late Hours:</b>{" "}
-                      {attendanceSummary.summary.totalLateHours}h
-                    </p>
+const EmployeeFormFields = ({
+  formData,
+  onRestDayToggle,
+  setFormData,
+}: EmployeeFormFieldsProps) => {
+  return (
+    <>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <Input
+          label="Full Name"
+          value={formData.full_name}
+          onChange={(e) =>
+            setFormData({ ...formData, full_name: e.target.value })
+          }
+          required
+        />
+        <Input
+          label="Position"
+          value={formData.position}
+          onChange={(e) =>
+            setFormData({ ...formData, position: e.target.value })
+          }
+        />
+        <Input
+          label="Monthly Salary"
+          type="number"
+          min={0}
+          step="0.01"
+          value={formData.monthly_salary}
+          onChange={(e) =>
+            setFormData({
+              ...formData,
+              monthly_salary: Number(e.target.value),
+            })
+          }
+        />
+        <Select
+          label="Status"
+          value={formData.status}
+          onChange={(e) =>
+            setFormData({
+              ...formData,
+              status: e.target.value as EmployeeStatus,
+            })
+          }
+        >
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+        </Select>
+      </div>
+      <RestDayPicker selectedDays={formData.rest_days} onToggle={onRestDayToggle} />
+    </>
+  )
+}
 
-                    <p className="mt-2 text-sm text-gray-600">
-                      {attendanceSummary.summary.bonusNote}
-                    </p>
+const RestDayPicker = ({
+  onToggle,
+  selectedDays,
+}: {
+  onToggle: (day: string) => void
+  selectedDays: string[]
+}) => {
+  return (
+    <div className="rounded-lg border border-slate-200 p-4">
+      <p className="mb-3 text-sm font-semibold text-slate-700">Rest Days</p>
+      <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
+        {days.map((day) => (
+          <label
+            key={day}
+            className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700"
+          >
+            <input
+              type="checkbox"
+              checked={selectedDays.includes(day)}
+              onChange={() => onToggle(day)}
+            />
+            {day}
+          </label>
+        ))}
+      </div>
+    </div>
+  )
+}
 
-                    <p className="mt-2 text-sm text-gray-600">
-                      Bonus approval should still be reviewed by admin because
-                      it can depend on lateness and company judgment.
-                    </p>
-                  </div>
-
-                  <div className="mb-3">
-                    <h3 className="text-xl font-bold">Office Log Book</h3>
-                    <p className="text-sm text-gray-600">
-                      Attendance rows based on date, time in, time out, worked
-                      hours, late, overtime, and status.
-                    </p>
-                  </div>
-
-                  <div className="overflow-x-auto">
-                    <table className="w-full border border-black text-sm">
-                      <thead>
-                        <tr className="border-b border-black">
-                          <th className="border-r border-black px-4 py-2 text-left">
-                            Date ↕
-                          </th>
-                          <th className="border-r border-black px-4 py-2 text-left">
-                            Status ↕
-                          </th>
-                          <th className="border-r border-black px-4 py-2 text-left">
-                            Time In ↕
-                          </th>
-                          <th className="border-r border-black px-4 py-2 text-left">
-                            Time Out ↕
-                          </th>
-                          <th className="border-r border-black px-4 py-2 text-left">
-                            Schedule In ↕
-                          </th>
-                          <th className="border-r border-black px-4 py-2 text-left">
-                            Schedule Out ↕
-                          </th>
-                          <th className="border-r border-black px-4 py-2 text-left">
-                            Break ↕
-                          </th>
-                          <th className="border-r border-black px-4 py-2 text-left">
-                            Worked w/ OT ↕
-                          </th>
-                          <th className="border-r border-black px-4 py-2 text-left">
-                            Regular Hours ↕
-                          </th>
-                          <th className="border-r border-black px-4 py-2 text-left">
-                            Overtime ↕
-                          </th>
-                          <th className="px-4 py-2 text-left">Late ↕</th>
-                        </tr>
-                      </thead>
-
-                      <tbody>
-                        {attendanceSummary.logs.map((log) => (
-                          <tr key={log.id} className="border-b border-black">
-                            <td className="border-r border-black px-4 py-2">
-                              {formatDate(log.attendance_date)}
-                            </td>
-
-                            <td className="border-r border-black px-4 py-2 capitalize">
-                              {formatStatus(log.computed_status)}
-                            </td>
-
-                            <td className="border-r border-black px-4 py-2">
-                              {formatTime(log.time_in)}
-                            </td>
-
-                            <td className="border-r border-black px-4 py-2">
-                              {formatTime(log.time_out)}
-                            </td>
-
-                            <td className="border-r border-black px-4 py-2">
-                              {formatTime(log.schedule_time_in)}
-                            </td>
-
-                            <td className="border-r border-black px-4 py-2">
-                              {formatTime(log.schedule_time_out)}
-                            </td>
-
-                            <td className="border-r border-black px-4 py-2">
-                              {log.break_minutes} mins
-                            </td>
-
-                            <td className="border-r border-black px-4 py-2">
-                              {log.worked_hours_with_ot}h
-                            </td>
-
-                            <td className="border-r border-black px-4 py-2">
-                              {log.regular_hours}h
-                            </td>
-
-                            <td className="border-r border-black px-4 py-2">
-                              {log.overtime_hours}h
-                            </td>
-
-                            <td className="px-4 py-2">{log.late_hours}h</td>
-                          </tr>
-                        ))}
-
-                        {attendanceSummary.logs.length === 0 && (
-                          <tr>
-                            <td
-                              colSpan={11}
-                              className="px-4 py-6 text-center text-gray-600"
-                            >
-                              No attendance records found for this period
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </>
-              ) : null}
-            </div>
-          </div>
-        </div>
-      )}
+const SummaryItem = ({
+  label,
+  value,
+}: {
+  label: string
+  value: number | string
+}) => {
+  return (
+    <div>
+      <p className="text-xs font-semibold uppercase text-slate-400">{label}</p>
+      <p className="mt-1 font-semibold text-slate-800">{value}</p>
     </div>
   )
 }

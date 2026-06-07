@@ -1,7 +1,22 @@
-import { useState, type FormEvent } from "react"
+import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api/v1"
+import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts"
+import { FiEdit2, FiEye, FiGrid, FiPlus, FiSearch } from "react-icons/fi"
+import Alert from "../components/ui/Alert"
+import Button from "../components/ui/Button"
+import EmptyState from "../components/ui/EmptyState"
+import Input from "../components/ui/Input"
+import LoadingState from "../components/ui/LoadingState"
+import Modal from "../components/ui/Modal"
+import PageHeader from "../components/ui/PageHeader"
+import Pagination from "../components/ui/Pagination"
+import Select from "../components/ui/Select"
+import StatCard from "../components/ui/StatCard"
+import StatusBadge from "../components/ui/StatusBadge"
+import TableContainer from "../components/ui/TableContainer"
+import { API_URL, getErrorMessage } from "../utils/api"
+import { formatDate, formatMoney, formatNumber } from "../utils/formatters"
+import { paginateRows } from "../utils/pagination"
 
 type ListingStatus = "available" | "reserved" | "hold" | "sold" | "inactive" | string
 
@@ -68,27 +83,14 @@ const defaultListingFormData: ListingFormData = {
 }
 
 const statusFilters = [
-  { label: "All", value: "all" },
-  { label: "Available", value: "available" },
-  { label: "Reserved", value: "reserved" },
-  { label: "Hold", value: "hold" },
-  { label: "Sold", value: "sold" },
-  { label: "Inactive", value: "inactive" },
+  "available",
+  "reserved",
+  "hold",
+  "sold",
+  "inactive",
 ]
 
-const getErrorMessage = async (response: Response) => {
-  try {
-    const data = await response.json()
-
-    if (typeof data.message === "string") {
-      return data.message
-    }
-  } catch {
-    return "Request failed"
-  }
-
-  return "Request failed"
-}
+const chartColors = ["#2563eb", "#f59e0b", "#8b5cf6", "#10b981", "#ef4444"]
 
 const fetchListings = async () => {
   const response = await fetch(`${API_URL}/listings`, {
@@ -100,7 +102,6 @@ const fetchListings = async () => {
   }
 
   const data = (await response.json()) as ListingsResponse
-
   return data.listings
 }
 
@@ -114,7 +115,6 @@ const fetchProjects = async () => {
   }
 
   const data = (await response.json()) as ProjectsResponse
-
   return data.projects
 }
 
@@ -180,6 +180,9 @@ const Listings = () => {
   const [editListing, setEditListing] = useState<Listing | null>(null)
   const [formData, setFormData] = useState<ListingFormData>(defaultListingFormData)
   const [editFormData, setEditFormData] = useState<ListingFormData>(defaultListingFormData)
+  const [page, setPage] = useState(1)
+  const [rowsPerPage, setRowsPerPage] = useState(10)
+  const [successMessage, setSuccessMessage] = useState("")
 
   const {
     data: listings = [],
@@ -201,6 +204,7 @@ const Listings = () => {
       queryClient.invalidateQueries({ queryKey: ["listings"] })
       setIsAddOpen(false)
       resetForm()
+      setSuccessMessage("Listing created successfully")
     },
   })
 
@@ -209,23 +213,11 @@ const Listings = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["listings"] })
       setEditListing(null)
+      setSuccessMessage("Listing updated successfully")
     },
   })
 
-  const formatMoney = (amount: number | string) => {
-    return new Intl.NumberFormat("en-PH", {
-      style: "currency",
-      currency: "PHP",
-    }).format(Number(amount || 0))
-  }
-
-  const formatNumber = (value: number | string) => {
-    return new Intl.NumberFormat("en-PH").format(Number(value || 0))
-  }
-
-  const projectFormDefault = () => {
-    return projects[0]?.id ?? 0
-  }
+  const projectFormDefault = () => projects[0]?.id ?? 0
 
   const resetForm = () => {
     setFormData({
@@ -239,6 +231,7 @@ const Listings = () => {
     setStatusFilter("all")
     setProjectFilter("all")
     setLotTypeFilter("all")
+    setPage(1)
   }
 
   const openAddModal = () => {
@@ -254,12 +247,12 @@ const Listings = () => {
     setEditFormData(listingToFormData(listing))
   }
 
-  const handleAddListing = (e: FormEvent<HTMLFormElement>) => {
+  const handleAddListing = (e: { preventDefault: () => void }) => {
     e.preventDefault()
     createListingMutation.mutate(formData)
   }
 
-  const handleUpdateListing = (e: FormEvent<HTMLFormElement>) => {
+  const handleUpdateListing = (e: { preventDefault: () => void }) => {
     e.preventDefault()
 
     if (!editListing) return
@@ -272,7 +265,6 @@ const Listings = () => {
 
   const filteredListings = listings.filter((listing) => {
     const search = searchInput.toLowerCase().trim()
-
     const matchesSearch =
       search === "" ||
       listing.unit_id.toLowerCase().includes(search) ||
@@ -283,665 +275,390 @@ const Listings = () => {
 
     const matchesStatus =
       statusFilter === "all" || listing.status === statusFilter
-
     const matchesProject =
       projectFilter === "all" || listing.project_id === Number(projectFilter)
-
     const matchesLotType =
       lotTypeFilter === "all" || listing.lot_type === lotTypeFilter
 
     return matchesSearch && matchesStatus && matchesProject && matchesLotType
   })
 
-  const countByStatus = (status: string) => {
-    return listings.filter((listing) => listing.status === status).length
-  }
-
+  const paginatedListings = paginateRows(filteredListings, page, rowsPerPage)
   const lotTypes = [
     ...new Set(listings.map((listing) => listing.lot_type).filter(Boolean)),
   ] as string[]
+  const totalValue = listings.reduce(
+    (sum, listing) => sum + Number(listing.net_selling_price || 0),
+    0
+  )
+  const statusData = statusFilters.map((status) => ({
+    name: status,
+    value: listings.filter((listing) => listing.status === status).length,
+  }))
+
+  const formFields = (
+    data: ListingFormData,
+    setData: (data: ListingFormData) => void
+  ) => (
+    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+      <Select
+        label="Project"
+        onChange={(e) => setData({ ...data, project_id: Number(e.target.value) })}
+        required
+        value={data.project_id}
+      >
+        <option disabled value={0}>
+          Select project
+        </option>
+        {projects.map((project) => (
+          <option key={project.id} value={project.id}>
+            {project.name}
+          </option>
+        ))}
+      </Select>
+      <Input
+        label="Cadastral lot no."
+        onChange={(e) => setData({ ...data, cadastral_lot_no: e.target.value })}
+        value={data.cadastral_lot_no}
+      />
+      <Input
+        label="Unit ID"
+        onChange={(e) => setData({ ...data, unit_id: e.target.value })}
+        required
+        value={data.unit_id}
+      />
+      <Input
+        label="Lot type"
+        onChange={(e) => setData({ ...data, lot_type: e.target.value })}
+        value={data.lot_type}
+      />
+      {[
+        ["promo_discount", "Promo discount"],
+        ["downpayment", "Downpayment"],
+        ["reservation_fee", "Reservation fee"],
+        ["price_per_sqm", "Price per sqm"],
+        ["lot_area_sqm", "Lot area sqm"],
+        ["net_selling_price", "Net selling price"],
+        ["legal_misc_fee", "Legal misc fee"],
+      ].map(([key, label]) => (
+        <Input
+          key={key}
+          label={label}
+          onChange={(e) =>
+            setData({
+              ...data,
+              [key]: Number(e.target.value),
+            } as ListingFormData)
+          }
+          type="number"
+          value={String(data[key as keyof ListingFormData])}
+        />
+      ))}
+      <Select
+        label="Status"
+        onChange={(e) => setData({ ...data, status: e.target.value })}
+        value={data.status}
+      >
+        {statusFilters.map((status) => (
+          <option key={status} value={status}>
+            {status}
+          </option>
+        ))}
+      </Select>
+    </div>
+  )
 
   return (
-    <div className="p-4">
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold">Listings / Units</h1>
-        <p className="text-sm text-gray-600">
-          Live inventory from MySQL with editable listing records
-        </p>
-      </div>
+    <div>
+      <PageHeader
+        actions={
+          <Button icon={<FiPlus />} onClick={openAddModal} variant="primary">
+            Add
+          </Button>
+        }
+        icon={<FiGrid className="h-5 w-5" />}
+        subtitle="Live inventory from MySQL with editable listing records"
+        title="Listings / Units"
+      />
 
-      <div className="mb-4 flex flex-wrap gap-2">
-        {statusFilters.map((status) => (
-          <button
-            key={status.value}
-            onClick={() => setStatusFilter(status.value)}
-            className={`border border-black px-3 py-1 hover:bg-gray-200 ${
-              statusFilter === status.value ? "bg-gray-200" : ""
-            }`}
-          >
-            {status.label}
-            {status.value === "all"
-              ? `(${listings.length})`
-              : `(${countByStatus(status.value)})`}
-          </button>
+      <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3 xl:grid-cols-6">
+        <StatCard title="All" value={listings.length} />
+        {statusFilters.slice(0, 4).map((status) => (
+          <StatCard
+            key={status}
+            title={status[0].toUpperCase() + status.slice(1)}
+            value={listings.filter((listing) => listing.status === status).length}
+          />
         ))}
+        <StatCard title="Total Value" value={formatMoney(totalValue)} />
       </div>
 
-      <div className="mb-4 flex flex-col gap-2 md:flex-row md:items-center">
-        <input
-          type="text"
-          placeholder="Search by unit ID, project, cadastral lot no, lot type, status..."
-          value={searchInput}
-          onChange={(e) => setSearchInput(e.target.value)}
-          className="border border-black px-3 py-2 md:w-96"
-        />
-
-        <select
-          value={projectFilter}
-          onChange={(e) => setProjectFilter(e.target.value)}
-          className="border border-black px-3 py-2"
-        >
-          <option value="all">All Projects</option>
-          {projects.map((project) => (
-            <option key={project.id} value={project.id}>
-              {project.name}
-            </option>
-          ))}
-        </select>
-
-        <select
-          value={lotTypeFilter}
-          onChange={(e) => setLotTypeFilter(e.target.value)}
-          className="border border-black px-3 py-2"
-        >
-          <option value="all">All Lot Types</option>
-          {lotTypes.map((lotType) => (
-            <option key={lotType} value={lotType}>
-              {lotType}
-            </option>
-          ))}
-        </select>
-
-        <button
-          onClick={resetFilters}
-          className="w-fit border border-black px-4 py-2 hover:bg-gray-200"
-        >
-          Reset
-        </button>
-
-        <button
-          onClick={openAddModal}
-          className="w-fit border border-black px-4 py-2 hover:bg-gray-200"
-        >
-          Add
-        </button>
+      <div className="mb-6 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="grid gap-4 lg:grid-cols-[240px_1fr]">
+          <div>
+            <h2 className="text-base font-bold text-slate-900">
+              Listing status distribution
+            </h2>
+            <p className="text-sm text-slate-500">
+              Current unit inventory by status
+            </p>
+          </div>
+          <div className="h-56">
+            <ResponsiveContainer height="100%" width="100%">
+              <PieChart>
+                <Pie data={statusData} dataKey="value" nameKey="name" outerRadius={82}>
+                  {statusData.map((entry, index) => (
+                    <Cell
+                      fill={chartColors[index % chartColors.length]}
+                      key={entry.name}
+                    />
+                  ))}
+                </Pie>
+                <Tooltip />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
       </div>
 
-      {isLoading && (
-        <div className="border border-black px-4 py-6 text-center text-gray-600">
-          Loading listings...
+      {successMessage ? (
+        <div className="mb-4">
+          <Alert type="success">{successMessage}</Alert>
         </div>
-      )}
+      ) : null}
 
-      {error && !isLoading && (
-        <div className="border border-black px-4 py-6 text-center text-gray-600">
-          Failed to load listings
+      <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_180px_180px_180px_auto]">
+          <Input
+            onChange={(e) => {
+              setSearchInput(e.target.value)
+              setPage(1)
+            }}
+            placeholder="Search unit, project, cadastral lot no, lot type, status..."
+            value={searchInput}
+          />
+          <Select
+            onChange={(e) => {
+              setProjectFilter(e.target.value)
+              setPage(1)
+            }}
+            value={projectFilter}
+          >
+            <option value="all">All Projects</option>
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>
+                {project.name}
+              </option>
+            ))}
+          </Select>
+          <Select
+            onChange={(e) => {
+              setLotTypeFilter(e.target.value)
+              setPage(1)
+            }}
+            value={lotTypeFilter}
+          >
+            <option value="all">All Lot Types</option>
+            {lotTypes.map((lotType) => (
+              <option key={lotType} value={lotType}>
+                {lotType}
+              </option>
+            ))}
+          </Select>
+          <Select
+            onChange={(e) => {
+              setStatusFilter(e.target.value)
+              setPage(1)
+            }}
+            value={statusFilter}
+          >
+            <option value="all">All Status</option>
+            {statusFilters.map((status) => (
+              <option key={status} value={status}>
+                {status}
+              </option>
+            ))}
+          </Select>
+          <Button icon={<FiSearch />} onClick={resetFilters}>
+            Reset
+          </Button>
         </div>
-      )}
+      </div>
 
-      {!isLoading && !error && (
-        <div className="overflow-x-auto">
-          <table className="w-full border border-black text-sm">
-            <thead>
-              <tr className="border-b border-black">
-                <th className="border-r border-black px-4 py-2 text-left">
-                  Unit ID
-                </th>
-                <th className="border-r border-black px-4 py-2 text-left">
-                  Project
-                </th>
-                <th className="border-r border-black px-4 py-2 text-left">
-                  Cadastral Lot No.
-                </th>
-                <th className="border-r border-black px-4 py-2 text-left">
-                  Lot Type
-                </th>
-                <th className="border-r border-black px-4 py-2 text-left">
-                  Area
-                </th>
-                <th className="border-r border-black px-4 py-2 text-left">
-                  Price / SQM
-                </th>
-                <th className="border-r border-black px-4 py-2 text-left">
-                  Net Price
-                </th>
-                <th className="border-r border-black px-4 py-2 text-left">
-                  Legal / Misc
-                </th>
-                <th className="border-r border-black px-4 py-2 text-left">
-                  Status
-                </th>
-                <th className="px-4 py-2 text-left">
-                  Actions
-                </th>
-              </tr>
-            </thead>
+      {isLoading ? <LoadingState message="Loading listings..." /> : null}
+      {error && !isLoading ? (
+        <Alert type="error">Failed to load listings</Alert>
+      ) : null}
 
-            <tbody>
-              {filteredListings.map((listing) => (
-                <tr key={listing.id} className="border-b border-black">
-                  <td className="border-r border-black px-4 py-2">
-                    {listing.unit_id}
-                  </td>
-
-                  <td className="border-r border-black px-4 py-2">
-                    {listing.project_name}
-                  </td>
-
-                  <td className="border-r border-black px-4 py-2">
-                    {listing.cadastral_lot_no || "-"}
-                  </td>
-
-                  <td className="border-r border-black px-4 py-2">
-                    {listing.lot_type || "-"}
-                  </td>
-
-                  <td className="border-r border-black px-4 py-2">
-                    {formatNumber(listing.lot_area_sqm)} sqm
-                  </td>
-
-                  <td className="border-r border-black px-4 py-2">
-                    {formatMoney(listing.price_per_sqm)}
-                  </td>
-
-                  <td className="border-r border-black px-4 py-2">
-                    {formatMoney(listing.net_selling_price)}
-                  </td>
-
-                  <td className="border-r border-black px-4 py-2">
-                    {formatMoney(listing.legal_misc_fee)}
-                  </td>
-
-                  <td className="border-r border-black px-4 py-2 capitalize">
-                    {listing.status}
-                  </td>
-
-                  <td className="px-4 py-2">
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => setViewListing(listing)}
-                        className="border border-black px-3 py-1 hover:bg-gray-200"
+      {!isLoading && !error ? (
+        filteredListings.length === 0 ? (
+          <EmptyState title="No listings found" />
+        ) : (
+          <>
+            <TableContainer>
+              <table className="min-w-full divide-y divide-slate-200 text-sm">
+                <thead className="bg-slate-50">
+                  <tr>
+                    {[
+                      "Unit ID",
+                      "Project",
+                      "Cadastral Lot No.",
+                      "Lot Type",
+                      "Area",
+                      "Price / SQM",
+                      "Net Price",
+                      "Legal / Misc",
+                      "Status",
+                      "Actions",
+                    ].map((heading) => (
+                      <th
+                        className="px-4 py-3 text-left font-semibold text-slate-600"
+                        key={heading}
                       >
-                        Details
-                      </button>
+                        {heading}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white">
+                  {paginatedListings.map((listing) => (
+                    <tr className="transition hover:bg-slate-50" key={listing.id}>
+                      <td className="px-4 py-3 font-semibold text-slate-900">
+                        {listing.unit_id}
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {listing.project_name}
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {listing.cadastral_lot_no || "-"}
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {listing.lot_type || "-"}
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {formatNumber(listing.lot_area_sqm)} sqm
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {formatMoney(listing.price_per_sqm)}
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {formatMoney(listing.net_selling_price)}
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {formatMoney(listing.legal_misc_fee)}
+                      </td>
+                      <td className="px-4 py-3">
+                        <StatusBadge status={listing.status} />
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex gap-2">
+                          <Button
+                            icon={<FiEye />}
+                            onClick={() => setViewListing(listing)}
+                          >
+                            Details
+                          </Button>
+                          <Button
+                            icon={<FiEdit2 />}
+                            onClick={() => openEditModal(listing)}
+                          >
+                            Edit
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </TableContainer>
+            <Pagination
+              onPageChange={setPage}
+              onRowsPerPageChange={setRowsPerPage}
+              page={page}
+              rowsPerPage={rowsPerPage}
+              totalRows={filteredListings.length}
+            />
+          </>
+        )
+      ) : null}
 
-                      <button
-                        onClick={() => openEditModal(listing)}
-                        className="border border-black px-3 py-1 hover:bg-gray-200"
-                      >
-                        Edit
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-
-              {filteredListings.length === 0 && (
-                <tr>
-                  <td colSpan={10} className="px-4 py-6 text-center text-gray-600">
-                    No listings found
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {isAddOpen && (
-        <div className="fixed inset-0 flex items-center justify-center bg-black/40 p-4">
-          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto border border-black bg-white p-4">
-            <h2 className="mb-4 text-2xl font-bold">Add Listing</h2>
-
-            <form
-              onSubmit={handleAddListing}
-              className="grid grid-cols-1 gap-3 md:grid-cols-2"
-            >
-              <select
-                value={formData.project_id}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    project_id: Number(e.target.value),
-                  })
-                }
-                className="border border-black px-3 py-2"
-                required
+      {isAddOpen ? (
+        <Modal onClose={() => setIsAddOpen(false)} title="Add Listing">
+          <form className="space-y-4" onSubmit={handleAddListing}>
+            {formFields(formData, setFormData)}
+            {createListingMutation.isError ? (
+              <Alert type="error">{createListingMutation.error.message}</Alert>
+            ) : null}
+            <div className="flex justify-end gap-2">
+              <Button onClick={() => setIsAddOpen(false)}>Cancel</Button>
+              <Button
+                disabled={createListingMutation.isPending}
+                type="submit"
+                variant="primary"
               >
-                <option value={0} disabled>
-                  Select project
-                </option>
-                {projects.map((project) => (
-                  <option key={project.id} value={project.id}>
-                    {project.name}
-                  </option>
-                ))}
-              </select>
-
-              <input
-                type="text"
-                placeholder="Cadastral lot no."
-                value={formData.cadastral_lot_no}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    cadastral_lot_no: e.target.value,
-                  })
-                }
-                className="border border-black px-3 py-2"
-              />
-
-              <input
-                type="text"
-                placeholder="Unit ID"
-                value={formData.unit_id}
-                onChange={(e) =>
-                  setFormData({ ...formData, unit_id: e.target.value })
-                }
-                className="border border-black px-3 py-2"
-                required
-              />
-
-              <input
-                type="text"
-                placeholder="Lot type"
-                value={formData.lot_type}
-                onChange={(e) =>
-                  setFormData({ ...formData, lot_type: e.target.value })
-                }
-                className="border border-black px-3 py-2"
-              />
-
-              <input
-                type="number"
-                placeholder="Promo discount"
-                value={formData.promo_discount}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    promo_discount: Number(e.target.value),
-                  })
-                }
-                className="border border-black px-3 py-2"
-              />
-
-              <input
-                type="number"
-                placeholder="Downpayment"
-                value={formData.downpayment}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    downpayment: Number(e.target.value),
-                  })
-                }
-                className="border border-black px-3 py-2"
-              />
-
-              <input
-                type="number"
-                placeholder="Reservation fee"
-                value={formData.reservation_fee}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    reservation_fee: Number(e.target.value),
-                  })
-                }
-                className="border border-black px-3 py-2"
-              />
-
-              <input
-                type="number"
-                placeholder="Price per sqm"
-                value={formData.price_per_sqm}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    price_per_sqm: Number(e.target.value),
-                  })
-                }
-                className="border border-black px-3 py-2"
-              />
-
-              <input
-                type="number"
-                placeholder="Lot area sqm"
-                value={formData.lot_area_sqm}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    lot_area_sqm: Number(e.target.value),
-                  })
-                }
-                className="border border-black px-3 py-2"
-              />
-
-              <input
-                type="number"
-                placeholder="Net selling price"
-                value={formData.net_selling_price}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    net_selling_price: Number(e.target.value),
-                  })
-                }
-                className="border border-black px-3 py-2"
-              />
-
-              <input
-                type="number"
-                placeholder="Legal misc fee"
-                value={formData.legal_misc_fee}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    legal_misc_fee: Number(e.target.value),
-                  })
-                }
-                className="border border-black px-3 py-2"
-              />
-
-              <select
-                value={formData.status}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    status: e.target.value as ListingStatus,
-                  })
-                }
-                className="border border-black px-3 py-2"
-              >
-                <option value="available">Available</option>
-                <option value="reserved">Reserved</option>
-                <option value="hold">Hold</option>
-                <option value="sold">Sold</option>
-                <option value="inactive">Inactive</option>
-              </select>
-
-              {createListingMutation.isError && (
-                <p className="col-span-full text-sm text-red-600">
-                  {createListingMutation.error.message}
-                </p>
-              )}
-
-              <div className="col-span-full mt-2 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    resetForm()
-                    setIsAddOpen(false)
-                  }}
-                  className="border border-black px-4 py-2 hover:bg-gray-200"
-                >
-                  Cancel
-                </button>
-
-                <button
-                  type="submit"
-                  disabled={createListingMutation.isPending}
-                  className="border border-black px-4 py-2 hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {createListingMutation.isPending ? "Saving..." : "Save Listing"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {viewListing && (
-        <div className="fixed inset-0 flex items-center justify-center bg-black/40 p-4">
-          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto border border-black bg-white p-4">
-            <h2 className="mb-4 text-2xl font-bold">Listing Details</h2>
-
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              <p><b>ID:</b> {viewListing.id}</p>
-              <p><b>Project ID:</b> {viewListing.project_id}</p>
-              <p><b>Project:</b> {viewListing.project_name}</p>
-              <p><b>Cadastral Lot No.:</b> {viewListing.cadastral_lot_no || "-"}</p>
-              <p><b>Unit ID:</b> {viewListing.unit_id}</p>
-              <p><b>Lot Type:</b> {viewListing.lot_type || "-"}</p>
-              <p><b>Promo Discount:</b> {formatMoney(viewListing.promo_discount)}</p>
-              <p><b>Downpayment:</b> {formatMoney(viewListing.downpayment)}</p>
-              <p><b>Reservation Fee:</b> {formatMoney(viewListing.reservation_fee)}</p>
-              <p><b>Price Per SQM:</b> {formatMoney(viewListing.price_per_sqm)}</p>
-              <p><b>Lot Area:</b> {formatNumber(viewListing.lot_area_sqm)} sqm</p>
-              <p><b>Net Selling Price:</b> {formatMoney(viewListing.net_selling_price)}</p>
-              <p><b>Legal / Misc Fee:</b> {formatMoney(viewListing.legal_misc_fee)}</p>
-              <p><b>Status:</b> {viewListing.status}</p>
-              <p><b>Created At:</b> {viewListing.created_at}</p>
-              <p><b>Updated At:</b> {viewListing.updated_at}</p>
+                {createListingMutation.isPending ? "Saving..." : "Save Listing"}
+              </Button>
             </div>
+          </form>
+        </Modal>
+      ) : null}
 
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                onClick={() => {
-                  openEditModal(viewListing)
-                  setViewListing(null)
-                }}
-                className="border border-black px-4 py-2 hover:bg-gray-200"
-              >
-                Edit
-              </button>
-
-              <button
-                onClick={() => setViewListing(null)}
-                className="border border-black px-4 py-2 hover:bg-gray-200"
-              >
-                Close
-              </button>
-            </div>
+      {viewListing ? (
+        <Modal onClose={() => setViewListing(null)} title="Listing Details">
+          <div className="grid grid-cols-1 gap-3 text-sm md:grid-cols-2">
+            <p><b>ID:</b> {viewListing.id}</p>
+            <p><b>Project ID:</b> {viewListing.project_id}</p>
+            <p><b>Project:</b> {viewListing.project_name}</p>
+            <p><b>Cadastral Lot No.:</b> {viewListing.cadastral_lot_no || "-"}</p>
+            <p><b>Unit ID:</b> {viewListing.unit_id}</p>
+            <p><b>Lot Type:</b> {viewListing.lot_type || "-"}</p>
+            <p><b>Promo Discount:</b> {formatMoney(viewListing.promo_discount)}</p>
+            <p><b>Downpayment:</b> {formatMoney(viewListing.downpayment)}</p>
+            <p><b>Reservation Fee:</b> {formatMoney(viewListing.reservation_fee)}</p>
+            <p><b>Price Per SQM:</b> {formatMoney(viewListing.price_per_sqm)}</p>
+            <p><b>Lot Area:</b> {formatNumber(viewListing.lot_area_sqm)} sqm</p>
+            <p><b>Net Selling Price:</b> {formatMoney(viewListing.net_selling_price)}</p>
+            <p><b>Legal / Misc Fee:</b> {formatMoney(viewListing.legal_misc_fee)}</p>
+            <p><b>Status:</b> {viewListing.status}</p>
+            <p><b>Created At:</b> {formatDate(viewListing.created_at)}</p>
+            <p><b>Updated At:</b> {formatDate(viewListing.updated_at)}</p>
           </div>
-        </div>
-      )}
-
-      {editListing && (
-        <div className="fixed inset-0 flex items-center justify-center bg-black/40 p-4">
-          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto border border-black bg-white p-4">
-            <h2 className="mb-4 text-2xl font-bold">Edit Listing</h2>
-
-            <form
-              onSubmit={handleUpdateListing}
-              className="grid grid-cols-1 gap-3 md:grid-cols-2"
+          <div className="mt-5 flex justify-end gap-2">
+            <Button
+              icon={<FiEdit2 />}
+              onClick={() => {
+                openEditModal(viewListing)
+                setViewListing(null)
+              }}
+              variant="primary"
             >
-              <select
-                value={editFormData.project_id}
-                onChange={(e) =>
-                  setEditFormData({
-                    ...editFormData,
-                    project_id: Number(e.target.value),
-                  })
-                }
-                className="border border-black px-3 py-2"
-                required
-              >
-                <option value={0} disabled>
-                  Select project
-                </option>
-                {projects.map((project) => (
-                  <option key={project.id} value={project.id}>
-                    {project.name}
-                  </option>
-                ))}
-              </select>
-
-              <input
-                type="text"
-                value={editFormData.cadastral_lot_no}
-                onChange={(e) =>
-                  setEditFormData({
-                    ...editFormData,
-                    cadastral_lot_no: e.target.value,
-                  })
-                }
-                className="border border-black px-3 py-2"
-              />
-
-              <input
-                type="text"
-                value={editFormData.unit_id}
-                onChange={(e) =>
-                  setEditFormData({
-                    ...editFormData,
-                    unit_id: e.target.value,
-                  })
-                }
-                className="border border-black px-3 py-2"
-                required
-              />
-
-              <input
-                type="text"
-                value={editFormData.lot_type}
-                onChange={(e) =>
-                  setEditFormData({
-                    ...editFormData,
-                    lot_type: e.target.value,
-                  })
-                }
-                className="border border-black px-3 py-2"
-              />
-
-              <input
-                type="number"
-                value={editFormData.promo_discount}
-                onChange={(e) =>
-                  setEditFormData({
-                    ...editFormData,
-                    promo_discount: Number(e.target.value),
-                  })
-                }
-                className="border border-black px-3 py-2"
-              />
-
-              <input
-                type="number"
-                value={editFormData.downpayment}
-                onChange={(e) =>
-                  setEditFormData({
-                    ...editFormData,
-                    downpayment: Number(e.target.value),
-                  })
-                }
-                className="border border-black px-3 py-2"
-              />
-
-              <input
-                type="number"
-                value={editFormData.reservation_fee}
-                onChange={(e) =>
-                  setEditFormData({
-                    ...editFormData,
-                    reservation_fee: Number(e.target.value),
-                  })
-                }
-                className="border border-black px-3 py-2"
-              />
-
-              <input
-                type="number"
-                value={editFormData.price_per_sqm}
-                onChange={(e) =>
-                  setEditFormData({
-                    ...editFormData,
-                    price_per_sqm: Number(e.target.value),
-                  })
-                }
-                className="border border-black px-3 py-2"
-              />
-
-              <input
-                type="number"
-                value={editFormData.lot_area_sqm}
-                onChange={(e) =>
-                  setEditFormData({
-                    ...editFormData,
-                    lot_area_sqm: Number(e.target.value),
-                  })
-                }
-                className="border border-black px-3 py-2"
-              />
-
-              <input
-                type="number"
-                value={editFormData.net_selling_price}
-                onChange={(e) =>
-                  setEditFormData({
-                    ...editFormData,
-                    net_selling_price: Number(e.target.value),
-                  })
-                }
-                className="border border-black px-3 py-2"
-              />
-
-              <input
-                type="number"
-                value={editFormData.legal_misc_fee}
-                onChange={(e) =>
-                  setEditFormData({
-                    ...editFormData,
-                    legal_misc_fee: Number(e.target.value),
-                  })
-                }
-                className="border border-black px-3 py-2"
-              />
-
-              <select
-                value={editFormData.status}
-                onChange={(e) =>
-                  setEditFormData({
-                    ...editFormData,
-                    status: e.target.value as ListingStatus,
-                  })
-                }
-                className="border border-black px-3 py-2"
-              >
-                <option value="available">Available</option>
-                <option value="reserved">Reserved</option>
-                <option value="hold">Hold</option>
-                <option value="sold">Sold</option>
-                <option value="inactive">Inactive</option>
-              </select>
-
-              {updateListingMutation.isError && (
-                <p className="col-span-full text-sm text-red-600">
-                  {updateListingMutation.error.message}
-                </p>
-              )}
-
-              <div className="col-span-full mt-2 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setEditListing(null)}
-                  className="border border-black px-4 py-2 hover:bg-gray-200"
-                >
-                  Cancel
-                </button>
-
-                <button
-                  type="submit"
-                  disabled={updateListingMutation.isPending}
-                  className="border border-black px-4 py-2 hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {updateListingMutation.isPending ? "Saving..." : "Save Changes"}
-                </button>
-              </div>
-            </form>
+              Edit
+            </Button>
+            <Button onClick={() => setViewListing(null)}>Close</Button>
           </div>
-        </div>
-      )}
+        </Modal>
+      ) : null}
+
+      {editListing ? (
+        <Modal onClose={() => setEditListing(null)} title="Edit Listing">
+          <form className="space-y-4" onSubmit={handleUpdateListing}>
+            {formFields(editFormData, setEditFormData)}
+            {updateListingMutation.isError ? (
+              <Alert type="error">{updateListingMutation.error.message}</Alert>
+            ) : null}
+            <div className="flex justify-end gap-2">
+              <Button onClick={() => setEditListing(null)}>Cancel</Button>
+              <Button
+                disabled={updateListingMutation.isPending}
+                type="submit"
+                variant="primary"
+              >
+                {updateListingMutation.isPending ? "Saving..." : "Save Changes"}
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      ) : null}
     </div>
   )
 }
