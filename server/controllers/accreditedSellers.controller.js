@@ -1,189 +1,128 @@
 import { db } from '../db/connect.js'
 import { createAuditLog } from '../utils/createAuditLog.js'
+import { getClientIp } from '../utils/getClientIp.js'
 
-const allowedSellerRoles = [
-  'broker_network_manager',
-  'broker',
-  'manager',
-  'agent'
-]
-
-const allowedStatuses = [
-  'active',
-  'inactive'
-]
-
-const parentRoleBySellerRole = {
-  broker_network_manager: null,
-  broker: 'broker_network_manager',
-  manager: 'broker',
-  agent: 'manager'
-}
+const sellerRoles = ['broker_network_manager', 'broker', 'agent']
 
 const isMissing = (value) => {
   return value === undefined || value === null || value === ''
 }
 
 const nullableValue = (value) => {
-  if (isMissing(value)) {
-    return null
-  }
-
+  if (isMissing(value)) return null
   return value
 }
 
+const normalizeSellerRole = (role) => {
+  if (isMissing(role)) return 'agent'
+  return String(role)
+}
+
+const validateSellerRole = (role) => {
+  return sellerRoles.includes(role)
+}
+
 const sellerFields = `
-  s.id,
-  s.user_id,
-  linked_user.full_name AS linked_user_name,
-  s.full_name,
-  s.email,
-  s.contact_no,
-  s.seller_role,
-  s.parent_seller_id,
-  parent_seller.full_name AS parent_seller_name,
-  parent_seller.seller_role AS parent_seller_role,
-  s.status,
-  s.created_at,
-  s.updated_at
+  seller.id,
+  seller.user_id,
+  seller.full_name,
+  seller.email,
+  seller.contact_no,
+  seller.seller_role,
+  seller.parent_seller_id,
+  parent.full_name AS parent_seller_name,
+  parent.seller_role AS parent_seller_role,
+  seller.custom_reports_under,
+  COALESCE(parent.full_name, seller.custom_reports_under, 'None') AS reports_under_display,
+  seller.status,
+  seller.created_at,
+  seller.updated_at
 `
 
 const sellerJoins = `
-  FROM accredited_sellers s
-  LEFT JOIN users linked_user ON linked_user.id = s.user_id
-  LEFT JOIN accredited_sellers parent_seller ON parent_seller.id = s.parent_seller_id
+  FROM accredited_sellers seller
+  LEFT JOIN accredited_sellers parent
+    ON parent.id = seller.parent_seller_id
 `
 
-const userExists = async (connectionOrDb, userId) => {
-  const [rows] = await connectionOrDb.query(
-    `
-    SELECT id
-    FROM users
-    WHERE id = ?
-    LIMIT 1
-    `,
-    [userId]
-  )
+const mapSeller = (seller) => ({
+  ...seller,
+  reports_under_display:
+    seller.parent_seller_name || seller.custom_reports_under || 'None',
+})
 
-  return rows.length > 0
-}
-
-export const validateSellerParent = async (
-  connectionOrDb,
-  sellerRole,
-  parentSellerId,
-  currentSellerId = null
-) => {
-  if (sellerRole === 'broker_network_manager') {
-    if (!isMissing(parentSellerId)) {
-      return {
-        isValid: false,
-        message: 'Broker network manager cannot have a parent seller'
-      }
-    }
-
-    return {
-      isValid: true
-    }
-  }
-
-  const requiredParentRole = parentRoleBySellerRole[sellerRole]
-
-  if (isMissing(parentSellerId)) {
-    return {
-      isValid: false,
-      message: `${sellerRole} must have a parent seller`
-    }
-  }
-
-  if (!isMissing(currentSellerId) && String(parentSellerId) === String(currentSellerId)) {
-    return {
-      isValid: false,
-      message: 'Seller cannot be its own parent'
-    }
-  }
-
-  const [parentRows] = await connectionOrDb.query(
+const getSellerById = async (id) => {
+  const [rows] = await db.query(
     `
     SELECT
-      id,
-      seller_role
+      ${sellerFields}
+    ${sellerJoins}
+    WHERE seller.id = ?
+    LIMIT 1
+    `,
+    [id]
+  )
+
+  return rows[0] ? mapSeller(rows[0]) : null
+}
+
+const validateParentSeller = async ({ sellerId = null, parentSellerId }) => {
+  if (isMissing(parentSellerId)) {
+    return {
+      isValid: true,
+      message: null,
+    }
+  }
+
+  if (sellerId && Number(sellerId) === Number(parentSellerId)) {
+    return {
+      isValid: false,
+      message: 'Seller cannot report under themselves',
+    }
+  }
+
+  const [rows] = await db.query(
+    `
+    SELECT id
     FROM accredited_sellers
     WHERE id = ?
+      AND status = 'active'
     LIMIT 1
     `,
     [parentSellerId]
   )
 
-  const parentSeller = parentRows[0]
-
-  if (!parentSeller) {
+  if (rows.length === 0) {
     return {
       isValid: false,
-      message: 'Parent seller not found'
-    }
-  }
-
-  if (parentSeller.seller_role !== requiredParentRole) {
-    return {
-      isValid: false,
-      message: `${sellerRole} must report under ${requiredParentRole}`
+      message: 'Reports under seller not found or inactive',
     }
   }
 
   return {
-    isValid: true
+    isValid: true,
+    message: null,
   }
 }
 
-const wouldCreateHierarchyCycle = async (connectionOrDb, currentSellerId, parentSellerId) => {
-  if (isMissing(parentSellerId)) {
-    return false
+const buildReportsUnderValues = ({ parent_seller_id, custom_reports_under }) => {
+  const hasCustomReportsUnder = !isMissing(custom_reports_under)
+
+  if (hasCustomReportsUnder) {
+    return {
+      parentSellerId: null,
+      customReportsUnder: String(custom_reports_under).trim(),
+    }
   }
 
-  let cursorId = parentSellerId
-  const visitedSellerIds = new Set()
-
-  while (!isMissing(cursorId)) {
-    if (String(cursorId) === String(currentSellerId)) {
-      return true
-    }
-
-    if (visitedSellerIds.has(String(cursorId))) {
-      return true
-    }
-
-    visitedSellerIds.add(String(cursorId))
-
-    const [rows] = await connectionOrDb.query(
-      `
-      SELECT parent_seller_id
-      FROM accredited_sellers
-      WHERE id = ?
-      LIMIT 1
-      `,
-      [cursorId]
-    )
-
-    const seller = rows[0]
-
-    if (!seller) {
-      return false
-    }
-
-    cursorId = seller.parent_seller_id
+  return {
+    parentSellerId: nullableValue(parent_seller_id),
+    customReportsUnder: null,
   }
-
-  return false
 }
 
 export const getAccreditedSellers = async (req, res) => {
-  const {
-    search,
-    status,
-    seller_role,
-    parent_seller_id
-  } = req.query
+  const { search, status, seller_role } = req.query
 
   const conditions = []
   const params = []
@@ -193,77 +132,69 @@ export const getAccreditedSellers = async (req, res) => {
 
     conditions.push(`
       (
-        s.full_name LIKE ?
-        OR s.email LIKE ?
-        OR s.contact_no LIKE ?
-        OR s.seller_role LIKE ?
-        OR s.status LIKE ?
-        OR parent_seller.full_name LIKE ?
+        seller.full_name LIKE ?
+        OR seller.email LIKE ?
+        OR seller.contact_no LIKE ?
+        OR seller.seller_role LIKE ?
+        OR seller.status LIKE ?
+        OR parent.full_name LIKE ?
+        OR seller.custom_reports_under LIKE ?
       )
     `)
 
-    params.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm)
+    params.push(
+      searchTerm,
+      searchTerm,
+      searchTerm,
+      searchTerm,
+      searchTerm,
+      searchTerm,
+      searchTerm
+    )
   }
 
-  if (!isMissing(status)) {
-    conditions.push('s.status = ?')
+  if (!isMissing(status) && status !== 'all') {
+    conditions.push('seller.status = ?')
     params.push(status)
   }
 
-  if (!isMissing(seller_role)) {
-    conditions.push('s.seller_role = ?')
+  if (!isMissing(seller_role) && seller_role !== 'all') {
+    conditions.push('seller.seller_role = ?')
     params.push(seller_role)
   }
 
-  if (!isMissing(parent_seller_id)) {
-    conditions.push('s.parent_seller_id = ?')
-    params.push(parent_seller_id)
-  }
-
-  const whereClause = conditions.length > 0
-    ? `WHERE ${conditions.join(' AND ')}`
-    : ''
-
-  const [sellers] = await db.query(
-    `
-    SELECT
-      ${sellerFields}
-    ${sellerJoins}
-    ${whereClause}
-    ORDER BY s.id ASC
-    `,
-    params
-  )
-
-  res.status(200).json({
-    sellers
-  })
-}
-
-export const getAccreditedSeller = async (req, res) => {
-  const { id } = req.params
+  const whereClause =
+    conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
 
   const [rows] = await db.query(
     `
     SELECT
       ${sellerFields}
     ${sellerJoins}
-    WHERE s.id = ?
-    LIMIT 1
+    ${whereClause}
+    ORDER BY seller.id DESC
     `,
-    [id]
+    params
   )
 
-  const seller = rows[0]
+  res.status(200).json({
+    accreditedSellers: rows.map(mapSeller),
+  })
+}
+
+export const getAccreditedSeller = async (req, res) => {
+  const { id } = req.params
+
+  const seller = await getSellerById(id)
 
   if (!seller) {
     return res.status(404).json({
-      message: 'Accredited seller not found'
+      message: 'Accredited seller not found',
     })
   }
 
   res.status(200).json({
-    seller
+    accreditedSeller: seller,
   })
 }
 
@@ -275,48 +206,36 @@ export const createAccreditedSeller = async (req, res) => {
     contact_no,
     seller_role,
     parent_seller_id,
-    status
+    custom_reports_under,
+    status = 'active',
   } = req.body
 
   if (isMissing(full_name)) {
     return res.status(400).json({
-      message: 'Seller full name is required'
+      message: 'Seller full name is required',
     })
   }
 
-  const nextSellerRole = seller_role || 'agent'
-  const nextStatus = status || 'active'
-  const nextParentSellerId = nextSellerRole === 'broker_network_manager'
-    ? null
-    : nullableValue(parent_seller_id)
+  const finalSellerRole = normalizeSellerRole(seller_role)
 
-  if (!allowedSellerRoles.includes(nextSellerRole)) {
+  if (!validateSellerRole(finalSellerRole)) {
     return res.status(400).json({
-      message: 'Invalid seller role'
+      message: 'Invalid seller role',
     })
   }
 
-  if (!allowedStatuses.includes(nextStatus)) {
-    return res.status(400).json({
-      message: 'Invalid seller status'
-    })
-  }
+  const { parentSellerId, customReportsUnder } = buildReportsUnderValues({
+    parent_seller_id,
+    custom_reports_under,
+  })
 
-  if (!isMissing(user_id) && !(await userExists(db, user_id))) {
-    return res.status(404).json({
-      message: 'Linked user not found'
-    })
-  }
-
-  const parentValidation = await validateSellerParent(
-    db,
-    nextSellerRole,
-    nextParentSellerId
-  )
+  const parentValidation = await validateParentSeller({
+    parentSellerId,
+  })
 
   if (!parentValidation.isValid) {
     return res.status(400).json({
-      message: parentValidation.message
+      message: parentValidation.message,
     })
   }
 
@@ -329,17 +248,19 @@ export const createAccreditedSeller = async (req, res) => {
       contact_no,
       seller_role,
       parent_seller_id,
+      custom_reports_under,
       status
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `,
     [
       nullableValue(user_id),
       full_name,
       nullableValue(email),
       nullableValue(contact_no),
-      nextSellerRole,
-      nextParentSellerId,
-      nextStatus
+      finalSellerRole,
+      parentSellerId,
+      customReportsUnder,
+      status,
     ]
   )
 
@@ -348,17 +269,18 @@ export const createAccreditedSeller = async (req, res) => {
     action: 'create',
     module: 'Accredited Sellers',
     description: `Created accredited seller ${full_name}`,
-    ipAddress: req.ip
+    ipAddress: getClientIp(req),
   })
 
   res.status(201).json({
     message: 'Accredited seller created successfully',
-    sellerId: result.insertId
+    sellerId: result.insertId,
   })
 }
 
 export const updateAccreditedSeller = async (req, res) => {
   const { id } = req.params
+
   const {
     user_id,
     full_name,
@@ -366,73 +288,49 @@ export const updateAccreditedSeller = async (req, res) => {
     contact_no,
     seller_role,
     parent_seller_id,
-    status
+    custom_reports_under,
+    status = 'active',
   } = req.body
-
-  const [existingRows] = await db.query(
-    `
-    SELECT id
-    FROM accredited_sellers
-    WHERE id = ?
-    LIMIT 1
-    `,
-    [id]
-  )
-
-  if (!existingRows[0]) {
-    return res.status(404).json({
-      message: 'Accredited seller not found'
-    })
-  }
 
   if (isMissing(full_name)) {
     return res.status(400).json({
-      message: 'Seller full name is required'
+      message: 'Seller full name is required',
     })
   }
 
-  if (!allowedSellerRoles.includes(seller_role)) {
-    return res.status(400).json({
-      message: 'Invalid seller role'
-    })
-  }
+  const existingSeller = await getSellerById(id)
 
-  if (!allowedStatuses.includes(status)) {
-    return res.status(400).json({
-      message: 'Invalid seller status'
-    })
-  }
-
-  const nextParentSellerId = seller_role === 'broker_network_manager'
-    ? null
-    : nullableValue(parent_seller_id)
-
-  if (!isMissing(user_id) && !(await userExists(db, user_id))) {
+  if (!existingSeller) {
     return res.status(404).json({
-      message: 'Linked user not found'
+      message: 'Accredited seller not found',
     })
   }
 
-  const parentValidation = await validateSellerParent(
-    db,
-    seller_role,
-    nextParentSellerId,
-    id
-  )
+  const finalSellerRole = normalizeSellerRole(seller_role)
+
+  if (!validateSellerRole(finalSellerRole)) {
+    return res.status(400).json({
+      message: 'Invalid seller role',
+    })
+  }
+
+  const { parentSellerId, customReportsUnder } = buildReportsUnderValues({
+    parent_seller_id,
+    custom_reports_under,
+  })
+
+  const parentValidation = await validateParentSeller({
+    sellerId: id,
+    parentSellerId,
+  })
 
   if (!parentValidation.isValid) {
     return res.status(400).json({
-      message: parentValidation.message
+      message: parentValidation.message,
     })
   }
 
-  if (await wouldCreateHierarchyCycle(db, id, nextParentSellerId)) {
-    return res.status(400).json({
-      message: 'Parent seller cannot be a descendant of this seller'
-    })
-  }
-
-  const [result] = await db.query(
+  await db.query(
     `
     UPDATE accredited_sellers
     SET
@@ -442,6 +340,7 @@ export const updateAccreditedSeller = async (req, res) => {
       contact_no = ?,
       seller_role = ?,
       parent_seller_id = ?,
+      custom_reports_under = ?,
       status = ?
     WHERE id = ?
     `,
@@ -450,146 +349,97 @@ export const updateAccreditedSeller = async (req, res) => {
       full_name,
       nullableValue(email),
       nullableValue(contact_no),
-      seller_role,
-      nextParentSellerId,
+      finalSellerRole,
+      parentSellerId,
+      customReportsUnder,
       status,
-      id
+      id,
     ]
   )
-
-  if (result.affectedRows === 0) {
-    return res.status(404).json({
-      message: 'Accredited seller not found'
-    })
-  }
 
   await createAuditLog({
     userId: req.user.id,
     action: 'update',
     module: 'Accredited Sellers',
     description: `Updated accredited seller ${full_name}`,
-    ipAddress: req.ip
+    ipAddress: getClientIp(req),
   })
 
   res.status(200).json({
-    message: 'Accredited seller updated successfully'
-  })
-}
-
-export const getSellerHierarchy = async (req, res) => {
-  const [sellers] = await db.query(
-    `
-    SELECT
-      id,
-      full_name,
-      seller_role,
-      parent_seller_id,
-      status
-    FROM accredited_sellers
-    ORDER BY id ASC
-    `
-  )
-
-  const sellerMap = new Map()
-  const hierarchy = []
-
-  sellers.forEach((seller) => {
-    sellerMap.set(seller.id, {
-      id: seller.id,
-      full_name: seller.full_name,
-      seller_role: seller.seller_role,
-      status: seller.status,
-      children: []
-    })
-  })
-
-  sellers.forEach((seller) => {
-    const hierarchySeller = sellerMap.get(seller.id)
-
-    if (isMissing(seller.parent_seller_id)) {
-      hierarchy.push(hierarchySeller)
-      return
-    }
-
-    const parentSeller = sellerMap.get(seller.parent_seller_id)
-
-    if (parentSeller) {
-      parentSeller.children.push(hierarchySeller)
-      return
-    }
-
-    hierarchy.push(hierarchySeller)
-  })
-
-  res.status(200).json({
-    hierarchy
+    message: 'Accredited seller updated successfully',
   })
 }
 
 export const getPossibleParentSellers = async (req, res) => {
-  const {
-    seller_role,
-    current_seller_id
-  } = req.query
+  const { exclude_id } = req.query
 
-  if (!allowedSellerRoles.includes(seller_role)) {
-    return res.status(400).json({
-      message: 'Invalid seller role'
-    })
+  const conditions = ['seller.status = ?']
+  const params = ['active']
+
+  if (!isMissing(exclude_id)) {
+    conditions.push('seller.id <> ?')
+    params.push(exclude_id)
   }
 
-  const requiredParentRole = parentRoleBySellerRole[seller_role]
-
-  if (!requiredParentRole) {
-    return res.status(200).json({
-      sellers: []
-    })
-  }
-
-  const conditions = [
-    'seller_role = ?',
-    'status = ?'
-  ]
-  const params = [
-    requiredParentRole,
-    'active'
-  ]
-
-  if (!isMissing(current_seller_id)) {
-    conditions.push('id <> ?')
-    params.push(current_seller_id)
-  }
-
-  const [sellers] = await db.query(
+  const [rows] = await db.query(
     `
     SELECT
-      id,
-      full_name,
-      seller_role,
-      parent_seller_id,
-      status
-    FROM accredited_sellers
+      seller.id,
+      seller.user_id,
+      seller.full_name,
+      seller.email,
+      seller.contact_no,
+      seller.seller_role,
+      seller.parent_seller_id,
+      parent.full_name AS parent_seller_name,
+      parent.seller_role AS parent_seller_role,
+      seller.custom_reports_under,
+      COALESCE(parent.full_name, seller.custom_reports_under, 'None') AS reports_under_display,
+      seller.status,
+      seller.created_at,
+      seller.updated_at
+    FROM accredited_sellers seller
+    LEFT JOIN accredited_sellers parent
+      ON parent.id = seller.parent_seller_id
     WHERE ${conditions.join(' AND ')}
-    ORDER BY id ASC
+    ORDER BY
+      FIELD(seller.seller_role, 'broker_network_manager', 'broker', 'agent'),
+      seller.full_name ASC
     `,
     params
   )
 
-  if (!isMissing(current_seller_id)) {
-    const filteredSellers = []
+  res.status(200).json({
+    possibleParentSellers: rows.map(mapSeller),
+  })
+}
 
-    for (const seller of sellers) {
-      if (!(await wouldCreateHierarchyCycle(db, current_seller_id, seller.id))) {
-        filteredSellers.push(seller)
-      }
-    }
+export const getSellerHierarchy = async (req, res) => {
+  const [rows] = await db.query(
+    `
+    SELECT
+      ${sellerFields}
+    ${sellerJoins}
+    ORDER BY
+      FIELD(seller.seller_role, 'broker_network_manager', 'broker', 'agent'),
+      seller.full_name ASC
+    `
+  )
 
-    return res.status(200).json({
-      sellers: filteredSellers
-    })
-  }
+  const sellers = rows.map(mapSeller)
+
+  const brokerNetworkManagers = sellers.filter(
+    (seller) => seller.seller_role === 'broker_network_manager'
+  )
+
+  const brokers = sellers.filter((seller) => seller.seller_role === 'broker')
+
+  const agents = sellers.filter((seller) => seller.seller_role === 'agent')
 
   res.status(200).json({
-    sellers
+    brokerNetworkManagers,
+    brokers,
+    agents,
+    sellers,
   })
 }

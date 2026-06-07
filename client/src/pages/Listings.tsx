@@ -15,15 +15,28 @@ import StatCard from "../components/ui/StatCard"
 import StatusBadge from "../components/ui/StatusBadge"
 import TableContainer from "../components/ui/TableContainer"
 import { API_URL, getErrorMessage } from "../utils/api"
-import { formatDate, formatMoney, formatNumber } from "../utils/formatters"
+import {
+  formatDate,
+  formatMoney,
+  formatNumber,
+  formatText,
+} from "../utils/formatters"
 import { paginateRows } from "../utils/pagination"
 
-type ListingStatus = "available" | "reserved" | "hold" | "sold" | "inactive" | string
+type ListingStatus =
+  | "available"
+  | "reserved"
+  | "hold"
+  | "sold"
+  | "inactive"
+  | string
 
 type Listing = {
   id: number
   project_id: number
   project_name: string
+  project_location?: string | null
+  project_administrator?: string | null
   cadastral_lot_no: string | null
   unit_id: string
   lot_type: string | null
@@ -32,8 +45,11 @@ type Listing = {
   reservation_fee: number | string
   price_per_sqm: number | string
   lot_area_sqm: number | string
+  gross_selling_price?: number | string
   net_selling_price: number | string
+  legal_misc_rate: number | string
   legal_misc_fee: number | string
+  total_contract_price: number | string
   status: ListingStatus
   created_at: string
   updated_at: string
@@ -42,6 +58,62 @@ type Listing = {
 type Project = {
   id: number
   name: string
+}
+
+type ClientUnitFullDetails = {
+  id: number
+  client_id: number
+  listing_id: number
+  assigned_user_id: number | null
+  assigned_user_name: string | null
+  status: string
+  balance: number | string
+  due_day: number | null
+  created_at: string
+  updated_at: string
+  client_name: string
+  spouse_co_owner_name: string | null
+  client_email: string | null
+  client_contact_no: string | null
+  client_address: string | null
+  client_region: string | null
+}
+
+type PaymentSummary = {
+  total_paid: number | string
+  payment_count: number
+  latest_payment_date: string | null
+  latest_payment_amount: number | string
+  payment_status: string
+  balance: number | string
+}
+
+type CommissionSummary = {
+  seller_name: string | null
+  seller_role: string | null
+  reports_under: string | null
+  rate: number | string
+  amount: number | string
+  released_amount: number | string
+  remaining_amount: number | string
+  status: string | null
+}
+
+type DocumentSummary = {
+  total_documents: number
+  required_documents: number
+  submitted_documents: number
+  approved_documents: number
+  missing_required_documents: number
+  document_status: string
+}
+
+type ListingFullDetails = {
+  listing: Listing
+  clientUnit: ClientUnitFullDetails | null
+  paymentSummary: PaymentSummary
+  commissionSummary: CommissionSummary
+  documentSummary: DocumentSummary
 }
 
 type ListingFormData = {
@@ -54,7 +126,7 @@ type ListingFormData = {
   reservation_fee: number
   price_per_sqm: number
   lot_area_sqm: number
-  legal_misc_fee: number
+  legal_misc_rate: number
   status: ListingStatus
 }
 
@@ -76,7 +148,7 @@ const defaultListingFormData: ListingFormData = {
   reservation_fee: 0,
   price_per_sqm: 0,
   lot_area_sqm: 0,
-  legal_misc_fee: 10,
+  legal_misc_rate: 10,
   status: "available",
 }
 
@@ -90,6 +162,7 @@ const statusFilters = [
 ]
 
 const normalLotTypes = ["inner", "corner", "end"]
+
 const chartColors = ["#2563eb", "#f59e0b", "#8b5cf6", "#10b981", "#ef4444"]
 
 const fetchListings = async () => {
@@ -116,6 +189,18 @@ const fetchProjects = async () => {
 
   const data = (await response.json()) as ProjectsResponse
   return data.projects
+}
+
+const fetchListingFullDetails = async (listingId: number) => {
+  const response = await fetch(`${API_URL}/listings/${listingId}/full-details`, {
+    credentials: "include",
+  })
+
+  if (!response.ok) {
+    throw new Error(await getErrorMessage(response))
+  }
+
+  return (await response.json()) as ListingFullDetails
 }
 
 const createListing = async (listingData: ListingFormData) => {
@@ -189,16 +274,7 @@ const listingToFormData = (listing: Listing): ListingFormData => ({
   reservation_fee: Number(listing.reservation_fee || 0),
   price_per_sqm: Number(listing.price_per_sqm || 0),
   lot_area_sqm: Number(listing.lot_area_sqm || 0),
-  legal_misc_fee:
-    Number(listing.net_selling_price || 0) > 0
-      ? Number(
-          (
-            (Number(listing.legal_misc_fee || 0) /
-              Number(listing.net_selling_price || 1)) *
-            100
-          ).toFixed(2)
-        )
-      : 10,
+  legal_misc_rate: Number(listing.legal_misc_rate || 10),
   status: listing.status,
 })
 
@@ -211,7 +287,7 @@ const Listings = () => {
   const [lotTypeFilter, setLotTypeFilter] = useState("all")
 
   const [isAddOpen, setIsAddOpen] = useState(false)
-  const [viewListing, setViewListing] = useState<Listing | null>(null)
+  const [viewListingId, setViewListingId] = useState<number | null>(null)
   const [editListing, setEditListing] = useState<Listing | null>(null)
 
   const [formData, setFormData] =
@@ -242,10 +318,21 @@ const Listings = () => {
     queryFn: fetchProjects,
   })
 
+  const {
+    data: listingFullDetails,
+    isLoading: isFullDetailsLoading,
+    error: fullDetailsError,
+  } = useQuery({
+    queryKey: ["listing-full-details", viewListingId],
+    queryFn: () => fetchListingFullDetails(viewListingId || 0),
+    enabled: Boolean(viewListingId),
+  })
+
   const createListingMutation = useMutation({
     mutationFn: createListing,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["listings"] })
+      queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] })
       setIsAddOpen(false)
       resetForm()
       setSuccessMessage("Listing created successfully")
@@ -256,6 +343,14 @@ const Listings = () => {
     mutationFn: updateListing,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["listings"] })
+      queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] })
+
+      if (viewListingId) {
+        queryClient.invalidateQueries({
+          queryKey: ["listing-full-details", viewListingId],
+        })
+      }
+
       setEditListing(null)
       setSuccessMessage("Listing updated successfully")
     },
@@ -353,7 +448,8 @@ const Listings = () => {
     .filter((status) => status.value !== "all")
     .map((status) => ({
       name: status.label,
-      value: listings.filter((listing) => listing.status === status.value).length,
+      value: listings.filter((listing) => listing.status === status.value)
+        .length,
     }))
 
   const totalValue = listings.reduce(
@@ -474,7 +570,7 @@ const Listings = () => {
           <option value="all">All Lot Types</option>
           {allLotTypes.map((lotType) => (
             <option key={lotType} value={lotType}>
-              {lotType}
+              {formatText(lotType)}
             </option>
           ))}
         </Select>
@@ -512,11 +608,12 @@ const Listings = () => {
             <tr className="border-b border-slate-200">
               <th className="px-4 py-3 text-left">Unit ID</th>
               <th className="px-4 py-3 text-left">Project</th>
+              <th className="px-4 py-3 text-left">Cadastral Lot No.</th>
               <th className="px-4 py-3 text-left">Lot Type</th>
               <th className="px-4 py-3 text-left">Area</th>
-              <th className="px-4 py-3 text-left">Price / SQM</th>
               <th className="px-4 py-3 text-left">Net Price</th>
               <th className="px-4 py-3 text-left">Legal / Misc</th>
+              <th className="px-4 py-3 text-left">Total Contract</th>
               <th className="px-4 py-3 text-left">Status</th>
               <th className="px-4 py-3 text-left">Actions</th>
             </tr>
@@ -526,33 +623,55 @@ const Listings = () => {
             {paginatedListings.map((listing) => (
               <tr key={listing.id} className="border-b border-slate-100">
                 <td className="px-4 py-3 font-semibold">{listing.unit_id}</td>
+
                 <td className="px-4 py-3 text-slate-600">
                   {listing.project_name}
                 </td>
+
                 <td className="px-4 py-3 text-slate-600">
-                  {listing.lot_type || "-"}
+                  {listing.cadastral_lot_no || "-"}
                 </td>
+
+                <td className="px-4 py-3 text-slate-600">
+                  {formatText(listing.lot_type)}
+                </td>
+
                 <td className="px-4 py-3 text-slate-600">
                   {formatNumber(listing.lot_area_sqm)} sqm
                 </td>
-                <td className="px-4 py-3 text-slate-600">
-                  {formatMoney(listing.price_per_sqm)}
-                </td>
+
                 <td className="px-4 py-3 text-slate-600">
                   {formatMoney(listing.net_selling_price)}
                 </td>
+
                 <td className="px-4 py-3 text-slate-600">
-                  {formatMoney(listing.legal_misc_fee)}
+                  <div>{formatNumber(listing.legal_misc_rate)}%</div>
+                  <div className="text-xs text-slate-500">
+                    {formatMoney(listing.legal_misc_fee)}
+                  </div>
                 </td>
+
+                <td className="px-4 py-3 text-slate-600">
+                  {formatMoney(listing.total_contract_price)}
+                </td>
+
                 <td className="px-4 py-3">
                   <StatusBadge status={listing.status} />
                 </td>
+
                 <td className="px-4 py-3">
                   <div className="flex flex-wrap gap-2">
-                    <Button icon={<FiEye />} onClick={() => setViewListing(listing)}>
+                    <Button
+                      icon={<FiEye />}
+                      onClick={() => setViewListingId(listing.id)}
+                    >
                       Details
                     </Button>
-                    <Button icon={<FiEdit2 />} onClick={() => openEditModal(listing)}>
+
+                    <Button
+                      icon={<FiEdit2 />}
+                      onClick={() => openEditModal(listing)}
+                    >
                       Edit
                     </Button>
                   </div>
@@ -562,7 +681,7 @@ const Listings = () => {
 
             {paginatedListings.length === 0 ? (
               <tr>
-                <td colSpan={9}>
+                <td colSpan={10}>
                   <EmptyState title="No listings found" />
                 </td>
               </tr>
@@ -613,57 +732,13 @@ const Listings = () => {
         />
       ) : null}
 
-      {viewListing ? (
-        <Modal
-          title={`Listing Details - ${viewListing.unit_id}`}
-          onClose={() => setViewListing(null)}
-          footer={
-            <div className="flex justify-end">
-              <Button onClick={() => setViewListing(null)}>Close</Button>
-            </div>
-          }
-        >
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <Detail label="Project" value={viewListing.project_name} />
-            <Detail label="Unit ID" value={viewListing.unit_id} />
-            <Detail
-              label="Cadastral Lot No."
-              value={viewListing.cadastral_lot_no || "-"}
-            />
-            <Detail label="Lot Type" value={viewListing.lot_type || "-"} />
-            <Detail
-              label="Area"
-              value={`${formatNumber(viewListing.lot_area_sqm)} sqm`}
-            />
-            <Detail
-              label="Price / SQM"
-              value={formatMoney(viewListing.price_per_sqm)}
-            />
-            <Detail
-              label="Promo Discount"
-              value={formatMoney(viewListing.promo_discount)}
-            />
-            <Detail
-              label="Downpayment"
-              value={formatMoney(viewListing.downpayment)}
-            />
-            <Detail
-              label="Reservation Fee"
-              value={formatMoney(viewListing.reservation_fee)}
-            />
-            <Detail
-              label="Net Selling Price"
-              value={formatMoney(viewListing.net_selling_price)}
-            />
-            <Detail
-              label="Legal / Misc Fee"
-              value={formatMoney(viewListing.legal_misc_fee)}
-            />
-            <Detail label="Status" value={viewListing.status} />
-            <Detail label="Created At" value={formatDate(viewListing.created_at)} />
-            <Detail label="Updated At" value={formatDate(viewListing.updated_at)} />
-          </div>
-        </Modal>
+      {viewListingId ? (
+        <ListingDetailsModal
+          details={listingFullDetails}
+          error={fullDetailsError}
+          isLoading={isFullDetailsLoading}
+          onClose={() => setViewListingId(null)}
+        />
       ) : null}
     </div>
   )
@@ -698,6 +773,8 @@ const ListingFormModal = ({
   isPending,
   submitLabel,
 }: ListingFormModalProps) => {
+  const formId = `${title.replaceAll(" ", "-").toLowerCase()}-form`
+
   return (
     <Modal
       title={title}
@@ -708,7 +785,7 @@ const ListingFormModal = ({
           <Button onClick={onClose}>Cancel</Button>
           <Button
             disabled={isPending}
-            form={`${title.replaceAll(" ", "-").toLowerCase()}-form`}
+            form={formId}
             type="submit"
             variant="primary"
           >
@@ -718,7 +795,7 @@ const ListingFormModal = ({
       }
     >
       <form
-        id={`${title.replaceAll(" ", "-").toLowerCase()}-form`}
+        id={formId}
         onSubmit={onSubmit}
         className="grid grid-cols-1 gap-4 md:grid-cols-2"
       >
@@ -866,15 +943,15 @@ const ListingFormModal = ({
 
         <div>
           <Input
-            label="Legal / Misc Fee (%)"
+            label="Legal / Misc Rate (%)"
             type="number"
             min={0}
             step="0.01"
-            value={formData.legal_misc_fee}
+            value={formData.legal_misc_rate}
             onChange={(e) =>
               setFormData({
                 ...formData,
-                legal_misc_fee: Number(e.target.value),
+                legal_misc_rate: Number(e.target.value),
               })
             }
           />
@@ -904,13 +981,297 @@ const ListingFormModal = ({
   )
 }
 
-const Detail = ({ label, value }: { label: string; value: string }) => {
+type ListingDetailsModalProps = {
+  details?: ListingFullDetails
+  error: unknown
+  isLoading: boolean
+  onClose: () => void
+}
+
+const ListingDetailsModal = ({
+  details,
+  error,
+  isLoading,
+  onClose,
+}: ListingDetailsModalProps) => {
+  return (
+    <Modal
+      title={
+        details
+          ? `Listing Details - ${details.listing.unit_id}`
+          : "Listing Details"
+      }
+      onClose={onClose}
+      size="xl"
+      footer={
+        <div className="flex justify-end">
+          <Button onClick={onClose}>Close</Button>
+        </div>
+      }
+    >
+      {isLoading ? <LoadingState label="Loading listing details..." /> : null}
+
+      {error ? (
+        <Alert
+          variant="error"
+          title="Failed to load listing full details"
+          message="Please check the backend endpoint /listings/:id/full-details."
+        />
+      ) : null}
+
+      {details ? (
+        <div className="space-y-6">
+          <DetailsSection title="Unit / Project Information">
+            <Detail label="Project" value={details.listing.project_name} />
+            <Detail
+              label="Project Location"
+              value={details.listing.project_location || "-"}
+            />
+            <Detail
+              label="Administrator"
+              value={details.listing.project_administrator || "-"}
+            />
+            <Detail
+              label="Cadastral Lot No."
+              value={details.listing.cadastral_lot_no || "-"}
+            />
+            <Detail label="Unit ID" value={details.listing.unit_id} />
+            <Detail
+              label="Lot Type"
+              value={formatText(details.listing.lot_type)}
+            />
+            <Detail
+              label="Listing Status"
+              value={formatText(details.listing.status)}
+            />
+          </DetailsSection>
+
+          <DetailsSection title="Buyer Information">
+            <Detail
+              label="Buyer Name"
+              value={details.clientUnit?.client_name || "No buyer assigned"}
+            />
+            <Detail
+              label="Spouse / Co-owner"
+              value={details.clientUnit?.spouse_co_owner_name || "-"}
+            />
+            <Detail
+              label="Email"
+              value={details.clientUnit?.client_email || "-"}
+            />
+            <Detail
+              label="Contact No."
+              value={details.clientUnit?.client_contact_no || "-"}
+            />
+            <Detail
+              label="Address"
+              value={details.clientUnit?.client_address || "-"}
+            />
+            <Detail
+              label="Region"
+              value={details.clientUnit?.client_region || "-"}
+            />
+            <Detail
+              label="Assigned User"
+              value={details.clientUnit?.assigned_user_name || "-"}
+            />
+            <Detail
+              label="Due Day"
+              value={
+                details.clientUnit?.due_day
+                  ? String(details.clientUnit.due_day)
+                  : "-"
+              }
+            />
+          </DetailsSection>
+
+          <DetailsSection title="Lot Pricing">
+            <Detail
+              label="Lot Area SQM"
+              value={`${formatNumber(details.listing.lot_area_sqm)} sqm`}
+            />
+            <Detail
+              label="Price / SQM"
+              value={formatMoney(details.listing.price_per_sqm)}
+            />
+            <Detail
+              label="Gross Selling Price"
+              value={formatMoney(details.listing.gross_selling_price)}
+            />
+            <Detail
+              label="Promo Discount"
+              value={formatMoney(details.listing.promo_discount)}
+            />
+            <Detail
+              label="Net Selling Price"
+              value={formatMoney(details.listing.net_selling_price)}
+            />
+            <Detail
+              label="Legal / Misc Rate"
+              value={`${formatNumber(details.listing.legal_misc_rate)}%`}
+            />
+            <Detail
+              label="Legal / Misc Fee"
+              value={formatMoney(details.listing.legal_misc_fee)}
+            />
+            <Detail
+              label="Total Contract Price"
+              value={formatMoney(details.listing.total_contract_price)}
+            />
+          </DetailsSection>
+
+          <DetailsSection title="Payment Information">
+            <Detail
+              label="Reservation Fee"
+              value={formatMoney(details.listing.reservation_fee)}
+            />
+            <Detail
+              label="Downpayment"
+              value={formatMoney(details.listing.downpayment)}
+            />
+            <Detail
+              label="Total Paid"
+              value={formatMoney(details.paymentSummary.total_paid)}
+            />
+            <Detail
+              label="Balance"
+              value={formatMoney(details.paymentSummary.balance)}
+            />
+            <Detail
+              label="Payment Status"
+              value={formatText(details.paymentSummary.payment_status)}
+            />
+            <Detail
+              label="Payment Count"
+              value={String(details.paymentSummary.payment_count)}
+            />
+            <Detail
+              label="Latest Payment Date"
+              value={formatDate(details.paymentSummary.latest_payment_date)}
+            />
+            <Detail
+              label="Latest Payment Amount"
+              value={formatMoney(details.paymentSummary.latest_payment_amount)}
+            />
+          </DetailsSection>
+
+          <DetailsSection title="Seller / Commission">
+            <Detail
+              label="Seller"
+              value={details.commissionSummary.seller_name || "-"}
+            />
+            <Detail
+              label="Seller Role"
+              value={formatText(details.commissionSummary.seller_role)}
+            />
+            <Detail
+              label="Reports Under"
+              value={details.commissionSummary.reports_under || "-"}
+            />
+            <Detail
+              label="Commission Rate"
+              value={`${formatNumber(details.commissionSummary.rate)}%`}
+            />
+            <Detail
+              label="Commission Amount"
+              value={formatMoney(details.commissionSummary.amount)}
+            />
+            <Detail
+              label="Released Amount"
+              value={formatMoney(details.commissionSummary.released_amount)}
+            />
+            <Detail
+              label="Remaining Commission"
+              value={formatMoney(details.commissionSummary.remaining_amount)}
+            />
+            <Detail
+              label="Commission Status"
+              value={formatText(details.commissionSummary.status)}
+            />
+          </DetailsSection>
+
+          <DetailsSection title="Documents">
+            <Detail
+              label="Total Documents"
+              value={String(details.documentSummary.total_documents)}
+            />
+            <Detail
+              label="Required Documents"
+              value={String(details.documentSummary.required_documents)}
+            />
+            <Detail
+              label="Submitted Documents"
+              value={String(details.documentSummary.submitted_documents)}
+            />
+            <Detail
+              label="Approved Documents"
+              value={String(details.documentSummary.approved_documents)}
+            />
+            <Detail
+              label="Missing Required"
+              value={String(details.documentSummary.missing_required_documents)}
+            />
+            <Detail
+              label="Document Status"
+              value={formatText(details.documentSummary.document_status)}
+            />
+          </DetailsSection>
+
+          <DetailsSection title="System Information">
+            <Detail
+              label="Created At"
+              value={formatDate(details.listing.created_at)}
+            />
+            <Detail
+              label="Updated At"
+              value={formatDate(details.listing.updated_at)}
+            />
+            <Detail
+              label="Client Unit Created"
+              value={formatDate(details.clientUnit?.created_at)}
+            />
+            <Detail
+              label="Client Unit Updated"
+              value={formatDate(details.clientUnit?.updated_at)}
+            />
+          </DetailsSection>
+        </div>
+      ) : null}
+    </Modal>
+  )
+}
+
+type DetailsSectionProps = {
+  children: React.ReactNode
+  title: string
+}
+
+const DetailsSection = ({ children, title }: DetailsSectionProps) => {
+  return (
+    <section>
+      <h3 className="mb-3 text-base font-bold text-slate-900">{title}</h3>
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {children}
+      </div>
+    </section>
+  )
+}
+
+const Detail = ({
+  label,
+  value,
+}: {
+  label: string
+  value: string | number | null | undefined
+}) => {
   return (
     <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
       <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
         {label}
       </p>
-      <p className="mt-1 text-sm font-semibold text-slate-900">{value}</p>
+      <p className="mt-1 break-words text-sm font-semibold text-slate-900">
+        {value === null || value === undefined || value === "" ? "-" : value}
+      </p>
     </div>
   )
 }
