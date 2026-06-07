@@ -1,217 +1,388 @@
 import { useState } from "react"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
-type CommissionStatus = "pending" | "payable" | "released" | "cancelled"
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api/v1"
+
+type CommissionStatus = "pending" | "payable" | "released" | "cancelled" | string
 
 type Commission = {
   id: number
-  clientUnitId: number
-  sellerId: number
-  sellerName: string
-  clientName: string
-  unitId: string
-  projectName: string
-  netSellingPrice: number
-  rate: number
-  amount: number
-  releasedAmount: number
+  client_unit_id: number
+  seller_id: number
+  seller_name: string
+  seller_role: string
+  client_name: string
+  unit_id: string
+  project_name: string
+  net_selling_price: number | string
+  rate: number | string
+  amount: number | string
+  released_amount: number | string
+  remaining_amount: number | string
   status: CommissionStatus
-  createdAt: string
+  created_at: string
+  updated_at: string
+}
+
+type CommissionSummary = {
+  commissionPayable: number | string
+  commissionReleased: number | string
+  commissionRemaining: number | string
+  pendingCount: number
+  payableCount: number
+  releasedCount: number
+  cancelledCount: number
+}
+
+type Seller = {
+  id: number
+  full_name: string
+  seller_role: string
+  status: string
+}
+
+type ClientUnit = {
+  id: number
+  client_id: number
+  client_name: string
+  listing_id: number
+  unit_id: string
+  project_name: string
+  lot_type: string | null
+  lot_area_sqm: number | string
+  net_selling_price: number | string
+  paid_amount: number | string
+  balance: number | string
+  due_day: number | null
+  status: string
+  assigned_user_id: number | null
+  assigned_user_name: string | null
+  document_status: string
+  created_at: string
+  updated_at: string
+}
+
+type CommissionFormData = {
+  client_unit_id: number
+  seller_id: number
+  rate: number
+  released_amount: number
+  status: CommissionStatus
+}
+
+type CommissionsResponse = {
+  commissions: Commission[]
+}
+
+type CommissionSummaryResponse = {
+  summary: CommissionSummary
+}
+
+type SellersResponse = {
+  sellers: Seller[]
+}
+
+type ClientUnitsResponse = {
+  clientUnits: ClientUnit[]
+}
+
+const emptyFormData: CommissionFormData = {
+  client_unit_id: 0,
+  seller_id: 0,
+  rate: 5,
+  released_amount: 0,
+  status: "pending",
+}
+
+const getErrorMessage = async (response: Response) => {
+  try {
+    const data = await response.json()
+
+    if (typeof data.message === "string") {
+      return data.message
+    }
+
+    return "Something went wrong"
+  } catch {
+    return "Something went wrong"
+  }
+}
+
+const fetchCommissions = async (): Promise<Commission[]> => {
+  const res = await fetch(`${API_URL}/commissions`, {
+    credentials: "include",
+  })
+
+  if (!res.ok) {
+    throw new Error(await getErrorMessage(res))
+  }
+
+  const data: CommissionsResponse = await res.json()
+  return data.commissions
+}
+
+const fetchCommissionSummary = async (): Promise<CommissionSummary> => {
+  const res = await fetch(`${API_URL}/commissions-summary`, {
+    credentials: "include",
+  })
+
+  if (!res.ok) {
+    throw new Error(await getErrorMessage(res))
+  }
+
+  const data: CommissionSummaryResponse = await res.json()
+  return data.summary
+}
+
+const fetchSellers = async (): Promise<Seller[]> => {
+  const res = await fetch(`${API_URL}/accredited-sellers?status=active`, {
+    credentials: "include",
+  })
+
+  if (!res.ok) {
+    throw new Error(await getErrorMessage(res))
+  }
+
+  const data: SellersResponse = await res.json()
+  return data.sellers
+}
+
+const fetchClientUnits = async (): Promise<ClientUnit[]> => {
+  const res = await fetch(`${API_URL}/client-units`, {
+    credentials: "include",
+  })
+
+  if (!res.ok) {
+    throw new Error(await getErrorMessage(res))
+  }
+
+  const data: ClientUnitsResponse = await res.json()
+  return data.clientUnits
+}
+
+const createCommission = async (commissionData: CommissionFormData) => {
+  const res = await fetch(`${API_URL}/commissions`, {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(commissionData),
+  })
+
+  if (!res.ok) {
+    throw new Error(await getErrorMessage(res))
+  }
+
+  return res.json()
+}
+
+const updateCommission = async ({
+  id,
+  commissionData,
+}: {
+  id: number
+  commissionData: CommissionFormData
+}) => {
+  const res = await fetch(`${API_URL}/commissions/${id}`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(commissionData),
+  })
+
+  if (!res.ok) {
+    throw new Error(await getErrorMessage(res))
+  }
+
+  return res.json()
 }
 
 const Commissions = () => {
-  const sellers = [
-    {
-      id: 1,
-      fullName: "NEPOMUCENO, ERWIN",
-    },
-    {
-      id: 2,
-      fullName: "BRIONES, CONIE, A.",
-    },
-    {
-      id: 3,
-      fullName: "TOLEDO, NICKIE ROSE E.",
-    },
-  ]
-
-  const clientUnits = [
-    {
-      id: 1,
-      clientName: "AHMED, SARAH NACINO",
-      unitId: "LA-0416",
-      projectName: "Luntiang Aguinaldo",
-      netSellingPrice: 1000000,
-    },
-    {
-      id: 2,
-      clientName: "ALAMER, JAZZIE",
-      unitId: "LA-0221",
-      projectName: "Luntiang Aguinaldo",
-      netSellingPrice: 250000,
-    },
-  ]
-
-  const [commissions, setCommissions] = useState<Commission[]>([
-    {
-      id: 1,
-      clientUnitId: 1,
-      sellerId: 1,
-      sellerName: "NEPOMUCENO, ERWIN",
-      clientName: "AHMED, SARAH NACINO",
-      unitId: "LA-0416",
-      projectName: "Luntiang Aguinaldo",
-      netSellingPrice: 1000000,
-      rate: 5,
-      amount: 50000,
-      releasedAmount: 20000,
-      status: "payable",
-      createdAt: "2026-06-06",
-    },
-    {
-      id: 2,
-      clientUnitId: 2,
-      sellerId: 2,
-      sellerName: "BRIONES, CONIE, A.",
-      clientName: "ALAMER, JAZZIE",
-      unitId: "LA-0221",
-      projectName: "Luntiang Aguinaldo",
-      netSellingPrice: 250000,
-      rate: 5,
-      amount: 12500,
-      releasedAmount: 12500,
-      status: "released",
-      createdAt: "2026-06-07",
-    },
-  ])
+  const queryClient = useQueryClient()
 
   const [searchInput, setSearchInput] = useState("")
+  const [statusFilter, setStatusFilter] = useState("all")
+  const [sellerRoleFilter, setSellerRoleFilter] = useState("all")
+
   const [isAddOpen, setIsAddOpen] = useState(false)
   const [editCommission, setEditCommission] = useState<Commission | null>(null)
+  const [formData, setFormData] = useState<CommissionFormData>(emptyFormData)
 
-  const [formData, setFormData] = useState({
-    clientUnitId: 1,
-    sellerId: 1,
-    rate: 5,
-    releasedAmount: 0,
-    status: "pending" as CommissionStatus,
+  const {
+    data: commissions = [],
+    isLoading,
+    error,
+  } = useQuery<Commission[]>({
+    queryKey: ["commissions"],
+    queryFn: fetchCommissions,
   })
 
-  const formatMoney = (amount: number) => {
+  const { data: summary } = useQuery<CommissionSummary>({
+    queryKey: ["commissions-summary"],
+    queryFn: fetchCommissionSummary,
+  })
+
+  const { data: sellers = [] } = useQuery<Seller[]>({
+    queryKey: ["accredited-sellers"],
+    queryFn: fetchSellers,
+  })
+
+  const { data: clientUnits = [] } = useQuery<ClientUnit[]>({
+    queryKey: ["client-units"],
+    queryFn: fetchClientUnits,
+  })
+
+  const createCommissionMutation = useMutation({
+    mutationFn: createCommission,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["commissions"] })
+      queryClient.invalidateQueries({ queryKey: ["commissions-summary"] })
+      queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] })
+      setIsAddOpen(false)
+      setFormData(emptyFormData)
+    },
+  })
+
+  const updateCommissionMutation = useMutation({
+    mutationFn: updateCommission,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["commissions"] })
+      queryClient.invalidateQueries({ queryKey: ["commissions-summary"] })
+      queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] })
+      setEditCommission(null)
+    },
+  })
+
+  const formatMoney = (amount: number | string) => {
     return new Intl.NumberFormat("en-PH", {
       style: "currency",
       currency: "PHP",
-    }).format(amount)
+    }).format(Number(amount || 0))
   }
 
-  const getClientUnit = (clientUnitId: number) => {
-    return clientUnits.find((unit) => unit.id === clientUnitId)
+  const formatText = (value: string | null | undefined) => {
+    if (!value) return "-"
+
+    return value
+      .replaceAll("_", " ")
+      .split(" ")
+      .map((word) => word[0]?.toUpperCase() + word.slice(1))
+      .join(" ")
   }
 
-  const getSeller = (sellerId: number) => {
-    return sellers.find((seller) => seller.id === sellerId)
+  const getFormClientUnitId = () => {
+    return formData.client_unit_id || clientUnits[0]?.id || 0
   }
 
-  const computeCommissionAmount = (netSellingPrice: number, rate: number) => {
-    return netSellingPrice * (rate / 100)
+  const getFormSellerId = () => {
+    return formData.seller_id || sellers[0]?.id || 0
   }
 
   const resetForm = () => {
     setFormData({
-      clientUnitId: 1,
-      sellerId: 1,
-      rate: 5,
-      releasedAmount: 0,
-      status: "pending",
+      ...emptyFormData,
+      client_unit_id: clientUnits[0]?.id || 0,
+      seller_id: sellers[0]?.id || 0,
     })
   }
 
-  const handleAddCommission = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault()
-
-    const selectedUnit = getClientUnit(formData.clientUnitId)
-    const selectedSeller = getSeller(formData.sellerId)
-
-    if (!selectedUnit || !selectedSeller) return
-
-    const amount = computeCommissionAmount(
-      selectedUnit.netSellingPrice,
-      formData.rate
-    )
-
-    const newCommission: Commission = {
-      id: commissions.length + 1,
-      clientUnitId: formData.clientUnitId,
-      sellerId: formData.sellerId,
-      sellerName: selectedSeller.fullName,
-      clientName: selectedUnit.clientName,
-      unitId: selectedUnit.unitId,
-      projectName: selectedUnit.projectName,
-      netSellingPrice: selectedUnit.netSellingPrice,
-      rate: formData.rate,
-      amount,
-      releasedAmount: formData.releasedAmount,
-      status: formData.status,
-      createdAt: new Date().toISOString().slice(0, 10),
-    }
-
-    setCommissions((prev) => [...prev, newCommission])
-    resetForm()
-    setIsAddOpen(false)
+  const openAddModal = () => {
+    setFormData({
+      ...emptyFormData,
+      client_unit_id: clientUnits[0]?.id || 0,
+      seller_id: sellers[0]?.id || 0,
+    })
+    setIsAddOpen(true)
   }
 
-  const handleUpdateCommission = (e: React.FormEvent<HTMLFormElement>) => {
+  const openEditModal = (commission: Commission) => {
+    setEditCommission(commission)
+  }
+
+  const handleAddCommission = (e: { preventDefault: () => void }) => {
+    e.preventDefault()
+
+    createCommissionMutation.mutate({
+      ...formData,
+      client_unit_id: getFormClientUnitId(),
+      seller_id: getFormSellerId(),
+    })
+  }
+
+  const handleUpdateCommission = (e: { preventDefault: () => void }) => {
     e.preventDefault()
 
     if (!editCommission) return
 
-    const selectedUnit = getClientUnit(editCommission.clientUnitId)
-    const selectedSeller = getSeller(editCommission.sellerId)
-
-    if (!selectedUnit || !selectedSeller) return
-
-    const amount = computeCommissionAmount(
-      selectedUnit.netSellingPrice,
-      editCommission.rate
-    )
-
-    setCommissions((prev) =>
-      prev.map((commission) =>
-        commission.id === editCommission.id
-          ? {
-              ...editCommission,
-              sellerName: selectedSeller.fullName,
-              clientName: selectedUnit.clientName,
-              unitId: selectedUnit.unitId,
-              projectName: selectedUnit.projectName,
-              netSellingPrice: selectedUnit.netSellingPrice,
-              amount,
-            }
-          : commission
-      )
-    )
-
-    setEditCommission(null)
+    updateCommissionMutation.mutate({
+      id: editCommission.id,
+      commissionData: {
+        client_unit_id: editCommission.client_unit_id,
+        seller_id: editCommission.seller_id,
+        rate: Number(editCommission.rate || 0),
+        released_amount: Number(editCommission.released_amount || 0),
+        status: editCommission.status,
+      },
+    })
   }
 
   const filteredCommissions = commissions.filter((commission) => {
     const search = searchInput.toLowerCase().trim()
 
-    return (
+    const matchesSearch =
       search === "" ||
-      commission.sellerName.toLowerCase().includes(search) ||
-      commission.clientName.toLowerCase().includes(search) ||
-      commission.unitId.toLowerCase().includes(search) ||
-      commission.projectName.toLowerCase().includes(search) ||
-      commission.status.toLowerCase().includes(search)
-    )
+      commission.seller_name.toLowerCase().includes(search) ||
+      commission.client_name.toLowerCase().includes(search) ||
+      commission.unit_id.toLowerCase().includes(search) ||
+      commission.project_name.toLowerCase().includes(search) ||
+      commission.status.toLowerCase().includes(search) ||
+      commission.seller_role.toLowerCase().includes(search)
+
+    const matchesStatus =
+      statusFilter === "all" || commission.status === statusFilter
+
+    const matchesSellerRole =
+      sellerRoleFilter === "all" ||
+      commission.seller_role === sellerRoleFilter
+
+    return matchesSearch && matchesStatus && matchesSellerRole
   })
 
-  const commissionPayable = commissions.reduce((sum, item) => sum + item.amount, 0)
-  const commissionReleased = commissions.reduce(
-    (sum, item) => sum + item.releasedAmount,
-    0
-  )
-  const commissionRemaining = commissionPayable - commissionReleased
+  const sellerRoles = [
+    ...new Set(commissions.map((commission) => commission.seller_role).filter(Boolean)),
+  ]
+
+  const commissionPayable =
+    summary?.commissionPayable ??
+    commissions
+      .filter((commission) => commission.status !== "cancelled")
+      .reduce((sum, commission) => sum + Number(commission.amount || 0), 0)
+
+  const commissionReleased =
+    summary?.commissionReleased ??
+    commissions
+      .filter((commission) => commission.status !== "cancelled")
+      .reduce((sum, commission) => sum + Number(commission.released_amount || 0), 0)
+
+  const commissionRemaining =
+    summary?.commissionRemaining ??
+    commissions
+      .filter((commission) => commission.status !== "cancelled")
+      .reduce(
+        (sum, commission) => sum + Number(commission.remaining_amount || 0),
+        0
+      )
+
+  if (isLoading) {
+    return <p className="p-4">Loading commissions...</p>
+  }
+
+  if (error) {
+    return <p className="p-4">Failed to load commissions</p>
+  }
 
   return (
     <div className="p-4">
@@ -225,26 +396,34 @@ const Commissions = () => {
       <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3">
         <div className="border border-black px-4 py-3">
           <p className="text-sm">Commission Payable</p>
-          <h3 className="text-2xl font-bold">{formatMoney(commissionPayable)}</h3>
+          <h3 className="text-2xl font-bold">
+            {formatMoney(commissionPayable)}
+          </h3>
           <p className="text-sm text-gray-600">Total commission amount</p>
         </div>
 
         <div className="border border-black px-4 py-3">
           <p className="text-sm">Commission Released</p>
-          <h3 className="text-2xl font-bold">{formatMoney(commissionReleased)}</h3>
+          <h3 className="text-2xl font-bold">
+            {formatMoney(commissionReleased)}
+          </h3>
           <p className="text-sm text-gray-600">Total released commission</p>
         </div>
 
         <div className="border border-black px-4 py-3">
           <p className="text-sm">Commission Remaining</p>
-          <h3 className="text-2xl font-bold">{formatMoney(commissionRemaining)}</h3>
-          <p className="text-sm text-gray-600">Unreleased commission balance</p>
+          <h3 className="text-2xl font-bold">
+            {formatMoney(commissionRemaining)}
+          </h3>
+          <p className="text-sm text-gray-600">
+            Unreleased commission balance
+          </p>
         </div>
       </div>
 
       <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <button
-          onClick={() => setIsAddOpen(true)}
+          onClick={openAddModal}
           className="w-fit border border-black px-4 py-2 hover:bg-gray-200"
         >
           Add Commission
@@ -259,8 +438,37 @@ const Commissions = () => {
             className="border border-black px-3 py-2 md:w-96"
           />
 
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="border border-black px-3 py-2"
+          >
+            <option value="all">All Status</option>
+            <option value="pending">Pending</option>
+            <option value="payable">Payable</option>
+            <option value="released">Released</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+
+          <select
+            value={sellerRoleFilter}
+            onChange={(e) => setSellerRoleFilter(e.target.value)}
+            className="border border-black px-3 py-2"
+          >
+            <option value="all">All Roles</option>
+            {sellerRoles.map((role) => (
+              <option key={role} value={role}>
+                {formatText(role)}
+              </option>
+            ))}
+          </select>
+
           <button
-            onClick={() => setSearchInput("")}
+            onClick={() => {
+              setSearchInput("")
+              setStatusFilter("all")
+              setSellerRoleFilter("all")
+            }}
             className="border border-black px-4 py-2 hover:bg-gray-200"
           >
             Reset
@@ -272,16 +480,39 @@ const Commissions = () => {
         <table className="w-full border border-black text-sm">
           <thead>
             <tr className="border-b border-black">
-              <th className="border-r border-black px-4 py-2 text-left">Seller ↕</th>
-              <th className="border-r border-black px-4 py-2 text-left">Client ↕</th>
-              <th className="border-r border-black px-4 py-2 text-left">Unit ↕</th>
-              <th className="border-r border-black px-4 py-2 text-left">Project ↕</th>
-              <th className="border-r border-black px-4 py-2 text-left">TCP ↕</th>
-              <th className="border-r border-black px-4 py-2 text-left">Rate ↕</th>
-              <th className="border-r border-black px-4 py-2 text-left">Commission ↕</th>
-              <th className="border-r border-black px-4 py-2 text-left">Released ↕</th>
-              <th className="border-r border-black px-4 py-2 text-left">Remaining ↕</th>
-              <th className="border-r border-black px-4 py-2 text-left">Status ↕</th>
+              <th className="border-r border-black px-4 py-2 text-left">
+                Seller ↕
+              </th>
+              <th className="border-r border-black px-4 py-2 text-left">
+                Role ↕
+              </th>
+              <th className="border-r border-black px-4 py-2 text-left">
+                Client ↕
+              </th>
+              <th className="border-r border-black px-4 py-2 text-left">
+                Unit ↕
+              </th>
+              <th className="border-r border-black px-4 py-2 text-left">
+                Project ↕
+              </th>
+              <th className="border-r border-black px-4 py-2 text-left">
+                TCP ↕
+              </th>
+              <th className="border-r border-black px-4 py-2 text-left">
+                Rate ↕
+              </th>
+              <th className="border-r border-black px-4 py-2 text-left">
+                Commission ↕
+              </th>
+              <th className="border-r border-black px-4 py-2 text-left">
+                Released ↕
+              </th>
+              <th className="border-r border-black px-4 py-2 text-left">
+                Remaining ↕
+              </th>
+              <th className="border-r border-black px-4 py-2 text-left">
+                Status ↕
+              </th>
               <th className="px-4 py-2 text-left">Actions ↕</th>
             </tr>
           </thead>
@@ -289,21 +520,53 @@ const Commissions = () => {
           <tbody>
             {filteredCommissions.map((commission) => (
               <tr key={commission.id} className="border-b border-black">
-                <td className="border-r border-black px-4 py-2">{commission.sellerName}</td>
-                <td className="border-r border-black px-4 py-2">{commission.clientName}</td>
-                <td className="border-r border-black px-4 py-2">{commission.unitId}</td>
-                <td className="border-r border-black px-4 py-2">{commission.projectName}</td>
-                <td className="border-r border-black px-4 py-2">{formatMoney(commission.netSellingPrice)}</td>
-                <td className="border-r border-black px-4 py-2">{commission.rate}%</td>
-                <td className="border-r border-black px-4 py-2">{formatMoney(commission.amount)}</td>
-                <td className="border-r border-black px-4 py-2">{formatMoney(commission.releasedAmount)}</td>
                 <td className="border-r border-black px-4 py-2">
-                  {formatMoney(commission.amount - commission.releasedAmount)}
+                  {commission.seller_name}
                 </td>
-                <td className="border-r border-black px-4 py-2 capitalize">{commission.status}</td>
+
+                <td className="border-r border-black px-4 py-2">
+                  {formatText(commission.seller_role)}
+                </td>
+
+                <td className="border-r border-black px-4 py-2">
+                  {commission.client_name}
+                </td>
+
+                <td className="border-r border-black px-4 py-2">
+                  {commission.unit_id}
+                </td>
+
+                <td className="border-r border-black px-4 py-2">
+                  {commission.project_name}
+                </td>
+
+                <td className="border-r border-black px-4 py-2">
+                  {formatMoney(commission.net_selling_price)}
+                </td>
+
+                <td className="border-r border-black px-4 py-2">
+                  {Number(commission.rate || 0)}%
+                </td>
+
+                <td className="border-r border-black px-4 py-2">
+                  {formatMoney(commission.amount)}
+                </td>
+
+                <td className="border-r border-black px-4 py-2">
+                  {formatMoney(commission.released_amount)}
+                </td>
+
+                <td className="border-r border-black px-4 py-2">
+                  {formatMoney(commission.remaining_amount)}
+                </td>
+
+                <td className="border-r border-black px-4 py-2 capitalize">
+                  {formatText(commission.status)}
+                </td>
+
                 <td className="px-4 py-2">
                   <button
-                    onClick={() => setEditCommission(commission)}
+                    onClick={() => openEditModal(commission)}
                     className="border border-black px-3 py-1 hover:bg-gray-200"
                   >
                     Edit
@@ -314,7 +577,7 @@ const Commissions = () => {
 
             {filteredCommissions.length === 0 && (
               <tr>
-                <td colSpan={11} className="px-4 py-6 text-center text-gray-600">
+                <td colSpan={12} className="px-4 py-6 text-center text-gray-600">
                   No commissions found
                 </td>
               </tr>
@@ -330,51 +593,75 @@ const Commissions = () => {
 
             <form onSubmit={handleAddCommission} className="flex flex-col gap-3">
               <select
-                value={formData.clientUnitId}
+                value={getFormClientUnitId()}
                 onChange={(e) =>
-                  setFormData({ ...formData, clientUnitId: Number(e.target.value) })
+                  setFormData({
+                    ...formData,
+                    client_unit_id: Number(e.target.value),
+                  })
                 }
                 className="border border-black px-3 py-2"
+                required
               >
+                {clientUnits.length === 0 && (
+                  <option value={0}>No client units available</option>
+                )}
+
                 {clientUnits.map((unit) => (
                   <option key={unit.id} value={unit.id}>
-                    {unit.clientName} - {unit.unitId}
+                    {unit.client_name} - {unit.unit_id}
                   </option>
                 ))}
               </select>
 
               <select
-                value={formData.sellerId}
+                value={getFormSellerId()}
                 onChange={(e) =>
-                  setFormData({ ...formData, sellerId: Number(e.target.value) })
+                  setFormData({
+                    ...formData,
+                    seller_id: Number(e.target.value),
+                  })
                 }
                 className="border border-black px-3 py-2"
+                required
               >
+                {sellers.length === 0 && (
+                  <option value={0}>No active sellers available</option>
+                )}
+
                 {sellers.map((seller) => (
                   <option key={seller.id} value={seller.id}>
-                    {seller.fullName}
+                    {seller.full_name} - {formatText(seller.seller_role)}
                   </option>
                 ))}
               </select>
 
               <input
                 type="number"
+                min={0}
+                step="0.01"
                 placeholder="Rate %"
                 value={formData.rate}
                 onChange={(e) =>
-                  setFormData({ ...formData, rate: Number(e.target.value) })
+                  setFormData({
+                    ...formData,
+                    rate: Number(e.target.value),
+                  })
                 }
                 className="border border-black px-3 py-2"
+                required
               />
 
               <input
                 type="number"
+                min={0}
+                step="0.01"
                 placeholder="Released amount"
-                value={formData.releasedAmount}
+                value={formData.released_amount}
                 onChange={(e) =>
                   setFormData({
                     ...formData,
-                    releasedAmount: Number(e.target.value),
+                    released_amount: Number(e.target.value),
                   })
                 }
                 className="border border-black px-3 py-2"
@@ -396,6 +683,12 @@ const Commissions = () => {
                 <option value="cancelled">Cancelled</option>
               </select>
 
+              {createCommissionMutation.isError && (
+                <p className="border border-black px-4 py-2 text-red-600">
+                  {createCommissionMutation.error.message}
+                </p>
+              )}
+
               <div className="mt-2 flex justify-end gap-2">
                 <button
                   type="button"
@@ -410,9 +703,16 @@ const Commissions = () => {
 
                 <button
                   type="submit"
-                  className="border border-black px-4 py-2 hover:bg-gray-200"
+                  disabled={
+                    createCommissionMutation.isPending ||
+                    clientUnits.length === 0 ||
+                    sellers.length === 0
+                  }
+                  className="border border-black px-4 py-2 hover:bg-gray-200 disabled:opacity-50"
                 >
-                  Save Commission
+                  {createCommissionMutation.isPending
+                    ? "Saving..."
+                    : "Save Commission"}
                 </button>
               </div>
             </form>
@@ -425,44 +725,51 @@ const Commissions = () => {
           <div className="w-full max-w-lg border border-black bg-white p-4">
             <h2 className="mb-4 text-2xl font-bold">Edit Commission</h2>
 
-            <form onSubmit={handleUpdateCommission} className="flex flex-col gap-3">
+            <form
+              onSubmit={handleUpdateCommission}
+              className="flex flex-col gap-3"
+            >
               <select
-                value={editCommission.clientUnitId}
+                value={editCommission.client_unit_id}
                 onChange={(e) =>
                   setEditCommission({
                     ...editCommission,
-                    clientUnitId: Number(e.target.value),
+                    client_unit_id: Number(e.target.value),
                   })
                 }
                 className="border border-black px-3 py-2"
+                required
               >
                 {clientUnits.map((unit) => (
                   <option key={unit.id} value={unit.id}>
-                    {unit.clientName} - {unit.unitId}
+                    {unit.client_name} - {unit.unit_id}
                   </option>
                 ))}
               </select>
 
               <select
-                value={editCommission.sellerId}
+                value={editCommission.seller_id}
                 onChange={(e) =>
                   setEditCommission({
                     ...editCommission,
-                    sellerId: Number(e.target.value),
+                    seller_id: Number(e.target.value),
                   })
                 }
                 className="border border-black px-3 py-2"
+                required
               >
                 {sellers.map((seller) => (
                   <option key={seller.id} value={seller.id}>
-                    {seller.fullName}
+                    {seller.full_name} - {formatText(seller.seller_role)}
                   </option>
                 ))}
               </select>
 
               <input
                 type="number"
-                value={editCommission.rate}
+                min={0}
+                step="0.01"
+                value={Number(editCommission.rate || 0)}
                 onChange={(e) =>
                   setEditCommission({
                     ...editCommission,
@@ -470,15 +777,18 @@ const Commissions = () => {
                   })
                 }
                 className="border border-black px-3 py-2"
+                required
               />
 
               <input
                 type="number"
-                value={editCommission.releasedAmount}
+                min={0}
+                step="0.01"
+                value={Number(editCommission.released_amount || 0)}
                 onChange={(e) =>
                   setEditCommission({
                     ...editCommission,
-                    releasedAmount: Number(e.target.value),
+                    released_amount: Number(e.target.value),
                   })
                 }
                 className="border border-black px-3 py-2"
@@ -500,6 +810,12 @@ const Commissions = () => {
                 <option value="cancelled">Cancelled</option>
               </select>
 
+              {updateCommissionMutation.isError && (
+                <p className="border border-black px-4 py-2 text-red-600">
+                  {updateCommissionMutation.error.message}
+                </p>
+              )}
+
               <div className="mt-2 flex justify-end gap-2">
                 <button
                   type="button"
@@ -511,9 +827,12 @@ const Commissions = () => {
 
                 <button
                   type="submit"
-                  className="border border-black px-4 py-2 hover:bg-gray-200"
+                  disabled={updateCommissionMutation.isPending}
+                  className="border border-black px-4 py-2 hover:bg-gray-200 disabled:opacity-50"
                 >
-                  Save Changes
+                  {updateCommissionMutation.isPending
+                    ? "Saving..."
+                    : "Save Changes"}
                 </button>
               </div>
             </form>

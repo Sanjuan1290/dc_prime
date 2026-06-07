@@ -1,471 +1,344 @@
 import { useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+
+const API_URL =
+  import.meta.env.VITE_API_URL || "http://localhost:5000/api/v1"
 
 type Client = {
   id: number
-  fullName: string
-  spouseCoOwnerName: string
-  email: string
-  contactNo: string
-  address: string
+  full_name: string
+  spouse_co_owner_name: string | null
+  email: string | null
+  contact_no: string | null
+  address: string | null
 }
-
-type ListingStatus = "available" | "reserved" | "hold" | "sold" | "inactive"
-
-type AvailableListing = {
-  id: number
-  projectName: string
-  cadastralLotNo: string
-  unitId: string
-  lotType: string
-  pricePerSqm: number
-  lotAreaSqm: number
-  netSellingPrice: number
-  legalMiscFee: number
-  status: ListingStatus
-}
-
-type ClientUnitStatus =
-  | "reserved"
-  | "active"
-  | "cancelled"
-  | "fully_paid"
-  | "closed"
 
 type ClientUnit = {
   id: number
-  clientId: number
-  listingId: number
-  projectName: string
-  unitId: string
-  lotType: string
-  lotAreaSqm: number
-  netSellingPrice: number
-  paidAmount: number
-  balance: number
-  status: ClientUnitStatus
+  client_id: number
+  client_name: string
+  listing_id: number
+  unit_id: string
+  project_name: string
+  lot_type: string | null
+  lot_area_sqm: number | string
+  net_selling_price: number | string
+  paid_amount: number | string
+  balance: number | string
+  due_day: number | null
+  status: string
+  assigned_user_id: number | null
+  assigned_user_name: string | null
+  document_status: "complete" | "incomplete" | string
+  created_at: string
+  updated_at: string
 }
 
-type DocumentStatus = "submitted" | "not_submitted"
+type AvailableListing = {
+  id: number
+  project_id: number
+  project_name: string
+  cadastral_lot_no: string | null
+  unit_id: string
+  lot_type: string | null
+  lot_area_sqm: number | string
+  net_selling_price: number | string
+  legal_misc_fee: number | string
+  status: string
+}
 
 type ClientDocument = {
   id: number
-  clientUnitId: number
+  client_unit_id: number
+  document_id: number
   name: string
-  isRequired: boolean
-  canReuse: boolean
-  status: DocumentStatus
-  reviewedBy: string
-  reviewedAt: string
+  description: string | null
+  is_required: boolean | number
+  can_reuse: boolean | number
+  file_url: string | null
+  status: "not_submitted" | "submitted" | "approved" | "rejected" | string
+  reviewed_by: number | null
+  reviewed_by_name: string | null
+  reviewed_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+type ClientUnitsResponse = {
+  client: Client
+  units: ClientUnit[]
+}
+
+type ReserveListingPayload = {
+  clientId: number
+  listing_id: number
+  due_day: number
+}
+
+type UpdateClientDocumentStatusPayload = {
+  documentChecklistId: number
+  status: string
+}
+
+const getErrorMessage = async (res: Response) => {
+  try {
+    const data = await res.json()
+    return data.message || "Something went wrong"
+  } catch {
+    return "Something went wrong"
+  }
+}
+
+const fetchClientUnits = async (
+  clientId: number
+): Promise<ClientUnitsResponse> => {
+  const res = await fetch(`${API_URL}/clients/${clientId}/units`, {
+    credentials: "include",
+  })
+
+  if (!res.ok) {
+    throw new Error(await getErrorMessage(res))
+  }
+
+  return res.json()
+}
+
+const fetchAvailableListings = async (): Promise<AvailableListing[]> => {
+  const res = await fetch(`${API_URL}/available-listings`, {
+    credentials: "include",
+  })
+
+  if (!res.ok) {
+    throw new Error(await getErrorMessage(res))
+  }
+
+  const data = await res.json()
+  return data.listings
+}
+
+const reserveListing = async ({
+  clientId,
+  listing_id,
+  due_day,
+}: ReserveListingPayload) => {
+  const res = await fetch(`${API_URL}/clients/${clientId}/reserve-listing`, {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      listing_id,
+      due_day,
+    }),
+  })
+
+  if (!res.ok) {
+    throw new Error(await getErrorMessage(res))
+  }
+
+  return res.json()
+}
+
+const fetchClientUnitDocuments = async (
+  clientUnitId: number
+): Promise<ClientDocument[]> => {
+  const res = await fetch(`${API_URL}/client-units/${clientUnitId}/documents`, {
+    credentials: "include",
+  })
+
+  if (!res.ok) {
+    throw new Error(await getErrorMessage(res))
+  }
+
+  const data = await res.json()
+  return data.documents
+}
+
+const createChecklist = async (clientUnitId: number) => {
+  const res = await fetch(
+    `${API_URL}/client-units/${clientUnitId}/documents/create-checklist`,
+    {
+      method: "POST",
+      credentials: "include",
+    }
+  )
+
+  if (!res.ok) {
+    throw new Error(await getErrorMessage(res))
+  }
+
+  return res.json()
+}
+
+const updateClientDocumentStatus = async ({
+  documentChecklistId,
+  status,
+}: UpdateClientDocumentStatusPayload) => {
+  const res = await fetch(
+    `${API_URL}/client-documents/${documentChecklistId}/status`,
+    {
+      method: "PATCH",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        status,
+      }),
+    }
+  )
+
+  if (!res.ok) {
+    throw new Error(await getErrorMessage(res))
+  }
+
+  return res.json()
+}
+
+const applyExistingDocuments = async (clientUnitId: number) => {
+  const res = await fetch(
+    `${API_URL}/client-units/${clientUnitId}/documents/apply-existing`,
+    {
+      method: "POST",
+      credentials: "include",
+    }
+  )
+
+  if (!res.ok) {
+    throw new Error(await getErrorMessage(res))
+  }
+
+  return res.json()
 }
 
 const ClientListings = () => {
   const { id } = useParams()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
 
   const clientId = Number(id)
 
-  const clients: Client[] = [
-    {
-      id: 1,
-      fullName: "AHMED, SARAH NACINO",
-      spouseCoOwnerName: "AARON NACINO",
-      email: "msx.sarah0929@gmail.com",
-      contactNo: "0969-129-1596",
-      address: "BIÑAN LAGUNA",
-    },
-    {
-      id: 2,
-      fullName: "ALAMER, JAZZIE",
-      spouseCoOwnerName: "AARON JAZZIE",
-      email: "alamermarkchristopher21@gmail.com",
-      contactNo: "0927-437-5425",
-      address: "GEN. TRI CAVITE",
-    },
-  ]
-
-  const client = clients.find((client) => client.id === clientId)
-
-  const documentTemplates = [
-    {
-      name: "Client Registration Form - Seller's Copy",
-      isRequired: true,
-      canReuse: false,
-    },
-    {
-      name: "Client Registration Form - Administrator Copy",
-      isRequired: true,
-      canReuse: false,
-    },
-    {
-      name: "Intent to Buy",
-      isRequired: true,
-      canReuse: false,
-    },
-    {
-      name: "Offer to Buy & Buyer's Profile",
-      isRequired: true,
-      canReuse: false,
-    },
-    {
-      name: "Reservation Agreement",
-      isRequired: true,
-      canReuse: false,
-    },
-    {
-      name: "Deed of Sale",
-      isRequired: false,
-      canReuse: false,
-    },
-    {
-      name: "Contract to Sell",
-      isRequired: false,
-      canReuse: false,
-    },
-    {
-      name: "Buyer Counselling and Acknowledgement Form",
-      isRequired: true,
-      canReuse: false,
-    },
-    {
-      name: "Voluntary Cancellation and Waiver of Rights",
-      isRequired: false,
-      canReuse: false,
-    },
-    {
-      name: "Buyer Acknowledgement Form",
-      isRequired: true,
-      canReuse: false,
-    },
-    {
-      name: "SPA to Process Title (for Company)",
-      isRequired: false,
-      canReuse: false,
-    },
-    {
-      name: "SPA Authorization to Sign (for Representative)",
-      isRequired: false,
-      canReuse: false,
-    },
-    {
-      name: "Two valid Government-issued IDs (with 3 specimen signatures)",
-      isRequired: true,
-      canReuse: true,
-    },
-    {
-      name: "TIN No. / TIN ID",
-      isRequired: true,
-      canReuse: true,
-    },
-    {
-      name: "PSA (Single)",
-      isRequired: false,
-      canReuse: true,
-    },
-    {
-      name: "Marriage Certificate",
-      isRequired: false,
-      canReuse: true,
-    },
-    {
-      name: "Valid ID of Spouse (when required)",
-      isRequired: false,
-      canReuse: true,
-    },
-    {
-      name: "CENOMAR (if the buyer has kids but not married)",
-      isRequired: false,
-      canReuse: true,
-    },
-    {
-      name: "Passport ID",
-      isRequired: false,
-      canReuse: true,
-    },
-    {
-      name: "Valid IDs of both Principal and Representative",
-      isRequired: false,
-      canReuse: true,
-    },
-  ]
-
-  const [availableListings, setAvailableListings] = useState<AvailableListing[]>(
-    [
-      {
-        id: 1,
-        projectName: "Luntiang Aguinaldo",
-        cadastralLotNo: "CAD-0505",
-        unitId: "LA-0505",
-        lotType: "Residential",
-        pricePerSqm: 2500,
-        lotAreaSqm: 1200,
-        netSellingPrice: 3000000,
-        legalMiscFee: 300000,
-        status: "available",
-      },
-      {
-        id: 2,
-        projectName: "Luntiang Aguinaldo",
-        cadastralLotNo: "CAD-0506",
-        unitId: "LA-0506",
-        lotType: "Residential",
-        pricePerSqm: 2500,
-        lotAreaSqm: 1647,
-        netSellingPrice: 4117500,
-        legalMiscFee: 411750,
-        status: "available",
-      },
-      {
-        id: 3,
-        projectName: "Bailen Project",
-        cadastralLotNo: "CAD-B001",
-        unitId: "BP-0001",
-        lotType: "Residential",
-        pricePerSqm: 2000,
-        lotAreaSqm: 100,
-        netSellingPrice: 200000,
-        legalMiscFee: 20000,
-        status: "available",
-      },
-    ]
-  )
-
-  const [clientUnits, setClientUnits] = useState<ClientUnit[]>([
-    {
-      id: 1,
-      clientId: 1,
-      listingId: 10,
-      projectName: "Luntiang Aguinaldo",
-      unitId: "LA-0416",
-      lotType: "Residential",
-      lotAreaSqm: 400,
-      netSellingPrice: 1000000,
-      paidAmount: 68000,
-      balance: 932000,
-      status: "active",
-    },
-    {
-      id: 2,
-      clientId: 2,
-      listingId: 11,
-      projectName: "Luntiang Aguinaldo",
-      unitId: "LA-0221",
-      lotType: "Residential",
-      lotAreaSqm: 100,
-      netSellingPrice: 250000,
-      paidAmount: 35500,
-      balance: 214500,
-      status: "active",
-    },
-  ])
-
-  const [clientDocuments, setClientDocuments] = useState<ClientDocument[]>(
-    documentTemplates.map((doc, index) => ({
-      id: index + 1,
-      clientUnitId: 1,
-      name: doc.name,
-      isRequired: doc.isRequired,
-      canReuse: doc.canReuse,
-      status:
-        index === 0 || index === 1
-          ? "submitted"
-          : "not_submitted",
-      reviewedBy:
-        index === 0 || index === 1
-          ? "Admin"
-          : "",
-      reviewedAt:
-        index === 0 || index === 1
-          ? "2026-06-06"
-          : "",
-    }))
-  )
-
   const [isReserveOpen, setIsReserveOpen] = useState(false)
   const [searchInput, setSearchInput] = useState("")
+  const [dueDay, setDueDay] = useState(28)
   const [selectedUnitForDocs, setSelectedUnitForDocs] =
     useState<ClientUnit | null>(null)
 
-  const formatMoney = (amount: number) => {
+  const isValidClientId = Number.isFinite(clientId)
+
+  const { data, isLoading, error } = useQuery<ClientUnitsResponse>({
+    queryKey: ["client-units", clientId],
+    queryFn: () => fetchClientUnits(clientId),
+    enabled: isValidClientId,
+  })
+
+  const { data: availableListings = [], isLoading: isAvailableListingsLoading } =
+    useQuery<AvailableListing[]>({
+      queryKey: ["available-listings"],
+      queryFn: fetchAvailableListings,
+      enabled: isReserveOpen,
+    })
+
+  const { data: selectedDocuments = [], isLoading: isDocumentsLoading } =
+    useQuery<ClientDocument[]>({
+      queryKey: ["client-unit-documents", selectedUnitForDocs?.id],
+      queryFn: () => fetchClientUnitDocuments(selectedUnitForDocs!.id),
+      enabled: !!selectedUnitForDocs,
+    })
+
+  const client = data?.client
+  const units = data?.units || []
+
+  const reserveListingMutation = useMutation({
+    mutationFn: reserveListing,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["client-units", clientId] })
+      queryClient.invalidateQueries({ queryKey: ["available-listings"] })
+      setIsReserveOpen(false)
+      setSearchInput("")
+      setDueDay(28)
+    },
+  })
+
+  const createChecklistMutation = useMutation({
+    mutationFn: createChecklist,
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["client-unit-documents", selectedUnitForDocs?.id],
+      })
+      queryClient.invalidateQueries({ queryKey: ["client-units", clientId] })
+    },
+  })
+
+  const updateDocumentStatusMutation = useMutation({
+    mutationFn: updateClientDocumentStatus,
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["client-unit-documents", selectedUnitForDocs?.id],
+      })
+      queryClient.invalidateQueries({ queryKey: ["client-units", clientId] })
+    },
+  })
+
+  const applyExistingDocumentsMutation = useMutation({
+    mutationFn: applyExistingDocuments,
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ["client-unit-documents", selectedUnitForDocs?.id],
+      })
+      queryClient.invalidateQueries({ queryKey: ["client-units", clientId] })
+    },
+  })
+
+  const formatMoney = (amount: number | string) => {
     return new Intl.NumberFormat("en-PH", {
       style: "currency",
       currency: "PHP",
-    }).format(amount)
+    }).format(Number(amount || 0))
   }
 
-  const formatNumber = (value: number) => {
-    return new Intl.NumberFormat("en-PH").format(value)
+  const formatNumber = (value: number | string) => {
+    return new Intl.NumberFormat("en-PH").format(Number(value || 0))
   }
-
-  const clientUnitList = clientUnits.filter((unit) => unit.clientId === clientId)
 
   const filteredAvailableListings = availableListings.filter((listing) => {
     const search = searchInput.toLowerCase().trim()
 
     return (
-      listing.status === "available" &&
-      (
-        search === "" ||
-        listing.projectName.toLowerCase().includes(search) ||
-        listing.cadastralLotNo.toLowerCase().includes(search) ||
-        listing.unitId.toLowerCase().includes(search) ||
-        listing.lotType.toLowerCase().includes(search)
-      )
+      search === "" ||
+      listing.project_name.toLowerCase().includes(search) ||
+      (listing.cadastral_lot_no || "").toLowerCase().includes(search) ||
+      listing.unit_id.toLowerCase().includes(search) ||
+      (listing.lot_type || "").toLowerCase().includes(search)
     )
   })
 
-  const getDocumentsByClientUnitId = (clientUnitId: number) => {
-    return clientDocuments.filter((doc) => doc.clientUnitId === clientUnitId)
+  const getMutationError = (...mutations: { error: unknown }[]) => {
+    const mutationWithError = mutations.find((mutation) => mutation.error)
+
+    if (!mutationWithError) return ""
+
+    return mutationWithError.error instanceof Error
+      ? mutationWithError.error.message
+      : "Something went wrong"
   }
 
-  const getDocumentStatus = (clientUnitId: number) => {
-    const docs = getDocumentsByClientUnitId(clientUnitId)
-    const requiredDocs = docs.filter((doc) => doc.isRequired)
-
-    if (requiredDocs.length === 0) return "incomplete"
-
-    const isComplete = requiredDocs.every((doc) => doc.status === "submitted")
-
-    return isComplete ? "complete" : "incomplete"
+  if (!isValidClientId) {
+    return <p className="p-4">Invalid client ID</p>
   }
 
-  const createDocumentsForClientUnit = (clientUnitId: number) => {
-    const existingDocs = getDocumentsByClientUnitId(clientUnitId)
-
-    if (existingDocs.length > 0) return
-
-    const startId = clientDocuments.length + 1
-
-    const docs: ClientDocument[] = documentTemplates.map((doc, index) => ({
-      id: startId + index,
-      clientUnitId,
-      name: doc.name,
-      isRequired: doc.isRequired,
-      canReuse: doc.canReuse,
-      status: "not_submitted",
-      reviewedBy: "",
-      reviewedAt: "",
-    }))
-
-    setClientDocuments((prev) => [...prev, ...docs])
+  if (isLoading) {
+    return <p className="p-4">Loading client units...</p>
   }
 
-  const handleReserveListing = (listing: AvailableListing) => {
-    if (!client) return
-
-    const newClientUnit: ClientUnit = {
-      id: clientUnits.length + 1,
-      clientId: client.id,
-      listingId: listing.id,
-      projectName: listing.projectName,
-      unitId: listing.unitId,
-      lotType: listing.lotType,
-      lotAreaSqm: listing.lotAreaSqm,
-      netSellingPrice: listing.netSellingPrice,
-      paidAmount: 0,
-      balance: listing.netSellingPrice,
-      status: "reserved",
-    }
-
-    setClientUnits((prev) => [...prev, newClientUnit])
-
-    const newDocs: ClientDocument[] = documentTemplates.map((doc, index) => ({
-      id: clientDocuments.length + index + 1,
-      clientUnitId: newClientUnit.id,
-      name: doc.name,
-      isRequired: doc.isRequired,
-      canReuse: doc.canReuse,
-      status: "not_submitted",
-      reviewedBy: "",
-      reviewedAt: "",
-    }))
-
-    setClientDocuments((prev) => [...prev, ...newDocs])
-
-    setAvailableListings((prev) =>
-      prev.map((item) =>
-        item.id === listing.id ? { ...item, status: "reserved" } : item
-      )
-    )
-
-    setSearchInput("")
-    setIsReserveOpen(false)
-  }
-
-  const handleToggleDocumentStatus = (documentId: number) => {
-    setClientDocuments((prev) =>
-      prev.map((doc) => {
-        if (doc.id !== documentId) return doc
-
-        const nextStatus =
-          doc.status === "submitted" ? "not_submitted" : "submitted"
-
-        return {
-          ...doc,
-          status: nextStatus,
-          reviewedBy: nextStatus === "submitted" ? "Admin" : "",
-          reviewedAt:
-            nextStatus === "submitted"
-              ? new Date().toISOString().slice(0, 10)
-              : "",
-        }
-      })
-    )
-  }
-
-  const handleApplyExistingDocs = () => {
-    if (!client || !selectedUnitForDocs) return
-
-    const otherClientUnitIds = clientUnits
-      .filter(
-        (unit) =>
-          unit.clientId === client.id &&
-          unit.id !== selectedUnitForDocs.id
-      )
-      .map((unit) => unit.id)
-
-    const existingSubmittedDocs = clientDocuments.filter(
-      (doc) =>
-        otherClientUnitIds.includes(doc.clientUnitId) &&
-        doc.status === "submitted" &&
-        doc.canReuse
-    )
-
-    setClientDocuments((prev) =>
-      prev.map((doc) => {
-        if (doc.clientUnitId !== selectedUnitForDocs.id) return doc
-        if (!doc.canReuse) return doc
-
-        const matchedDoc = existingSubmittedDocs.find(
-          (existingDoc) => existingDoc.name === doc.name
-        )
-
-        if (!matchedDoc) return doc
-
-        return {
-          ...doc,
-          status: "submitted",
-          reviewedBy: matchedDoc.reviewedBy || "Admin",
-          reviewedAt:
-            matchedDoc.reviewedAt || new Date().toISOString().slice(0, 10),
-        }
-      })
-    )
+  if (error) {
+    return <p className="p-4">Failed to load client units</p>
   }
 
   if (!client) {
-    return (
-      <div className="p-4">
-        <h1 className="text-2xl font-bold">Client not found</h1>
-
-        <button
-          onClick={() => navigate("/clients")}
-          className="mt-4 border border-black px-4 py-2 hover:bg-gray-200"
-        >
-          Back to Clients
-        </button>
-      </div>
-    )
+    return <p className="p-4">Client not found</p>
   }
 
   return (
@@ -478,17 +351,17 @@ const ClientListings = () => {
       </button>
 
       <div className="mb-6 border border-black p-4">
-        <h1 className="text-3xl font-bold">{client.fullName}</h1>
+        <h1 className="text-3xl font-bold">{client.full_name}</h1>
 
         <div className="mt-3 grid grid-cols-1 gap-2 text-sm md:grid-cols-2">
           <p>
-            <b>Spouse / Co-owner:</b> {client.spouseCoOwnerName || "-"}
+            <b>Spouse / Co-owner:</b> {client.spouse_co_owner_name || "-"}
           </p>
           <p>
             <b>Email:</b> {client.email || "-"}
           </p>
           <p>
-            <b>Contact:</b> {client.contactNo || "-"}
+            <b>Contact:</b> {client.contact_no || "-"}
           </p>
           <p>
             <b>Address:</b> {client.address || "-"}
@@ -538,37 +411,35 @@ const ClientListings = () => {
               <th className="border-r border-black px-4 py-2 text-left">
                 Document Status ↕
               </th>
-              <th className="px-4 py-2 text-left">
-                Action ↕
-              </th>
+              <th className="px-4 py-2 text-left">Action ↕</th>
             </tr>
           </thead>
 
           <tbody>
-            {clientUnitList.map((unit) => (
+            {units.map((unit) => (
               <tr key={unit.id} className="border-b border-black">
                 <td className="border-r border-black px-4 py-2">
-                  {unit.unitId}
+                  {unit.unit_id}
                 </td>
 
                 <td className="border-r border-black px-4 py-2">
-                  {unit.projectName}
+                  {unit.project_name}
                 </td>
 
                 <td className="border-r border-black px-4 py-2">
-                  {unit.lotType}
+                  {unit.lot_type || "-"}
                 </td>
 
                 <td className="border-r border-black px-4 py-2">
-                  {formatNumber(unit.lotAreaSqm)} sqm
+                  {formatNumber(unit.lot_area_sqm)} sqm
                 </td>
 
                 <td className="border-r border-black px-4 py-2">
-                  {formatMoney(unit.netSellingPrice)}
+                  {formatMoney(unit.net_selling_price)}
                 </td>
 
                 <td className="border-r border-black px-4 py-2">
-                  {formatMoney(unit.paidAmount)}
+                  {formatMoney(unit.paid_amount)}
                 </td>
 
                 <td className="border-r border-black px-4 py-2">
@@ -580,14 +451,14 @@ const ClientListings = () => {
                 </td>
 
                 <td className="border-r border-black px-4 py-2 capitalize">
-                  {getDocumentStatus(unit.id)}
+                  {unit.document_status}
                 </td>
 
                 <td className="px-4 py-2">
                   <button
                     onClick={() => {
-                      createDocumentsForClientUnit(unit.id)
                       setSelectedUnitForDocs(unit)
+                      createChecklistMutation.mutate(unit.id)
                     }}
                     className="border border-black px-3 py-1 hover:bg-gray-200"
                   >
@@ -597,7 +468,7 @@ const ClientListings = () => {
               </tr>
             ))}
 
-            {clientUnitList.length === 0 && (
+            {units.length === 0 && (
               <tr>
                 <td colSpan={10} className="px-4 py-6 text-center text-gray-600">
                   No units reserved for this client
@@ -618,6 +489,7 @@ const ClientListings = () => {
                 onClick={() => {
                   setSearchInput("")
                   setIsReserveOpen(false)
+                  setDueDay(28)
                 }}
                 className="w-fit border border-black px-4 py-2 hover:bg-gray-200"
               >
@@ -634,6 +506,16 @@ const ClientListings = () => {
                 className="border border-black px-3 py-2 md:w-[500px]"
               />
 
+              <input
+                type="number"
+                min={1}
+                max={31}
+                value={dueDay}
+                onChange={(e) => setDueDay(Number(e.target.value))}
+                className="border border-black px-3 py-2 md:w-32"
+                placeholder="Due day"
+              />
+
               <button
                 onClick={() => setSearchInput("")}
                 className="border border-black px-4 py-2 hover:bg-gray-200"
@@ -642,85 +524,102 @@ const ClientListings = () => {
               </button>
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full border border-black text-sm">
-                <thead>
-                  <tr className="border-b border-black">
-                    <th className="border-r border-black px-4 py-2 text-left">
-                      Unit ID ↕
-                    </th>
-                    <th className="border-r border-black px-4 py-2 text-left">
-                      Project ↕
-                    </th>
-                    <th className="border-r border-black px-4 py-2 text-left">
-                      Cadastral Lot No. ↕
-                    </th>
-                    <th className="border-r border-black px-4 py-2 text-left">
-                      Lot Type ↕
-                    </th>
-                    <th className="border-r border-black px-4 py-2 text-left">
-                      Area ↕
-                    </th>
-                    <th className="border-r border-black px-4 py-2 text-left">
-                      Net Price ↕
-                    </th>
-                    <th className="px-4 py-2 text-left">
-                      Action ↕
-                    </th>
-                  </tr>
-                </thead>
+            {reserveListingMutation.isError && (
+              <p className="mb-3 border border-black px-4 py-2 text-red-600">
+                {reserveListingMutation.error.message}
+              </p>
+            )}
 
-                <tbody>
-                  {filteredAvailableListings.map((listing) => (
-                    <tr key={listing.id} className="border-b border-black">
-                      <td className="border-r border-black px-4 py-2">
-                        {listing.unitId}
-                      </td>
+            {isAvailableListingsLoading ? (
+              <p>Loading available listings...</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full border border-black text-sm">
+                  <thead>
+                    <tr className="border-b border-black">
+                      <th className="border-r border-black px-4 py-2 text-left">
+                        Unit ID ↕
+                      </th>
+                      <th className="border-r border-black px-4 py-2 text-left">
+                        Project ↕
+                      </th>
+                      <th className="border-r border-black px-4 py-2 text-left">
+                        Cadastral Lot No. ↕
+                      </th>
+                      <th className="border-r border-black px-4 py-2 text-left">
+                        Lot Type ↕
+                      </th>
+                      <th className="border-r border-black px-4 py-2 text-left">
+                        Area ↕
+                      </th>
+                      <th className="border-r border-black px-4 py-2 text-left">
+                        Net Price ↕
+                      </th>
+                      <th className="px-4 py-2 text-left">Action ↕</th>
+                    </tr>
+                  </thead>
 
-                      <td className="border-r border-black px-4 py-2">
-                        {listing.projectName}
-                      </td>
+                  <tbody>
+                    {filteredAvailableListings.map((listing) => (
+                      <tr key={listing.id} className="border-b border-black">
+                        <td className="border-r border-black px-4 py-2">
+                          {listing.unit_id}
+                        </td>
 
-                      <td className="border-r border-black px-4 py-2">
-                        {listing.cadastralLotNo}
-                      </td>
+                        <td className="border-r border-black px-4 py-2">
+                          {listing.project_name}
+                        </td>
 
-                      <td className="border-r border-black px-4 py-2">
-                        {listing.lotType}
-                      </td>
+                        <td className="border-r border-black px-4 py-2">
+                          {listing.cadastral_lot_no || "-"}
+                        </td>
 
-                      <td className="border-r border-black px-4 py-2">
-                        {formatNumber(listing.lotAreaSqm)} sqm
-                      </td>
+                        <td className="border-r border-black px-4 py-2">
+                          {listing.lot_type || "-"}
+                        </td>
 
-                      <td className="border-r border-black px-4 py-2">
-                        {formatMoney(listing.netSellingPrice)}
-                      </td>
+                        <td className="border-r border-black px-4 py-2">
+                          {formatNumber(listing.lot_area_sqm)} sqm
+                        </td>
 
-                      <td className="px-4 py-2">
-                        <button
-                          onClick={() => handleReserveListing(listing)}
-                          className="border border-black px-3 py-1 hover:bg-gray-200"
+                        <td className="border-r border-black px-4 py-2">
+                          {formatMoney(listing.net_selling_price)}
+                        </td>
+
+                        <td className="px-4 py-2">
+                          <button
+                            disabled={reserveListingMutation.isPending}
+                            onClick={() =>
+                              reserveListingMutation.mutate({
+                                clientId,
+                                listing_id: listing.id,
+                                due_day: dueDay,
+                              })
+                            }
+                            className="border border-black px-3 py-1 hover:bg-gray-200 disabled:opacity-50"
+                          >
+                            {reserveListingMutation.isPending
+                              ? "Reserving..."
+                              : "Reserve"}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+
+                    {filteredAvailableListings.length === 0 && (
+                      <tr>
+                        <td
+                          colSpan={7}
+                          className="px-4 py-6 text-center text-gray-600"
                         >
-                          Reserve
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-
-                  {filteredAvailableListings.length === 0 && (
-                    <tr>
-                      <td
-                        colSpan={7}
-                        className="px-4 py-6 text-center text-gray-600"
-                      >
-                        No available listings found
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+                          No available listings found
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -733,17 +632,24 @@ const ClientListings = () => {
                 <div>
                   <h2 className="text-2xl font-bold">Client Documents</h2>
                   <p className="text-sm text-gray-600">
-                    {selectedUnitForDocs.unitId} -{" "}
-                    {selectedUnitForDocs.projectName}
+                    {selectedUnitForDocs.unit_id} -{" "}
+                    {selectedUnitForDocs.project_name}
                   </p>
                 </div>
 
                 <div className="flex flex-wrap gap-2">
                   <button
-                    onClick={handleApplyExistingDocs}
-                    className="border border-black px-4 py-2 hover:bg-gray-200"
+                    disabled={applyExistingDocumentsMutation.isPending}
+                    onClick={() =>
+                      applyExistingDocumentsMutation.mutate(
+                        selectedUnitForDocs.id
+                      )
+                    }
+                    className="border border-black px-4 py-2 hover:bg-gray-200 disabled:opacity-50"
                   >
-                    Apply Existing Docs
+                    {applyExistingDocumentsMutation.isPending
+                      ? "Applying..."
+                      : "Apply Existing Docs"}
                   </button>
 
                   <button
@@ -760,105 +666,139 @@ const ClientListings = () => {
               <p>
                 <b>Document Status:</b>{" "}
                 <span className="capitalize">
-                  {getDocumentStatus(selectedUnitForDocs.id)}
+                  {selectedUnitForDocs.document_status}
                 </span>
               </p>
 
               <p className="text-sm text-gray-600">
-                Mark each document as submitted after the admin checks the physical copy.
+                Mark each document as submitted after the admin checks the
+                physical copy.
               </p>
+
+              {getMutationError(
+                createChecklistMutation,
+                applyExistingDocumentsMutation,
+                updateDocumentStatusMutation
+              ) && (
+                <p className="mt-2 border border-black px-4 py-2 text-red-600">
+                  {getMutationError(
+                    createChecklistMutation,
+                    applyExistingDocumentsMutation,
+                    updateDocumentStatusMutation
+                  )}
+                </p>
+              )}
             </div>
 
             <div className="overflow-y-auto p-4">
-              <div className="overflow-x-auto">
-                <table className="w-full border border-black text-sm">
-                  <thead className="sticky top-0 bg-white">
-                    <tr className="border-b border-black">
-                      <th className="border-r border-black px-4 py-2 text-left">
-                        No. ↕
-                      </th>
-                      <th className="border-r border-black px-4 py-2 text-left">
-                        Document ↕
-                      </th>
-                      <th className="border-r border-black px-4 py-2 text-left">
-                        Required ↕
-                      </th>
-                      <th className="border-r border-black px-4 py-2 text-left">
-                        Status ↕
-                      </th>
-                      <th className="border-r border-black px-4 py-2 text-left">
-                        Reviewed By ↕
-                      </th>
-                      <th className="border-r border-black px-4 py-2 text-left">
-                        Reviewed At ↕
-                      </th>
-                      <th className="px-4 py-2 text-left">
-                        Action ↕
-                      </th>
-                    </tr>
-                  </thead>
+              {isDocumentsLoading ? (
+                <p>Loading documents...</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full border border-black text-sm">
+                    <thead className="sticky top-0 bg-white">
+                      <tr className="border-b border-black">
+                        <th className="border-r border-black px-4 py-2 text-left">
+                          No. ↕
+                        </th>
+                        <th className="border-r border-black px-4 py-2 text-left">
+                          Document ↕
+                        </th>
+                        <th className="border-r border-black px-4 py-2 text-left">
+                          Required ↕
+                        </th>
+                        <th className="border-r border-black px-4 py-2 text-left">
+                          Reusable ↕
+                        </th>
+                        <th className="border-r border-black px-4 py-2 text-left">
+                          Status ↕
+                        </th>
+                        <th className="border-r border-black px-4 py-2 text-left">
+                          Reviewed By ↕
+                        </th>
+                        <th className="border-r border-black px-4 py-2 text-left">
+                          Reviewed At ↕
+                        </th>
+                        <th className="px-4 py-2 text-left">Action ↕</th>
+                      </tr>
+                    </thead>
 
-                  <tbody>
-                    {getDocumentsByClientUnitId(selectedUnitForDocs.id).map(
-                      (doc, index) => (
-                        <tr key={doc.id} className="border-b border-black">
-                          <td className="border-r border-black px-4 py-2">
-                            {index + 1}
-                          </td>
+                    <tbody>
+                      {selectedDocuments.map((doc, index) => {
+                        const isSubmitted =
+                          doc.status === "submitted" || doc.status === "approved"
 
-                          <td className="border-r border-black px-4 py-2">
-                            {doc.name}
-                          </td>
+                        return (
+                          <tr key={doc.id} className="border-b border-black">
+                            <td className="border-r border-black px-4 py-2">
+                              {index + 1}
+                            </td>
 
-                          <td className="border-r border-black px-4 py-2">
-                            {doc.isRequired ? "Yes" : "No"}
-                          </td>
+                            <td className="border-r border-black px-4 py-2">
+                              {doc.name}
+                            </td>
 
-                          <td className="border-r border-black px-4 py-2">
-                            {doc.status === "submitted"
-                              ? "Submitted"
-                              : "Not Submitted"}
-                          </td>
+                            <td className="border-r border-black px-4 py-2">
+                              {Boolean(doc.is_required) ? "Yes" : "No"}
+                            </td>
 
-                          <td className="border-r border-black px-4 py-2">
-                            {doc.reviewedBy || "-"}
-                          </td>
+                            <td className="border-r border-black px-4 py-2">
+                              {Boolean(doc.can_reuse) ? "Yes" : "No"}
+                            </td>
 
-                          <td className="border-r border-black px-4 py-2">
-                            {doc.reviewedAt || "-"}
-                          </td>
+                            <td className="border-r border-black px-4 py-2 capitalize">
+                              {doc.status.replace("_", " ")}
+                            </td>
 
-                          <td className="px-4 py-2">
-                            <button
-                              onClick={() => handleToggleDocumentStatus(doc.id)}
-                              className="border border-black px-3 py-1 hover:bg-gray-200"
-                            >
-                              {doc.status === "submitted"
-                                ? "Mark Not Submitted"
-                                : "Mark Submitted"}
-                            </button>
+                            <td className="border-r border-black px-4 py-2">
+                              {doc.reviewed_by_name || "-"}
+                            </td>
+
+                            <td className="border-r border-black px-4 py-2">
+                              {doc.reviewed_at || "-"}
+                            </td>
+
+                            <td className="px-4 py-2">
+                              <button
+                                disabled={updateDocumentStatusMutation.isPending}
+                                onClick={() =>
+                                  updateDocumentStatusMutation.mutate({
+                                    documentChecklistId: doc.id,
+                                    status: isSubmitted
+                                      ? "not_submitted"
+                                      : "submitted",
+                                  })
+                                }
+                                className="border border-black px-3 py-1 hover:bg-gray-200 disabled:opacity-50"
+                              >
+                                {isSubmitted
+                                  ? "Mark Not Submitted"
+                                  : "Mark Submitted"}
+                              </button>
+                            </td>
+                          </tr>
+                        )
+                      })}
+
+                      {selectedDocuments.length === 0 && (
+                        <tr>
+                          <td
+                            colSpan={8}
+                            className="px-4 py-6 text-center text-gray-600"
+                          >
+                            No documents found
                           </td>
                         </tr>
-                      )
-                    )}
-
-                    {getDocumentsByClientUnitId(selectedUnitForDocs.id).length === 0 && (
-                      <tr>
-                        <td
-                          colSpan={7}
-                          className="px-4 py-6 text-center text-gray-600"
-                        >
-                          No documents found
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
 
             <div className="border-t border-black p-4 text-sm text-gray-600">
-              This is a physical checklist. No file upload is required unless you want digital document storage later.
+              This is a physical checklist. No file upload is required unless you
+              want digital document storage later.
             </div>
           </div>
         </div>

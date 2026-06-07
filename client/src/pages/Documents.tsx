@@ -1,112 +1,209 @@
-import { useState } from "react"
+import { useState, type FormEvent } from "react"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
-type DocumentStatus = "active" | "inactive"
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api/v1"
+
+type DocumentStatus = "active" | "inactive" | string
 
 type DocumentItem = {
   id: number
   name: string
+  description: string | null
+  is_required: boolean | number
+  can_reuse: boolean | number
+  status: DocumentStatus
+  created_at: string
+  updated_at: string
+}
+
+type DocumentFormData = {
+  name: string
   description: string
-  isRequired: boolean
+  is_required: boolean
+  can_reuse: boolean
   status: DocumentStatus
 }
 
-const Documents = () => {
-  const [documents, setDocuments] = useState<DocumentItem[]>([
-    {
-      id: 1,
-      name: "Client Registration Form - Seller's Copy",
-      description: "Seller copy of the client registration form",
-      isRequired: true,
-      status: "active",
-    },
-    {
-      id: 2,
-      name: "Client Registration Form - Administrator Copy",
-      description: "Administrator copy of the client registration form",
-      isRequired: true,
-      status: "active",
-    },
-    {
-      id: 3,
-      name: "Intent to Buy",
-      description: "Client intent to buy document",
-      isRequired: true,
-      status: "active",
-    },
-    {
-      id: 4,
-      name: "Offer to Buy & Buyer's Profile",
-      description: "Offer to buy form with buyer profile",
-      isRequired: true,
-      status: "active",
-    },
-    {
-      id: 5,
-      name: "Reservation Agreement",
-      description: "Agreement for unit reservation",
-      isRequired: true,
-      status: "active",
-    },
-  ])
+type DocumentsResponse = {
+  documents: DocumentItem[]
+}
 
-  const [searchInput, setSearchInput] = useState("")
-  const [isAddOpen, setIsAddOpen] = useState(false)
-  const [editDocument, setEditDocument] = useState<DocumentItem | null>(null)
+const emptyFormData: DocumentFormData = {
+  name: "",
+  description: "",
+  is_required: true,
+  can_reuse: false,
+  status: "active",
+}
 
-  const [formData, setFormData] = useState({
-    name: "",
-    description: "",
-    isRequired: true,
-    status: "active" as DocumentStatus,
-  })
+const getErrorMessage = async (response: Response) => {
+  try {
+    const data = await response.json()
 
-  const resetForm = () => {
-    setFormData({
-      name: "",
-      description: "",
-      isRequired: true,
-      status: "active",
-    })
-  }
-
-  const handleAddDocument = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault()
-
-    const newDocument: DocumentItem = {
-      id: documents.length + 1,
-      ...formData,
+    if (typeof data.message === "string") {
+      return data.message
     }
 
-    setDocuments((prev) => [...prev, newDocument])
-    resetForm()
-    setIsAddOpen(false)
+    return "Something went wrong"
+  } catch {
+    return "Something went wrong"
+  }
+}
+
+const fetchDocuments = async (): Promise<DocumentItem[]> => {
+  const res = await fetch(`${API_URL}/documents`, {
+    credentials: "include",
+  })
+
+  if (!res.ok) {
+    throw new Error(await getErrorMessage(res))
   }
 
-  const handleUpdateDocument = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault()
+  const data: DocumentsResponse = await res.json()
+  return data.documents
+}
 
-    if (!editDocument) return
+const createDocument = async (documentData: DocumentFormData) => {
+  const res = await fetch(`${API_URL}/documents`, {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(documentData),
+  })
 
-    setDocuments((prev) =>
-      prev.map((document) =>
-        document.id === editDocument.id ? editDocument : document
-      )
-    )
-
-    setEditDocument(null)
+  if (!res.ok) {
+    throw new Error(await getErrorMessage(res))
   }
+
+  return res.json()
+}
+
+const updateDocument = async ({
+  id,
+  documentData,
+}: {
+  id: number
+  documentData: DocumentFormData
+}) => {
+  const res = await fetch(`${API_URL}/documents/${id}`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(documentData),
+  })
+
+  if (!res.ok) {
+    throw new Error(await getErrorMessage(res))
+  }
+
+  return res.json()
+}
+
+const Documents = () => {
+  const queryClient = useQueryClient()
+
+  const [searchInput, setSearchInput] = useState("")
+  const [statusFilter, setStatusFilter] = useState("all")
+  const [requiredFilter, setRequiredFilter] = useState("all")
+  const [reusableFilter, setReusableFilter] = useState("all")
+
+  const [isAddOpen, setIsAddOpen] = useState(false)
+  const [editDocument, setEditDocument] = useState<DocumentItem | null>(null)
+  const [formData, setFormData] = useState<DocumentFormData>(emptyFormData)
+
+  const {
+    data: documents = [],
+    isLoading,
+    error,
+  } = useQuery<DocumentItem[]>({
+    queryKey: ["documents"],
+    queryFn: fetchDocuments,
+  })
+
+  const createDocumentMutation = useMutation({
+    mutationFn: createDocument,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["documents"] })
+      setIsAddOpen(false)
+      setFormData(emptyFormData)
+    },
+  })
+
+  const updateDocumentMutation = useMutation({
+    mutationFn: updateDocument,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["documents"] })
+      setEditDocument(null)
+    },
+  })
 
   const filteredDocuments = documents.filter((document) => {
     const search = searchInput.toLowerCase().trim()
 
-    return (
+    const matchesSearch =
       search === "" ||
       document.name.toLowerCase().includes(search) ||
-      document.description.toLowerCase().includes(search) ||
-      document.status.toLowerCase().includes(search) ||
-      (document.isRequired ? "required" : "optional").includes(search)
-    )
+      (document.description || "").toLowerCase().includes(search) ||
+      document.status.toLowerCase().includes(search)
+
+    const matchesStatus =
+      statusFilter === "all" || document.status === statusFilter
+
+    const matchesRequired =
+      requiredFilter === "all" ||
+      String(Boolean(document.is_required)) === requiredFilter
+
+    const matchesReusable =
+      reusableFilter === "all" ||
+      String(Boolean(document.can_reuse)) === reusableFilter
+
+    return matchesSearch && matchesStatus && matchesRequired && matchesReusable
   })
+
+  const resetFilters = () => {
+    setSearchInput("")
+    setStatusFilter("all")
+    setRequiredFilter("all")
+    setReusableFilter("all")
+  }
+
+  const openEditModal = (document: DocumentItem) => {
+    setEditDocument(document)
+  }
+
+  const handleAddDocument = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    createDocumentMutation.mutate(formData)
+  }
+
+  const handleUpdateDocument = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+
+    if (!editDocument) return
+
+    updateDocumentMutation.mutate({
+      id: editDocument.id,
+      documentData: {
+        name: editDocument.name,
+        description: editDocument.description || "",
+        is_required: Boolean(editDocument.is_required),
+        can_reuse: Boolean(editDocument.can_reuse),
+        status: editDocument.status,
+      },
+    })
+  }
+
+  if (isLoading) {
+    return <p className="p-4">Loading documents...</p>
+  }
+
+  if (error) {
+    return <p className="p-4">Failed to load documents</p>
+  }
 
   return (
     <div className="p-4">
@@ -134,8 +231,38 @@ const Documents = () => {
             className="border border-black px-3 py-2 md:w-96"
           />
 
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="border border-black px-3 py-2"
+          >
+            <option value="all">All Status</option>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+          </select>
+
+          <select
+            value={requiredFilter}
+            onChange={(e) => setRequiredFilter(e.target.value)}
+            className="border border-black px-3 py-2"
+          >
+            <option value="all">All Required</option>
+            <option value="true">Required</option>
+            <option value="false">Optional</option>
+          </select>
+
+          <select
+            value={reusableFilter}
+            onChange={(e) => setReusableFilter(e.target.value)}
+            className="border border-black px-3 py-2"
+          >
+            <option value="all">All Reusable</option>
+            <option value="true">Reusable</option>
+            <option value="false">Not Reusable</option>
+          </select>
+
           <button
-            onClick={() => setSearchInput("")}
+            onClick={resetFilters}
             className="border border-black px-4 py-2 hover:bg-gray-200"
           >
             Reset
@@ -157,11 +284,12 @@ const Documents = () => {
                 Required ↕
               </th>
               <th className="border-r border-black px-4 py-2 text-left">
+                Reusable ↕
+              </th>
+              <th className="border-r border-black px-4 py-2 text-left">
                 Status ↕
               </th>
-              <th className="px-4 py-2 text-left">
-                Actions ↕
-              </th>
+              <th className="px-4 py-2 text-left">Actions ↕</th>
             </tr>
           </thead>
 
@@ -177,7 +305,11 @@ const Documents = () => {
                 </td>
 
                 <td className="border-r border-black px-4 py-2">
-                  {document.isRequired ? "Yes" : "No"}
+                  {Boolean(document.is_required) ? "Yes" : "No"}
+                </td>
+
+                <td className="border-r border-black px-4 py-2">
+                  {Boolean(document.can_reuse) ? "Yes" : "No"}
                 </td>
 
                 <td className="border-r border-black px-4 py-2 capitalize">
@@ -186,7 +318,7 @@ const Documents = () => {
 
                 <td className="px-4 py-2">
                   <button
-                    onClick={() => setEditDocument(document)}
+                    onClick={() => openEditModal(document)}
                     className="border border-black px-3 py-1 hover:bg-gray-200"
                   >
                     Edit
@@ -197,7 +329,7 @@ const Documents = () => {
 
             {filteredDocuments.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-4 py-6 text-center text-gray-600">
+                <td colSpan={6} className="px-4 py-6 text-center text-gray-600">
                   No documents found
                 </td>
               </tr>
@@ -236,17 +368,31 @@ const Documents = () => {
               />
 
               <select
-                value={formData.isRequired ? "true" : "false"}
+                value={String(formData.is_required)}
                 onChange={(e) =>
                   setFormData({
                     ...formData,
-                    isRequired: e.target.value === "true",
+                    is_required: e.target.value === "true",
                   })
                 }
                 className="border border-black px-3 py-2"
               >
                 <option value="true">Required</option>
                 <option value="false">Optional</option>
+              </select>
+
+              <select
+                value={String(formData.can_reuse)}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    can_reuse: e.target.value === "true",
+                  })
+                }
+                className="border border-black px-3 py-2"
+              >
+                <option value="true">Reusable</option>
+                <option value="false">Not Reusable</option>
               </select>
 
               <select
@@ -263,11 +409,17 @@ const Documents = () => {
                 <option value="inactive">Inactive</option>
               </select>
 
+              {createDocumentMutation.isError && (
+                <p className="border border-black px-4 py-2 text-red-600">
+                  {createDocumentMutation.error.message}
+                </p>
+              )}
+
               <div className="mt-2 flex justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => {
-                    resetForm()
+                    setFormData(emptyFormData)
                     setIsAddOpen(false)
                   }}
                   className="border border-black px-4 py-2 hover:bg-gray-200"
@@ -277,9 +429,12 @@ const Documents = () => {
 
                 <button
                   type="submit"
-                  className="border border-black px-4 py-2 hover:bg-gray-200"
+                  disabled={createDocumentMutation.isPending}
+                  className="border border-black px-4 py-2 hover:bg-gray-200 disabled:opacity-50"
                 >
-                  Save Document
+                  {createDocumentMutation.isPending
+                    ? "Saving..."
+                    : "Save Document"}
                 </button>
               </div>
             </form>
@@ -307,7 +462,7 @@ const Documents = () => {
               />
 
               <textarea
-                value={editDocument.description}
+                value={editDocument.description || ""}
                 onChange={(e) =>
                   setEditDocument({
                     ...editDocument,
@@ -318,17 +473,31 @@ const Documents = () => {
               />
 
               <select
-                value={editDocument.isRequired ? "true" : "false"}
+                value={String(Boolean(editDocument.is_required))}
                 onChange={(e) =>
                   setEditDocument({
                     ...editDocument,
-                    isRequired: e.target.value === "true",
+                    is_required: e.target.value === "true",
                   })
                 }
                 className="border border-black px-3 py-2"
               >
                 <option value="true">Required</option>
                 <option value="false">Optional</option>
+              </select>
+
+              <select
+                value={String(Boolean(editDocument.can_reuse))}
+                onChange={(e) =>
+                  setEditDocument({
+                    ...editDocument,
+                    can_reuse: e.target.value === "true",
+                  })
+                }
+                className="border border-black px-3 py-2"
+              >
+                <option value="true">Reusable</option>
+                <option value="false">Not Reusable</option>
               </select>
 
               <select
@@ -345,6 +514,12 @@ const Documents = () => {
                 <option value="inactive">Inactive</option>
               </select>
 
+              {updateDocumentMutation.isError && (
+                <p className="border border-black px-4 py-2 text-red-600">
+                  {updateDocumentMutation.error.message}
+                </p>
+              )}
+
               <div className="mt-2 flex justify-end gap-2">
                 <button
                   type="button"
@@ -356,9 +531,12 @@ const Documents = () => {
 
                 <button
                   type="submit"
-                  className="border border-black px-4 py-2 hover:bg-gray-200"
+                  disabled={updateDocumentMutation.isPending}
+                  className="border border-black px-4 py-2 hover:bg-gray-200 disabled:opacity-50"
                 >
-                  Save Changes
+                  {updateDocumentMutation.isPending
+                    ? "Saving..."
+                    : "Save Changes"}
                 </button>
               </div>
             </form>
