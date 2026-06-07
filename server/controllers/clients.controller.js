@@ -2,10 +2,7 @@ import { db } from '../db/connect.js'
 import { createAuditLog } from '../utils/createAuditLog.js'
 
 const nullableValue = (value) => {
-  if (value === undefined || value === null || value === '') {
-    return null
-  }
-
+  if (value === undefined || value === null || value === '') return null
   return value
 }
 
@@ -20,9 +17,10 @@ const clientFields = `
   c.email,
   c.contact_no,
   c.address,
+  c.region,
   c.created_at,
   c.updated_at,
-  COUNT(cu.client_id) AS units_count,
+  COUNT(cu.id) AS units_count,
   COALESCE(SUM(cu.balance), 0) AS balance
 `
 
@@ -33,12 +31,14 @@ const clientGroupBy = `
   c.email,
   c.contact_no,
   c.address,
+  c.region,
   c.created_at,
   c.updated_at
 `
 
 export const getClients = async (req, res) => {
   const { search } = req.query
+
   const params = []
   let whereClause = ''
 
@@ -52,9 +52,17 @@ export const getClients = async (req, res) => {
         OR c.email LIKE ?
         OR c.contact_no LIKE ?
         OR c.address LIKE ?
+        OR c.region LIKE ?
     `
 
-    params.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm)
+    params.push(
+      searchTerm,
+      searchTerm,
+      searchTerm,
+      searchTerm,
+      searchTerm,
+      searchTerm
+    )
   }
 
   const [clients] = await db.query(
@@ -72,14 +80,18 @@ export const getClients = async (req, res) => {
   )
 
   res.status(200).json({
-    clients
+    clients: clients.map((client) => ({
+      ...client,
+      units_count: Number(client.units_count || 0),
+      balance: Number(client.balance || 0),
+    })),
   })
 }
 
 export const getClient = async (req, res) => {
   const { id } = req.params
 
-  const [rows] = await db.query(
+  const [clients] = await db.query(
     `
     SELECT
       ${clientFields}
@@ -93,16 +105,20 @@ export const getClient = async (req, res) => {
     [id]
   )
 
-  const client = rows[0]
+  const client = clients[0]
 
   if (!client) {
     return res.status(404).json({
-      message: 'Client not found'
+      message: 'Client not found',
     })
   }
 
   res.status(200).json({
-    client
+    client: {
+      ...client,
+      units_count: Number(client.units_count || 0),
+      balance: Number(client.balance || 0),
+    },
   })
 }
 
@@ -112,12 +128,13 @@ export const createClient = async (req, res) => {
     spouse_co_owner_name,
     email,
     contact_no,
-    address
+    address,
+    region,
   } = req.body
 
   if (isMissing(full_name)) {
     return res.status(400).json({
-      message: 'Client full name is required'
+      message: 'Client full name is required',
     })
   }
 
@@ -128,15 +145,17 @@ export const createClient = async (req, res) => {
       spouse_co_owner_name,
       email,
       contact_no,
-      address
-    ) VALUES (?, ?, ?, ?, ?)
+      address,
+      region
+    ) VALUES (?, ?, ?, ?, ?, ?)
     `,
     [
       full_name,
       nullableValue(spouse_co_owner_name),
       nullableValue(email),
       nullableValue(contact_no),
-      nullableValue(address)
+      nullableValue(address),
+      nullableValue(region),
     ]
   )
 
@@ -145,12 +164,12 @@ export const createClient = async (req, res) => {
     action: 'create',
     module: 'Clients',
     description: `Created client ${full_name}`,
-    ipAddress: req.ip
+    ipAddress: req.ip,
   })
 
   res.status(201).json({
     message: 'Client created successfully',
-    clientId: result.insertId
+    clientId: result.insertId,
   })
 }
 
@@ -162,12 +181,13 @@ export const updateClient = async (req, res) => {
     spouse_co_owner_name,
     email,
     contact_no,
-    address
+    address,
+    region,
   } = req.body
 
   if (isMissing(full_name)) {
     return res.status(400).json({
-      message: 'Client full name is required'
+      message: 'Client full name is required',
     })
   }
 
@@ -179,7 +199,8 @@ export const updateClient = async (req, res) => {
       spouse_co_owner_name = ?,
       email = ?,
       contact_no = ?,
-      address = ?
+      address = ?,
+      region = ?
     WHERE id = ?
     `,
     [
@@ -188,13 +209,14 @@ export const updateClient = async (req, res) => {
       nullableValue(email),
       nullableValue(contact_no),
       nullableValue(address),
-      id
+      nullableValue(region),
+      id,
     ]
   )
 
   if (result.affectedRows === 0) {
     return res.status(404).json({
-      message: 'Client not found'
+      message: 'Client not found',
     })
   }
 
@@ -203,10 +225,10 @@ export const updateClient = async (req, res) => {
     action: 'update',
     module: 'Clients',
     description: `Updated client ${full_name}`,
-    ipAddress: req.ip
+    ipAddress: req.ip,
   })
 
   res.status(200).json({
-    message: 'Client updated successfully'
+    message: 'Client updated successfully',
   })
 }
