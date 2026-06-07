@@ -16,6 +16,7 @@ import AuditLogs from "./pages/AuditLogs"
 import Settings from "./pages/Settings"
 import Employees from "./pages/Employees"
 import Attendance from "./pages/Attendance"
+import NotFound from "./pages/NotFound"
 
 
 const App = () => {
@@ -41,6 +42,8 @@ const App = () => {
         <Route path="employees" element={<Employees/>} />
         <Route path="attendance" element={<Attendance/>} />
       </Route>
+
+      <Route path="*" element={<NotFound />}/>
     </>
   ))
 

@@ -20,12 +20,14 @@ type AttendanceRecord = {
   employee_name: string
   position: string | null
   attendance_date: string
+  day_status: "present" | "absent" | "rest_day" | "offset" | string
   time_in: string | null
   time_out: string | null
   schedule_time_in: string | null
   schedule_time_out: string | null
+  break_minutes: number
   work_hours: number | null
-  attendance_status: "no_time_in" | "late" | "on_time" | string
+  attendance_status: "no_time_in" | "late" | "on_time" | "absent" | "rest_day" | "offset" | string
   created_at: string
   updated_at: string
 }
@@ -33,10 +35,12 @@ type AttendanceRecord = {
 type AttendanceFormData = {
   employee_id: number
   attendance_date: string
+  day_status: string
   time_in: string
   time_out: string
   schedule_time_in: string
   schedule_time_out: string
+  break_minutes: number
 }
 
 type AttendanceResponse = {
@@ -47,15 +51,26 @@ type EmployeesResponse = {
   employees: Employee[]
 }
 
-const today = new Date().toISOString().slice(0, 10)
+const getLocalDate = () => {
+  const date = new Date()
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, "0")
+  const day = String(date.getDate()).padStart(2, "0")
+
+  return `${year}-${month}-${day}`
+}
+
+const today = getLocalDate()
 
 const emptyFormData: AttendanceFormData = {
   employee_id: 0,
   attendance_date: today,
+  day_status: "present",
   time_in: "",
   time_out: "",
   schedule_time_in: "08:00",
   schedule_time_out: "17:00",
+  break_minutes: 60,
 }
 
 const getErrorMessage = async (response: Response) => {
@@ -168,8 +183,12 @@ const Attendance = () => {
     mutationFn: createAttendance,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["attendance"] })
+      queryClient.invalidateQueries({ queryKey: ["employees"] })
       setIsAddOpen(false)
-      setFormData(emptyFormData)
+      setFormData({
+        ...emptyFormData,
+        attendance_date: getLocalDate(),
+      })
     },
   })
 
@@ -177,6 +196,7 @@ const Attendance = () => {
     mutationFn: updateAttendance,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["attendance"] })
+      queryClient.invalidateQueries({ queryKey: ["employees"] })
       setEditAttendance(null)
     },
   })
@@ -188,6 +208,7 @@ const Attendance = () => {
   const resetForm = () => {
     setFormData({
       ...emptyFormData,
+      attendance_date: getLocalDate(),
       employee_id: employees[0]?.id || 0,
     })
   }
@@ -195,6 +216,7 @@ const Attendance = () => {
   const openAddModal = () => {
     setFormData({
       ...emptyFormData,
+      attendance_date: getLocalDate(),
       employee_id: employees[0]?.id || 0,
     })
     setIsAddOpen(true)
@@ -203,13 +225,27 @@ const Attendance = () => {
   const formatDate = (date: string | null) => {
     if (!date) return "-"
 
-    return date.slice(0, 10)
+    if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return date
+    }
+
+    const parsedDate = new Date(date)
+
+    if (Number.isNaN(parsedDate.getTime())) {
+      return String(date).slice(0, 10)
+    }
+
+    const year = parsedDate.getFullYear()
+    const month = String(parsedDate.getMonth() + 1).padStart(2, "0")
+    const day = String(parsedDate.getDate()).padStart(2, "0")
+
+    return `${year}-${month}-${day}`
   }
 
   const formatTime = (time: string | null) => {
     if (!time) return "-"
 
-    return time.slice(0, 5)
+    return String(time).slice(0, 5)
   }
 
   const formatStatus = (status: string) => {
@@ -231,13 +267,21 @@ const Attendance = () => {
     return `${wholeHours}h ${minutes}m`
   }
 
+  const isNonWorkingStatus = (status: string) => {
+    return status === "absent" || status === "rest_day" || status === "offset"
+  }
+
   const handleAddAttendance = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
 
-    createAttendanceMutation.mutate({
+    const payload = {
       ...formData,
       employee_id: getFormEmployeeId(),
-    })
+      time_in: isNonWorkingStatus(formData.day_status) ? "" : formData.time_in,
+      time_out: isNonWorkingStatus(formData.day_status) ? "" : formData.time_out,
+    }
+
+    createAttendanceMutation.mutate(payload)
   }
 
   const handleUpdateAttendance = (e: FormEvent<HTMLFormElement>) => {
@@ -245,20 +289,32 @@ const Attendance = () => {
 
     if (!editAttendance) return
 
+    const payload: AttendanceFormData = {
+      employee_id: editAttendance.employee_id,
+      attendance_date: formatDate(editAttendance.attendance_date),
+      day_status: editAttendance.day_status || "present",
+      time_in: isNonWorkingStatus(editAttendance.day_status)
+        ? ""
+        : editAttendance.time_in
+          ? formatTime(editAttendance.time_in)
+          : "",
+      time_out: isNonWorkingStatus(editAttendance.day_status)
+        ? ""
+        : editAttendance.time_out
+          ? formatTime(editAttendance.time_out)
+          : "",
+      schedule_time_in: editAttendance.schedule_time_in
+        ? formatTime(editAttendance.schedule_time_in)
+        : "",
+      schedule_time_out: editAttendance.schedule_time_out
+        ? formatTime(editAttendance.schedule_time_out)
+        : "",
+      break_minutes: Number(editAttendance.break_minutes || 0),
+    }
+
     updateAttendanceMutation.mutate({
       id: editAttendance.id,
-      attendanceData: {
-        employee_id: editAttendance.employee_id,
-        attendance_date: formatDate(editAttendance.attendance_date),
-        time_in: editAttendance.time_in ? formatTime(editAttendance.time_in) : "",
-        time_out: editAttendance.time_out ? formatTime(editAttendance.time_out) : "",
-        schedule_time_in: editAttendance.schedule_time_in
-          ? formatTime(editAttendance.schedule_time_in)
-          : "",
-        schedule_time_out: editAttendance.schedule_time_out
-          ? formatTime(editAttendance.schedule_time_out)
-          : "",
-      },
+      attendanceData: payload,
     })
   }
 
@@ -278,7 +334,8 @@ const Attendance = () => {
       formatDate(record.attendance_date).toLowerCase().includes(search) ||
       formatTime(record.time_in).toLowerCase().includes(search) ||
       formatTime(record.time_out).toLowerCase().includes(search) ||
-      record.attendance_status.toLowerCase().includes(search)
+      record.attendance_status.toLowerCase().includes(search) ||
+      record.day_status.toLowerCase().includes(search)
 
     const matchesEmployee =
       employeeFilter === "all" || String(record.employee_id) === employeeFilter
@@ -366,6 +423,9 @@ const Attendance = () => {
                 Date ↕
               </th>
               <th className="border-r border-black px-4 py-2 text-left">
+                Day Status ↕
+              </th>
+              <th className="border-r border-black px-4 py-2 text-left">
                 Time In ↕
               </th>
               <th className="border-r border-black px-4 py-2 text-left">
@@ -376,6 +436,9 @@ const Attendance = () => {
               </th>
               <th className="border-r border-black px-4 py-2 text-left">
                 Schedule Out ↕
+              </th>
+              <th className="border-r border-black px-4 py-2 text-left">
+                Break ↕
               </th>
               <th className="border-r border-black px-4 py-2 text-left">
                 Work Hours ↕
@@ -403,6 +466,10 @@ const Attendance = () => {
                 </td>
 
                 <td className="border-r border-black px-4 py-2">
+                  {formatStatus(record.day_status)}
+                </td>
+
+                <td className="border-r border-black px-4 py-2">
                   {formatTime(record.time_in)}
                 </td>
 
@@ -416,6 +483,10 @@ const Attendance = () => {
 
                 <td className="border-r border-black px-4 py-2">
                   {formatTime(record.schedule_time_out)}
+                </td>
+
+                <td className="border-r border-black px-4 py-2">
+                  {record.break_minutes} mins
                 </td>
 
                 <td className="border-r border-black px-4 py-2">
@@ -439,7 +510,7 @@ const Attendance = () => {
 
             {filteredAttendance.length === 0 && (
               <tr>
-                <td colSpan={10} className="px-4 py-6 text-center text-gray-600">
+                <td colSpan={12} className="px-4 py-6 text-center text-gray-600">
                   No attendance records found
                 </td>
               </tr>
@@ -489,29 +560,49 @@ const Attendance = () => {
                 required
               />
 
-              <input
-                type="time"
-                value={formData.time_in}
+              <select
+                value={formData.day_status}
                 onChange={(e) =>
                   setFormData({
                     ...formData,
-                    time_in: e.target.value,
+                    day_status: e.target.value,
                   })
                 }
                 className="border border-black px-3 py-2"
-              />
+              >
+                <option value="present">Present</option>
+                <option value="absent">Absent</option>
+                <option value="rest_day">Rest Day</option>
+                <option value="offset">Offset</option>
+              </select>
 
-              <input
-                type="time"
-                value={formData.time_out}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    time_out: e.target.value,
-                  })
-                }
-                className="border border-black px-3 py-2"
-              />
+              {!isNonWorkingStatus(formData.day_status) && (
+                <>
+                  <input
+                    type="time"
+                    value={formData.time_in}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        time_in: e.target.value,
+                      })
+                    }
+                    className="border border-black px-3 py-2"
+                  />
+
+                  <input
+                    type="time"
+                    value={formData.time_out}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        time_out: e.target.value,
+                      })
+                    }
+                    className="border border-black px-3 py-2"
+                  />
+                </>
+              )}
 
               <input
                 type="time"
@@ -532,6 +623,20 @@ const Attendance = () => {
                   setFormData({
                     ...formData,
                     schedule_time_out: e.target.value,
+                  })
+                }
+                className="border border-black px-3 py-2"
+              />
+
+              <input
+                type="number"
+                min={0}
+                placeholder="Break minutes"
+                value={formData.break_minutes}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    break_minutes: Number(e.target.value),
                   })
                 }
                 className="border border-black px-3 py-2"
@@ -612,29 +717,57 @@ const Attendance = () => {
                 required
               />
 
-              <input
-                type="time"
-                value={editAttendance.time_in ? formatTime(editAttendance.time_in) : ""}
+              <select
+                value={editAttendance.day_status || "present"}
                 onChange={(e) =>
                   setEditAttendance({
                     ...editAttendance,
-                    time_in: e.target.value,
+                    day_status: e.target.value,
                   })
                 }
                 className="border border-black px-3 py-2"
-              />
+              >
+                <option value="present">Present</option>
+                <option value="absent">Absent</option>
+                <option value="rest_day">Rest Day</option>
+                <option value="offset">Offset</option>
+              </select>
 
-              <input
-                type="time"
-                value={editAttendance.time_out ? formatTime(editAttendance.time_out) : ""}
-                onChange={(e) =>
-                  setEditAttendance({
-                    ...editAttendance,
-                    time_out: e.target.value,
-                  })
-                }
-                className="border border-black px-3 py-2"
-              />
+              {!isNonWorkingStatus(editAttendance.day_status) && (
+                <>
+                  <input
+                    type="time"
+                    value={
+                      editAttendance.time_in
+                        ? formatTime(editAttendance.time_in)
+                        : ""
+                    }
+                    onChange={(e) =>
+                      setEditAttendance({
+                        ...editAttendance,
+                        time_in: e.target.value,
+                      })
+                    }
+                    className="border border-black px-3 py-2"
+                  />
+
+                  <input
+                    type="time"
+                    value={
+                      editAttendance.time_out
+                        ? formatTime(editAttendance.time_out)
+                        : ""
+                    }
+                    onChange={(e) =>
+                      setEditAttendance({
+                        ...editAttendance,
+                        time_out: e.target.value,
+                      })
+                    }
+                    className="border border-black px-3 py-2"
+                  />
+                </>
+              )}
 
               <input
                 type="time"
@@ -663,6 +796,19 @@ const Attendance = () => {
                   setEditAttendance({
                     ...editAttendance,
                     schedule_time_out: e.target.value,
+                  })
+                }
+                className="border border-black px-3 py-2"
+              />
+
+              <input
+                type="number"
+                min={0}
+                value={Number(editAttendance.break_minutes || 0)}
+                onChange={(e) =>
+                  setEditAttendance({
+                    ...editAttendance,
+                    break_minutes: Number(e.target.value),
                   })
                 }
                 className="border border-black px-3 py-2"
