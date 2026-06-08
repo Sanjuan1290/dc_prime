@@ -1,20 +1,10 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import {
-  CartesianGrid,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts"
 import {
   FiCreditCard,
   FiEdit2,
   FiPlus,
   FiSearch,
-  FiX,
 } from "react-icons/fi"
 import Alert from "../components/ui/Alert"
 import Button from "../components/ui/Button"
@@ -26,15 +16,19 @@ import PageHeader from "../components/ui/PageHeader"
 import Pagination from "../components/ui/Pagination"
 import Select from "../components/ui/Select"
 import StatCard from "../components/ui/StatCard"
+import StatusBadge from "../components/ui/StatusBadge"
 import TableContainer from "../components/ui/TableContainer"
 import { API_URL, getErrorMessage } from "../utils/api"
 import {
   formatDate,
   formatMoney,
+  formatNumber,
   formatText,
   getLocalDate,
 } from "../utils/formatters"
 import { paginateRows } from "../utils/pagination"
+
+type PaymentStatus = "pending" | "verified" | "rejected" | string
 
 type Payment = {
   id: number
@@ -42,61 +36,73 @@ type Payment = {
   client_name: string
   unit_id: string
   project_name: string
+  net_selling_price?: number | string
+  legal_misc_fee?: number | string
+  total_contract_price?: number | string
   amount: number | string
   payment_type: string | null
   payment_method: string | null
   payment_date: string
+  status: PaymentStatus
+  verified_by?: number | null
+  verified_by_name?: string | null
+  verified_at?: string | null
   created_at: string
   updated_at: string
 }
 
 type ClientUnit = {
   id: number
-  client_id?: number
+  client_id: number
   client_name: string
-  listing_id?: number
+  listing_id: number
   unit_id: string
-  project_name?: string
-  lot_type?: string | null
-  lot_area_sqm?: number | string
-  net_selling_price?: number | string
-  paid_amount?: number | string
-  balance?: number | string
-  due_day?: number | null
-  status?: string
-  assigned_user_id?: number | null
-  assigned_user_name?: string | null
-  document_status?: string
-  created_at?: string
-  updated_at?: string
+  project_name: string
+  lot_type: string | null
+  lot_area_sqm: number | string
+  net_selling_price: number | string
+  legal_misc_fee: number | string
+  total_contract_price: number | string
+  paid_amount: number | string
+  balance: number | string
+  payment_percentage?: number | string
+  due_day: number | null
+  status: string
+  seller_id: number | null
+  seller_name: string | null
+  document_status: string
 }
 
 type PaymentFormData = {
-  client_unit_id: number
-  amount: number
+  client_unit_id: number | ""
+  amount: string
   payment_type: string
   payment_method: string
   payment_date: string
+  status: PaymentStatus
 }
 
 type PaymentsResponse = {
-  payments: Payment[]
+  payments?: Payment[]
+  data?: Payment[]
 }
 
 type ClientUnitsResponse = {
-  clientUnits: ClientUnit[]
+  clientUnits?: ClientUnit[]
+  data?: ClientUnit[]
 }
 
 const emptyFormData: PaymentFormData = {
-  client_unit_id: 0,
-  amount: 0,
-  payment_type: "reservation_fee",
+  client_unit_id: "",
+  amount: "",
+  payment_type: "monthly",
   payment_method: "cash",
   payment_date: getLocalDate(),
+  status: "verified",
 }
 
-const paymentTypeOptions = [
-  "reservation_fee",
+const paymentTypes = [
+  "reservation",
   "downpayment",
   "monthly",
   "legal_misc",
@@ -104,13 +110,15 @@ const paymentTypeOptions = [
   "other",
 ]
 
-const paymentMethodOptions = [
+const paymentMethods = [
   "cash",
   "bank_transfer",
   "gcash",
   "check",
   "other",
 ]
+
+const paymentStatuses = ["pending", "verified", "rejected"]
 
 const fetchPayments = async (): Promise<Payment[]> => {
   const response = await fetch(`${API_URL}/payments`, {
@@ -122,7 +130,7 @@ const fetchPayments = async (): Promise<Payment[]> => {
   }
 
   const data = (await response.json()) as PaymentsResponse
-  return data.payments
+  return data.payments || data.data || []
 }
 
 const fetchClientUnits = async (): Promise<ClientUnit[]> => {
@@ -135,7 +143,7 @@ const fetchClientUnits = async (): Promise<ClientUnit[]> => {
   }
 
   const data = (await response.json()) as ClientUnitsResponse
-  return data.clientUnits
+  return data.clientUnits || data.data || []
 }
 
 const createPayment = async (paymentData: PaymentFormData) => {
@@ -145,7 +153,7 @@ const createPayment = async (paymentData: PaymentFormData) => {
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(paymentData),
+    body: JSON.stringify(formatPaymentPayload(paymentData)),
   })
 
   if (!response.ok) {
@@ -168,7 +176,7 @@ const updatePayment = async ({
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(paymentData),
+    body: JSON.stringify(formatPaymentPayload(paymentData)),
   })
 
   if (!response.ok) {
@@ -176,6 +184,30 @@ const updatePayment = async ({
   }
 
   return response.json()
+}
+
+const formatPaymentPayload = (paymentData: PaymentFormData) => {
+  return {
+    client_unit_id: paymentData.client_unit_id,
+    amount: Number(paymentData.amount || 0),
+    payment_type: paymentData.payment_type || null,
+    payment_method: paymentData.payment_method || null,
+    payment_date: paymentData.payment_date || getLocalDate(),
+    status: paymentData.status || "verified",
+  }
+}
+
+const paymentToFormData = (payment: Payment): PaymentFormData => {
+  return {
+    client_unit_id: payment.client_unit_id,
+    amount: String(payment.amount || ""),
+    payment_type: payment.payment_type || "monthly",
+    payment_method: payment.payment_method || "cash",
+    payment_date: payment.payment_date
+      ? payment.payment_date.slice(0, 10)
+      : getLocalDate(),
+    status: payment.status || "verified",
+  }
 }
 
 const getClientUnitSearchText = (unit: ClientUnit) => {
@@ -187,6 +219,7 @@ const getClientUnitSearchText = (unit: ClientUnit) => {
     unit.lot_type,
     unit.status,
     unit.document_status,
+    unit.seller_name,
   ]
     .filter(Boolean)
     .join(" ")
@@ -199,12 +232,15 @@ const Payments = () => {
   const [searchInput, setSearchInput] = useState("")
   const [paymentTypeFilter, setPaymentTypeFilter] = useState("all")
   const [paymentMethodFilter, setPaymentMethodFilter] = useState("all")
+  const [statusFilter, setStatusFilter] = useState("all")
   const [dateFrom, setDateFrom] = useState("")
   const [dateTo, setDateTo] = useState("")
 
   const [isAddOpen, setIsAddOpen] = useState(false)
   const [editPayment, setEditPayment] = useState<Payment | null>(null)
   const [formData, setFormData] = useState<PaymentFormData>(emptyFormData)
+  const [editFormData, setEditFormData] =
+    useState<PaymentFormData>(emptyFormData)
   const [clientUnitSearch, setClientUnitSearch] = useState("")
   const [editClientUnitSearch, setEditClientUnitSearch] = useState("")
 
@@ -226,12 +262,19 @@ const Payments = () => {
     queryFn: fetchClientUnits,
   })
 
+  const invalidateAfterPaymentChange = () => {
+    queryClient.invalidateQueries({ queryKey: ["payments"] })
+    queryClient.invalidateQueries({ queryKey: ["client-units"] })
+    queryClient.invalidateQueries({ queryKey: ["commissions"] })
+    queryClient.invalidateQueries({ queryKey: ["commission-summary"] })
+    queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] })
+    queryClient.invalidateQueries({ queryKey: ["reports"] })
+  }
+
   const createPaymentMutation = useMutation({
     mutationFn: createPayment,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["payments"] })
-      queryClient.invalidateQueries({ queryKey: ["client-units"] })
-      queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] })
+      invalidateAfterPaymentChange()
       setIsAddOpen(false)
       setFormData(emptyFormData)
       setClientUnitSearch("")
@@ -242,14 +285,101 @@ const Payments = () => {
   const updatePaymentMutation = useMutation({
     mutationFn: updatePayment,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["payments"] })
-      queryClient.invalidateQueries({ queryKey: ["client-units"] })
-      queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] })
+      invalidateAfterPaymentChange()
       setEditPayment(null)
+      setEditFormData(emptyFormData)
       setEditClientUnitSearch("")
       setSuccessMessage("Payment updated successfully")
     },
   })
+
+  const filteredPayments = payments.filter((payment) => {
+    const search = searchInput.toLowerCase().trim()
+
+    const matchesSearch =
+      search === "" ||
+      payment.client_name.toLowerCase().includes(search) ||
+      payment.unit_id.toLowerCase().includes(search) ||
+      payment.project_name.toLowerCase().includes(search) ||
+      (payment.payment_type || "").toLowerCase().includes(search) ||
+      (payment.payment_method || "").toLowerCase().includes(search) ||
+      (payment.status || "").toLowerCase().includes(search)
+
+    const matchesType =
+      paymentTypeFilter === "all" || payment.payment_type === paymentTypeFilter
+
+    const matchesMethod =
+      paymentMethodFilter === "all" ||
+      payment.payment_method === paymentMethodFilter
+
+    const matchesStatus =
+      statusFilter === "all" || payment.status === statusFilter
+
+    const paymentDate = payment.payment_date?.slice(0, 10) || ""
+
+    const matchesDateFrom =
+      dateFrom === "" || paymentDate >= dateFrom
+
+    const matchesDateTo =
+      dateTo === "" || paymentDate <= dateTo
+
+    return (
+      matchesSearch &&
+      matchesType &&
+      matchesMethod &&
+      matchesStatus &&
+      matchesDateFrom &&
+      matchesDateTo
+    )
+  })
+
+  const paginatedPayments = paginateRows(filteredPayments, page, rowsPerPage)
+
+  const filteredClientUnits = useMemo(() => {
+    const search = clientUnitSearch.toLowerCase().trim()
+
+    if (!search) return clientUnits
+
+    return clientUnits.filter((unit) =>
+      getClientUnitSearchText(unit).includes(search)
+    )
+  }, [clientUnits, clientUnitSearch])
+
+  const filteredEditClientUnits = useMemo(() => {
+    const search = editClientUnitSearch.toLowerCase().trim()
+
+    if (!search) return clientUnits
+
+    return clientUnits.filter((unit) =>
+      getClientUnitSearchText(unit).includes(search)
+    )
+  }, [clientUnits, editClientUnitSearch])
+
+  const selectedClientUnit = clientUnits.find(
+    (unit) => Number(unit.id) === Number(formData.client_unit_id)
+  )
+
+  const selectedEditClientUnit = clientUnits.find(
+    (unit) => Number(unit.id) === Number(editFormData.client_unit_id)
+  )
+
+  const totalCollected = useMemo(() => {
+    return filteredPayments
+      .filter((payment) => payment.status === "verified")
+      .reduce((sum, payment) => sum + Number(payment.amount || 0), 0)
+  }, [filteredPayments])
+
+  const pendingTotal = useMemo(() => {
+    return filteredPayments
+      .filter((payment) => payment.status === "pending")
+      .reduce((sum, payment) => sum + Number(payment.amount || 0), 0)
+  }, [filteredPayments])
+
+  const rejectedTotal = useMemo(() => {
+    return filteredPayments
+      .filter((payment) => payment.status === "rejected")
+      .reduce((sum, payment) => sum + Number(payment.amount || 0), 0)
+  }, [filteredPayments])
 
   const openAddModal = () => {
     setFormData(emptyFormData)
@@ -260,119 +390,27 @@ const Payments = () => {
 
   const openEditModal = (payment: Payment) => {
     setEditPayment(payment)
+    setEditFormData(paymentToFormData(payment))
     setEditClientUnitSearch("")
     setSuccessMessage("")
   }
 
-  const handleAddPayment = (e: { preventDefault: () => void }) => {
-    e.preventDefault()
-
+  const handleCreatePayment = () => {
     createPaymentMutation.mutate(formData)
   }
 
-  const handleUpdatePayment = (e: { preventDefault: () => void }) => {
-    e.preventDefault()
-
+  const handleUpdatePayment = () => {
     if (!editPayment) return
 
     updatePaymentMutation.mutate({
       id: editPayment.id,
-      paymentData: {
-        client_unit_id: editPayment.client_unit_id,
-        amount: Number(editPayment.amount || 0),
-        payment_type: editPayment.payment_type || "other",
-        payment_method: editPayment.payment_method || "cash",
-        payment_date: formatDate(editPayment.payment_date),
-      },
+      paymentData: editFormData,
     })
   }
 
-  const filteredPayments = payments.filter((payment) => {
-    const search = searchInput.toLowerCase().trim()
-    const paymentDate = formatDate(payment.payment_date)
-
-    const matchesSearch =
-      search === "" ||
-      payment.client_name.toLowerCase().includes(search) ||
-      payment.unit_id.toLowerCase().includes(search) ||
-      payment.project_name.toLowerCase().includes(search) ||
-      (payment.payment_type || "").toLowerCase().includes(search) ||
-      (payment.payment_method || "").toLowerCase().includes(search) ||
-      paymentDate.toLowerCase().includes(search)
-
-    const matchesPaymentType =
-      paymentTypeFilter === "all" || payment.payment_type === paymentTypeFilter
-
-    const matchesPaymentMethod =
-      paymentMethodFilter === "all" ||
-      payment.payment_method === paymentMethodFilter
-
-    const matchesDateFrom = dateFrom === "" || paymentDate >= dateFrom
-    const matchesDateTo = dateTo === "" || paymentDate <= dateTo
-
-    return (
-      matchesSearch &&
-      matchesPaymentType &&
-      matchesPaymentMethod &&
-      matchesDateFrom &&
-      matchesDateTo
-    )
-  })
-
-  const paginatedPayments = paginateRows(filteredPayments, page, rowsPerPage)
-
-  const paymentTypes = [
-    ...new Set(payments.map((payment) => payment.payment_type).filter(Boolean)),
-  ] as string[]
-
-  const paymentMethods = [
-    ...new Set(
-      payments.map((payment) => payment.payment_method).filter(Boolean)
-    ),
-  ] as string[]
-
-  const totalCollections = payments.reduce(
-    (sum, payment) => sum + Number(payment.amount || 0),
-    0
-  )
-
-  const latestPaymentAmount =
-    payments.length > 0 ? Number(payments[0].amount || 0) : 0
-
-  const thisMonth = getLocalDate().slice(0, 7)
-
-  const thisMonthCollections = payments
-    .filter((payment) => formatDate(payment.payment_date).startsWith(thisMonth))
-    .reduce((sum, payment) => sum + Number(payment.amount || 0), 0)
-
-  const monthlyCollections = Object.values(
-    payments.reduce<Record<string, { month: string; total: number }>>(
-      (acc, payment) => {
-        const month = formatDate(payment.payment_date).slice(0, 7)
-
-        acc[month] = acc[month] || {
-          month,
-          total: 0,
-        }
-
-        acc[month].total += Number(payment.amount || 0)
-
-        return acc
-      },
-      {}
-    )
-  ).sort((a, b) => a.month.localeCompare(b.month))
-
-  const selectedAddClientUnit = clientUnits.find(
-    (unit) => unit.id === formData.client_unit_id
-  )
-
-  const selectedEditClientUnit = editPayment
-    ? clientUnits.find((unit) => unit.id === editPayment.client_unit_id)
-    : null
-
   const mutationError =
-    createPaymentMutation.error?.message || updatePaymentMutation.error?.message
+    createPaymentMutation.error?.message ||
+    updatePaymentMutation.error?.message
 
   if (isLoading) {
     return <LoadingState label="Loading payments..." />
@@ -387,7 +425,7 @@ const Payments = () => {
       <PageHeader
         icon={<FiCreditCard />}
         title="Payments"
-        subtitle="Track reservation, downpayment, monthly, legal/misc, and full payment records."
+        subtitle="Record payments and update commission release eligibility from verified collections."
         actions={
           <Button icon={<FiPlus />} onClick={openAddModal} variant="primary">
             Add Payment
@@ -399,51 +437,21 @@ const Payments = () => {
       {mutationError ? <Alert variant="error" title={mutationError} /> : null}
 
       <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-4">
-        <StatCard label="Tracked Collections" value={formatMoney(totalCollections)} />
-        <StatCard label="Payment Records" value={payments.length} />
-        <StatCard label="Latest Payment" value={formatMoney(latestPaymentAmount)} />
-        <StatCard label="This Month" value={formatMoney(thisMonthCollections)} />
+        <StatCard label="Payment Records" value={filteredPayments.length} />
+        <StatCard label="Verified Collections" value={formatMoney(totalCollected)} />
+        <StatCard label="Pending" value={formatMoney(pendingTotal)} />
+        <StatCard label="Rejected" value={formatMoney(rejectedTotal)} />
       </div>
 
-      <div className="mb-6 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <h2 className="mb-3 text-lg font-bold text-slate-900">
-          Monthly Collections
-        </h2>
-
-        {monthlyCollections.length > 0 ? (
-          <div className="h-72">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={monthlyCollections}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="month" />
-                <YAxis />
-                <Tooltip
-                  formatter={(value) => formatMoney(Number(value || 0))}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="total"
-                  strokeWidth={3}
-                  dot
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        ) : (
-          <EmptyState title="No collection chart data yet" />
-        )}
-      </div>
-
-      <div className="mb-4 grid grid-cols-1 gap-3 lg:grid-cols-6">
+      <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-6">
         <Input
           icon={<FiSearch />}
-          placeholder="Search client, unit, project, type, method..."
+          placeholder="Search client, unit, project..."
           value={searchInput}
           onChange={(e) => {
             setSearchInput(e.target.value)
             setPage(1)
           }}
-          className="lg:col-span-2"
         />
 
         <Select
@@ -453,7 +461,7 @@ const Payments = () => {
             setPage(1)
           }}
         >
-          <option value="all">All Payment Types</option>
+          <option value="all">All Types</option>
           {paymentTypes.map((type) => (
             <option key={type} value={type}>
               {formatText(type)}
@@ -468,10 +476,25 @@ const Payments = () => {
             setPage(1)
           }}
         >
-          <option value="all">All Payment Methods</option>
+          <option value="all">All Methods</option>
           {paymentMethods.map((method) => (
             <option key={method} value={method}>
               {formatText(method)}
+            </option>
+          ))}
+        </Select>
+
+        <Select
+          value={statusFilter}
+          onChange={(e) => {
+            setStatusFilter(e.target.value)
+            setPage(1)
+          }}
+        >
+          <option value="all">All Statuses</option>
+          {paymentStatuses.map((status) => (
+            <option key={status} value={status}>
+              {formatText(status)}
             </option>
           ))}
         </Select>
@@ -495,12 +518,13 @@ const Payments = () => {
         />
       </div>
 
-      <div className="mb-4">
+      <div className="mb-4 flex justify-end">
         <Button
           onClick={() => {
             setSearchInput("")
             setPaymentTypeFilter("all")
             setPaymentMethodFilter("all")
+            setStatusFilter("all")
             setDateFrom("")
             setDateTo("")
             setPage(1)
@@ -520,7 +544,9 @@ const Payments = () => {
               <th className="px-4 py-3 text-left">Amount</th>
               <th className="px-4 py-3 text-left">Type</th>
               <th className="px-4 py-3 text-left">Method</th>
-              <th className="px-4 py-3 text-left">Date</th>
+              <th className="px-4 py-3 text-left">Payment Date</th>
+              <th className="px-4 py-3 text-left">Verified By</th>
+              <th className="px-4 py-3 text-left">Status</th>
               <th className="px-4 py-3 text-left">Actions</th>
             </tr>
           </thead>
@@ -531,31 +557,33 @@ const Payments = () => {
                 <td className="px-4 py-3 font-semibold text-slate-900">
                   {payment.client_name}
                 </td>
-
                 <td className="px-4 py-3 text-slate-600">
                   {payment.unit_id}
                 </td>
-
                 <td className="px-4 py-3 text-slate-600">
                   {payment.project_name}
                 </td>
-
                 <td className="px-4 py-3 font-semibold text-slate-900">
                   {formatMoney(payment.amount)}
                 </td>
-
                 <td className="px-4 py-3 text-slate-600">
                   {formatText(payment.payment_type)}
                 </td>
-
                 <td className="px-4 py-3 text-slate-600">
                   {formatText(payment.payment_method)}
                 </td>
-
                 <td className="px-4 py-3 text-slate-600">
                   {formatDate(payment.payment_date)}
                 </td>
-
+                <td className="px-4 py-3 text-slate-600">
+                  <p>{payment.verified_by_name || "-"}</p>
+                  <p className="text-xs text-slate-500">
+                    {formatDate(payment.verified_at)}
+                  </p>
+                </td>
+                <td className="px-4 py-3">
+                  <StatusBadge status={payment.status} />
+                </td>
                 <td className="px-4 py-3">
                   <Button
                     icon={<FiEdit2 />}
@@ -569,11 +597,8 @@ const Payments = () => {
 
             {paginatedPayments.length === 0 ? (
               <tr>
-                <td colSpan={8}>
-                  <EmptyState
-                    title="No payments found"
-                    description="Try clearing filters or add a new payment."
-                  />
+                <td colSpan={10}>
+                  <EmptyState title="No payments found" />
                 </td>
               </tr>
             ) : null}
@@ -590,287 +615,224 @@ const Payments = () => {
       />
 
       {isAddOpen ? (
-        <Modal title="Add Payment" onClose={() => setIsAddOpen(false)} size="lg">
-          <PaymentForm
-            clientUnitSearch={clientUnitSearch}
-            clientUnits={clientUnits}
-            error={createPaymentMutation.error?.message}
-            formData={formData}
-            isPending={createPaymentMutation.isPending}
-            onCancel={() => setIsAddOpen(false)}
-            onClientUnitSearchChange={setClientUnitSearch}
-            onSubmit={handleAddPayment}
-            selectedClientUnit={selectedAddClientUnit}
-            setFormData={setFormData}
-            submitLabel="Save Payment"
-          />
-        </Modal>
+        <PaymentModal
+          title="Add Payment"
+          formData={formData}
+          setFormData={setFormData}
+          clientUnitSearch={clientUnitSearch}
+          setClientUnitSearch={setClientUnitSearch}
+          clientUnits={filteredClientUnits}
+          selectedClientUnit={selectedClientUnit}
+          onClose={() => setIsAddOpen(false)}
+          onSave={handleCreatePayment}
+          isPending={createPaymentMutation.isPending}
+          submitLabel="Add Payment"
+        />
       ) : null}
 
       {editPayment ? (
-        <Modal
+        <PaymentModal
           title="Edit Payment"
+          formData={editFormData}
+          setFormData={setEditFormData}
+          clientUnitSearch={editClientUnitSearch}
+          setClientUnitSearch={setEditClientUnitSearch}
+          clientUnits={filteredEditClientUnits}
+          selectedClientUnit={selectedEditClientUnit}
           onClose={() => setEditPayment(null)}
-          size="lg"
-        >
-          <PaymentForm
-            clientUnitSearch={editClientUnitSearch}
-            clientUnits={clientUnits}
-            error={updatePaymentMutation.error?.message}
-            formData={{
-              client_unit_id: editPayment.client_unit_id,
-              amount: Number(editPayment.amount || 0),
-              payment_type: editPayment.payment_type || "other",
-              payment_method: editPayment.payment_method || "cash",
-              payment_date: formatDate(editPayment.payment_date),
-            }}
-            isPending={updatePaymentMutation.isPending}
-            onCancel={() => setEditPayment(null)}
-            onClientUnitSearchChange={setEditClientUnitSearch}
-            onSubmit={handleUpdatePayment}
-            selectedClientUnit={selectedEditClientUnit}
-            setFormData={(nextData) =>
-              setEditPayment({
-                ...editPayment,
-                client_unit_id: nextData.client_unit_id,
-                amount: nextData.amount,
-                payment_type: nextData.payment_type,
-                payment_method: nextData.payment_method,
-                payment_date: nextData.payment_date,
-              })
-            }
-            submitLabel="Save Changes"
-          />
-        </Modal>
+          onSave={handleUpdatePayment}
+          isPending={updatePaymentMutation.isPending}
+          submitLabel="Save Changes"
+        />
       ) : null}
     </div>
   )
 }
 
-type PaymentFormProps = {
-  clientUnitSearch: string
-  clientUnits: ClientUnit[]
-  error?: string
+type PaymentModalProps = {
+  title: string
   formData: PaymentFormData
-  isPending: boolean
-  onCancel: () => void
-  onClientUnitSearchChange: (value: string) => void
-  onSubmit: (e: { preventDefault: () => void }) => void
-  selectedClientUnit?: ClientUnit | null
   setFormData: (data: PaymentFormData) => void
+  clientUnitSearch: string
+  setClientUnitSearch: (value: string) => void
+  clientUnits: ClientUnit[]
+  selectedClientUnit?: ClientUnit
+  onClose: () => void
+  onSave: () => void
+  isPending: boolean
   submitLabel: string
 }
 
-const PaymentForm = ({
-  clientUnitSearch,
-  clientUnits,
-  error,
+const PaymentModal = ({
+  title,
   formData,
-  isPending,
-  onCancel,
-  onClientUnitSearchChange,
-  onSubmit,
-  selectedClientUnit,
   setFormData,
+  clientUnitSearch,
+  setClientUnitSearch,
+  clientUnits,
+  selectedClientUnit,
+  onClose,
+  onSave,
+  isPending,
   submitLabel,
-}: PaymentFormProps) => {
-  const search = clientUnitSearch.toLowerCase().trim()
-
-  const filteredClientUnits = clientUnits.filter((unit) => {
-    return search === "" || getClientUnitSearchText(unit).includes(search)
-  })
-
-  const visibleClientUnits = filteredClientUnits.slice(0, 50)
-
+}: PaymentModalProps) => {
   return (
-    <form className="space-y-4" onSubmit={onSubmit}>
-      <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-        <div className="mb-3 flex items-start justify-between gap-3">
-          <div>
-            <h3 className="font-bold text-slate-900">Client Unit</h3>
-            <p className="text-sm text-slate-500">
-              Search by client name, unit ID, project, lot type, or client unit ID.
-            </p>
-          </div>
-
-          {formData.client_unit_id ? (
-            <Button
-              icon={<FiX />}
-              onClick={() =>
-                setFormData({
-                  ...formData,
-                  client_unit_id: 0,
-                })
-              }
-              variant="ghost"
-            />
-          ) : null}
+    <Modal
+      title={title}
+      onClose={onClose}
+      size="lg"
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button onClick={onClose}>Cancel</Button>
+          <Button disabled={isPending} onClick={onSave} variant="primary">
+            {isPending ? "Saving..." : submitLabel}
+          </Button>
         </div>
-
+      }
+    >
+      <div className="space-y-4">
         <Input
+          label="Search Client Unit"
           icon={<FiSearch />}
-          placeholder="Example: AHMED, LA-0416, Maragondon, 15..."
+          placeholder="Search client, unit, project, seller..."
           value={clientUnitSearch}
-          onChange={(e) => onClientUnitSearchChange(e.target.value)}
+          onChange={(e) => setClientUnitSearch(e.target.value)}
         />
+
+        <Select
+          label="Client Unit"
+          value={formData.client_unit_id}
+          onChange={(e) =>
+            setFormData({
+              ...formData,
+              client_unit_id: e.target.value ? Number(e.target.value) : "",
+            })
+          }
+          required
+        >
+          <option value="">Select client unit</option>
+          {clientUnits.map((unit) => (
+            <option key={unit.id} value={unit.id}>
+              {unit.client_name} - {unit.unit_id} - {unit.project_name}
+            </option>
+          ))}
+        </Select>
 
         {selectedClientUnit ? (
-          <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm">
-            <p className="font-bold text-blue-900">Selected Client Unit</p>
-            <p className="mt-1 text-blue-800">
-              {selectedClientUnit.client_name}
-            </p>
-            <p className="text-blue-700">
-              {selectedClientUnit.unit_id}
-              {selectedClientUnit.project_name
-                ? ` - ${selectedClientUnit.project_name}`
-                : ""}
-            </p>
-            <p className="text-blue-700">
-              Balance: {formatMoney(selectedClientUnit.balance)}
-            </p>
-          </div>
-        ) : (
-          <Alert
-            className="mt-3"
-            title="No client unit selected yet."
-            variant="warning"
-          />
-        )}
-
-        <div className="mt-3 max-h-72 overflow-y-auto rounded-xl border border-slate-200 bg-white">
-          {visibleClientUnits.map((unit) => (
-            <button
-              key={unit.id}
-              type="button"
-              onClick={() =>
-                setFormData({
-                  ...formData,
-                  client_unit_id: unit.id,
-                })
-              }
-              className={[
-                "block w-full border-b border-slate-100 px-4 py-3 text-left text-sm transition hover:bg-slate-50",
-                formData.client_unit_id === unit.id ? "bg-blue-50" : "bg-white",
-              ].join(" ")}
-            >
-              <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
-                <div>
-                  <p className="font-semibold text-slate-900">
-                    {unit.client_name}
-                  </p>
-                  <p className="text-slate-500">
-                    {unit.unit_id}
-                    {unit.project_name ? ` - ${unit.project_name}` : ""}
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    Client Unit ID: {unit.id}
-                    {unit.lot_type ? ` • ${formatText(unit.lot_type)}` : ""}
-                  </p>
-                </div>
-
-                <div className="text-left md:text-right">
-                  <p className="font-semibold text-slate-900">
-                    {formatMoney(unit.balance)}
-                  </p>
-                  <p className="text-xs text-slate-500">Balance</p>
-                </div>
-              </div>
-            </button>
-          ))}
-
-          {visibleClientUnits.length === 0 ? (
-            <EmptyState
-              title="No client units found"
-              description="Try searching by client name, unit ID, or project."
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+            <MiniDetail label="TCP" value={formatMoney(selectedClientUnit.total_contract_price)} />
+            <MiniDetail label="Paid" value={formatMoney(selectedClientUnit.paid_amount)} />
+            <MiniDetail label="Balance" value={formatMoney(selectedClientUnit.balance)} />
+            <MiniDetail
+              label="Payment %"
+              value={`${formatNumber(selectedClientUnit.payment_percentage || 0)}%`}
             />
-          ) : null}
+          </div>
+        ) : null}
+
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <Input
+            label="Amount"
+            type="number"
+            min={0}
+            step="0.01"
+            value={formData.amount}
+            onChange={(e) =>
+              setFormData({
+                ...formData,
+                amount: e.target.value,
+              })
+            }
+            required
+          />
+
+          <Input
+            label="Payment Date"
+            type="date"
+            value={formData.payment_date}
+            onChange={(e) =>
+              setFormData({
+                ...formData,
+                payment_date: e.target.value,
+              })
+            }
+            required
+          />
+
+          <Select
+            label="Payment Type"
+            value={formData.payment_type}
+            onChange={(e) =>
+              setFormData({
+                ...formData,
+                payment_type: e.target.value,
+              })
+            }
+          >
+            {paymentTypes.map((type) => (
+              <option key={type} value={type}>
+                {formatText(type)}
+              </option>
+            ))}
+          </Select>
+
+          <Select
+            label="Payment Method"
+            value={formData.payment_method}
+            onChange={(e) =>
+              setFormData({
+                ...formData,
+                payment_method: e.target.value,
+              })
+            }
+          >
+            {paymentMethods.map((method) => (
+              <option key={method} value={method}>
+                {formatText(method)}
+              </option>
+            ))}
+          </Select>
+
+          <Select
+            label="Status"
+            value={formData.status}
+            onChange={(e) =>
+              setFormData({
+                ...formData,
+                status: e.target.value,
+              })
+            }
+          >
+            {paymentStatuses.map((status) => (
+              <option key={status} value={status}>
+                {formatText(status)}
+              </option>
+            ))}
+          </Select>
         </div>
 
-        {filteredClientUnits.length > 50 ? (
-          <p className="mt-2 text-xs text-slate-500">
-            Showing first 50 results. Type more details to narrow the search.
-          </p>
-        ) : null}
+        <p className="text-sm text-slate-500">
+          Only verified payments affect collection percentage and commission release eligibility.
+        </p>
       </div>
+    </Modal>
+  )
+}
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <Input
-          label="Amount"
-          min={0}
-          step="0.01"
-          type="number"
-          value={formData.amount}
-          onChange={(e) =>
-            setFormData({
-              ...formData,
-              amount: Number(e.target.value),
-            })
-          }
-          required
-        />
-
-        <Input
-          label="Payment Date"
-          type="date"
-          value={formData.payment_date}
-          onChange={(e) =>
-            setFormData({
-              ...formData,
-              payment_date: e.target.value,
-            })
-          }
-          required
-        />
-
-        <Select
-          label="Payment Type"
-          value={formData.payment_type}
-          onChange={(e) =>
-            setFormData({
-              ...formData,
-              payment_type: e.target.value,
-            })
-          }
-        >
-          {paymentTypeOptions.map((type) => (
-            <option key={type} value={type}>
-              {formatText(type)}
-            </option>
-          ))}
-        </Select>
-
-        <Select
-          label="Payment Method"
-          value={formData.payment_method}
-          onChange={(e) =>
-            setFormData({
-              ...formData,
-              payment_method: e.target.value,
-            })
-          }
-        >
-          {paymentMethodOptions.map((method) => (
-            <option key={method} value={method}>
-              {formatText(method)}
-            </option>
-          ))}
-        </Select>
-      </div>
-
-      {error ? <Alert title={error} variant="error" /> : null}
-
-      <div className="flex justify-end gap-2">
-        <Button onClick={onCancel}>Cancel</Button>
-        <Button
-          disabled={isPending || !formData.client_unit_id}
-          type="submit"
-          variant="primary"
-        >
-          {isPending ? "Saving..." : submitLabel}
-        </Button>
-      </div>
-    </form>
+const MiniDetail = ({
+  label,
+  value,
+}: {
+  label: string
+  value: string | number | null | undefined
+}) => {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+      <p className="text-xs font-semibold uppercase text-slate-400">{label}</p>
+      <p className="mt-1 text-sm font-semibold text-slate-900">
+        {value === null || value === undefined || value === "" ? "-" : value}
+      </p>
+    </div>
   )
 }
 
