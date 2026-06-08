@@ -411,15 +411,20 @@ export const updatePayment = async (req, res) => {
     ? existingPayment.client_unit_id
     : client_unit_id
 
-  const nextAmount = isMissing(amount)
-    ? normalizeMoney(existingPayment.amount)
-    : validateAmount(amount).value
+  const amountValidation = isMissing(amount)
+    ? {
+        isValid: true,
+        value: normalizeMoney(existingPayment.amount),
+      }
+    : validateAmount(amount)
 
-  if (!isMissing(amount) && !validateAmount(amount).isValid) {
+  if (!amountValidation.isValid) {
     return res.status(400).json({
       message: 'Amount must be greater than 0',
     })
   }
+
+  const nextAmount = amountValidation.value
 
   const nextStatus = isMissing(status)
     ? existingPayment.status
@@ -541,6 +546,73 @@ export const updatePayment = async (req, res) => {
         paymentId: Number(id),
         balanceSummaries,
         eligibilitySummaries,
+      },
+    })
+  } catch (err) {
+    await connection.rollback()
+    throw err
+  } finally {
+    connection.release()
+  }
+}
+
+export const deletePayment = async (req, res) => {
+  const { id } = req.params
+
+  const existingPayment = await getPaymentById(id)
+
+  if (!existingPayment) {
+    return res.status(404).json({
+      message: 'Payment not found',
+    })
+  }
+
+  if (existingPayment.status === 'released') {
+    return res.status(400).json({
+      message: 'This payment is already released/accounted and cannot be deleted.',
+    })
+  }
+
+  const connection = await db.getConnection()
+
+  try {
+    await connection.beginTransaction()
+
+    await connection.query(
+      `
+      DELETE FROM payments
+      WHERE id = ?
+      `,
+      [id]
+    )
+
+    const balanceSummary = await recomputeClientUnitBalance(
+      connection,
+      existingPayment.client_unit_id
+    )
+
+    const eligibilitySummary = await refreshCommissionEligibility(
+      existingPayment.client_unit_id,
+      connection
+    )
+
+    await connection.commit()
+
+    await createAuditLog({
+      userId: req.user.id,
+      action: 'delete',
+      module: 'Payments',
+      description: `Deleted payment ${id} from client unit ${existingPayment.client_unit_id}`,
+      ipAddress: getClientIp(req),
+    })
+
+    res.status(200).json({
+      message: 'Payment deleted successfully',
+      data: {
+        paymentId: Number(id),
+        client_unit_id: existingPayment.client_unit_id,
+        balanceSummary,
+        eligibilitySummary,
       },
     })
   } catch (err) {

@@ -21,21 +21,23 @@ type SellerStatus = "active" | "inactive" | string
 
 type SellerRole = "broker_network_manager" | "broker" | "agent" | string
 
+type ReportsUnderMode = "none" | "seller" | "custom"
+
 type AccreditedSeller = {
   id: number
   user_id: number | null
+  user_full_name?: string | null
   full_name: string
   email: string | null
   contact_no: string | null
   seller_role: SellerRole
-  commission_rate: number | string | null
   parent_seller_id: number | null
   parent_seller_name: string | null
-  parent_seller_role: string | null
   custom_reports_under: string | null
-  reports_under_display: string
+  reports_under_display: string | null
   status: SellerStatus
   accreditation_date: string | null
+  commission_rate: number | string | null
   created_at: string
   updated_at: string
 }
@@ -46,45 +48,38 @@ type SellerFormData = {
   email: string
   contact_no: string
   seller_role: SellerRole
-  commission_rate: string
   parent_seller_id: string
   custom_reports_under: string
-  reports_under_mode: "none" | "seller" | "custom"
+  reports_under_mode: ReportsUnderMode
   status: SellerStatus
   accreditation_date: string
+  commission_rate: string
 }
 
 type SellersResponse = {
-  accreditedSellers: AccreditedSeller[]
+  accreditedSellers?: AccreditedSeller[]
+  sellers?: AccreditedSeller[]
+  data?: AccreditedSeller[]
 }
 
-type PossibleParentSellersResponse = {
-  possibleParentSellers: AccreditedSeller[]
-}
-
-const defaultSellerFormData: SellerFormData = {
+const emptyFormData: SellerFormData = {
   user_id: "",
   full_name: "",
   email: "",
   contact_no: "",
   seller_role: "agent",
-  commission_rate: "",
   parent_seller_id: "",
   custom_reports_under: "",
   reports_under_mode: "none",
   status: "active",
   accreditation_date: "",
+  commission_rate: "",
 }
 
-const sellerRoles = [
-  { label: "Broker Network Manager", value: "broker_network_manager" },
-  { label: "Broker", value: "broker" },
-  { label: "Agent", value: "agent" },
-]
-
+const sellerRoles = ["broker_network_manager", "broker", "agent"]
 const sellerStatuses = ["active", "inactive"]
 
-const fetchSellers = async () => {
+const fetchSellers = async (): Promise<AccreditedSeller[]> => {
   const response = await fetch(`${API_URL}/accredited-sellers`, {
     credentials: "include",
   })
@@ -94,10 +89,12 @@ const fetchSellers = async () => {
   }
 
   const data = (await response.json()) as SellersResponse
-  return data.accreditedSellers
+  return data.accreditedSellers || data.sellers || data.data || []
 }
 
-const fetchPossibleParentSellers = async (excludeId?: number | null) => {
+const fetchPossibleParentSellers = async (
+  excludeId: number | null
+): Promise<AccreditedSeller[]> => {
   const url = excludeId
     ? `${API_URL}/accredited-sellers/possible-parents?exclude_id=${excludeId}`
     : `${API_URL}/accredited-sellers/possible-parents`
@@ -110,8 +107,12 @@ const fetchPossibleParentSellers = async (excludeId?: number | null) => {
     throw new Error(await getErrorMessage(response))
   }
 
-  const data = (await response.json()) as PossibleParentSellersResponse
-  return data.possibleParentSellers
+  const data = (await response.json()) as {
+    possibleParentSellers?: AccreditedSeller[]
+    data?: AccreditedSeller[]
+  }
+
+  return data.possibleParentSellers || data.data || []
 }
 
 const createSeller = async (sellerData: SellerFormData) => {
@@ -155,62 +156,65 @@ const updateSeller = async ({
 }
 
 const formatSellerPayload = (sellerData: SellerFormData) => {
-  const parent_seller_id =
-    sellerData.reports_under_mode === "seller"
+  const parentSellerId =
+    sellerData.reports_under_mode === "seller" && sellerData.parent_seller_id
       ? Number(sellerData.parent_seller_id)
       : null
 
-  const custom_reports_under =
+  const customReportsUnder =
     sellerData.reports_under_mode === "custom"
       ? sellerData.custom_reports_under.trim()
       : null
 
   return {
     user_id: sellerData.user_id ? Number(sellerData.user_id) : null,
-    full_name: sellerData.full_name,
-    email: sellerData.email || null,
-    contact_no: sellerData.contact_no || null,
+    full_name: sellerData.full_name.trim(),
+    email: sellerData.email.trim() || null,
+    contact_no: sellerData.contact_no.trim() || null,
     seller_role: sellerData.seller_role,
+    parent_seller_id: parentSellerId,
+    custom_reports_under: customReportsUnder,
+    status: sellerData.status,
+    accreditation_date: sellerData.accreditation_date || null,
     commission_rate:
       sellerData.commission_rate === ""
         ? null
         : Number(sellerData.commission_rate),
-    parent_seller_id,
-    custom_reports_under,
-    status: sellerData.status,
-    accreditation_date: sellerData.accreditation_date || null,
   }
 }
 
+const getReportsUnderMode = (seller: AccreditedSeller): ReportsUnderMode => {
+  if (seller.parent_seller_id) return "seller"
+  if (seller.custom_reports_under) return "custom"
+  return "none"
+}
+
 const sellerToFormData = (seller: AccreditedSeller): SellerFormData => {
-  let reportsUnderMode: SellerFormData["reports_under_mode"] = "none"
-
-  if (seller.parent_seller_id) {
-    reportsUnderMode = "seller"
-  } else if (seller.custom_reports_under) {
-    reportsUnderMode = "custom"
-  }
-
   return {
     user_id: seller.user_id ? String(seller.user_id) : "",
     full_name: seller.full_name,
     email: seller.email || "",
     contact_no: seller.contact_no || "",
     seller_role: seller.seller_role,
-    commission_rate:
-      seller.commission_rate === null || seller.commission_rate === undefined
-        ? ""
-        : String(seller.commission_rate),
     parent_seller_id: seller.parent_seller_id
       ? String(seller.parent_seller_id)
       : "",
     custom_reports_under: seller.custom_reports_under || "",
-    reports_under_mode: reportsUnderMode,
+    reports_under_mode: getReportsUnderMode(seller),
     status: seller.status,
     accreditation_date: seller.accreditation_date
       ? seller.accreditation_date.slice(0, 10)
       : "",
+    commission_rate:
+      seller.commission_rate === null || seller.commission_rate === undefined
+        ? ""
+        : String(seller.commission_rate),
   }
+}
+
+const getCommissionRateDisplay = (rate: number | string | null) => {
+  if (rate === null || rate === undefined || rate === "") return "-"
+  return `${formatNumber(rate)}%`
 }
 
 const AccredittedSellers = () => {
@@ -219,14 +223,14 @@ const AccredittedSellers = () => {
   const [searchInput, setSearchInput] = useState("")
   const [roleFilter, setRoleFilter] = useState("all")
   const [statusFilter, setStatusFilter] = useState("all")
+
   const [isAddOpen, setIsAddOpen] = useState(false)
   const [editSeller, setEditSeller] = useState<AccreditedSeller | null>(null)
-  const [formData, setFormData] = useState<SellerFormData>(
-    defaultSellerFormData
-  )
-  const [editFormData, setEditFormData] = useState<SellerFormData>(
-    defaultSellerFormData
-  )
+
+  const [formData, setFormData] = useState<SellerFormData>(emptyFormData)
+  const [editFormData, setEditFormData] =
+    useState<SellerFormData>(emptyFormData)
+
   const [page, setPage] = useState(1)
   const [rowsPerPage, setRowsPerPage] = useState(10)
   const [successMessage, setSuccessMessage] = useState("")
@@ -235,34 +239,45 @@ const AccredittedSellers = () => {
     data: sellers = [],
     isLoading,
     error,
-  } = useQuery({
+  } = useQuery<AccreditedSeller[]>({
     queryKey: ["accredited-sellers"],
     queryFn: fetchSellers,
   })
 
-  const { data: possibleParentSellers = [] } = useQuery({
-    queryKey: ["possible-parent-sellers", editSeller?.id || null],
+  const { data: possibleParentSellers = [] } = useQuery<AccreditedSeller[]>({
+    queryKey: ["accredited-sellers-possible-parents", editSeller?.id || null],
     queryFn: () => fetchPossibleParentSellers(editSeller?.id || null),
   })
+
+  const invalidateSellerAndCommissionQueries = () => {
+    queryClient.invalidateQueries({ queryKey: ["accredited-sellers"] })
+    queryClient.invalidateQueries({
+      queryKey: ["accredited-sellers-possible-parents"],
+    })
+    queryClient.invalidateQueries({ queryKey: ["commissions"] })
+    queryClient.invalidateQueries({ queryKey: ["commission-summary"] })
+    queryClient.invalidateQueries({ queryKey: ["commission-releases"] })
+    queryClient.invalidateQueries({ queryKey: ["client-units"] })
+    queryClient.invalidateQueries({ queryKey: ["reports"] })
+  }
 
   const createSellerMutation = useMutation({
     mutationFn: createSeller,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["accredited-sellers"] })
-      queryClient.invalidateQueries({ queryKey: ["possible-parent-sellers"] })
+      invalidateSellerAndCommissionQueries()
       setIsAddOpen(false)
-      setFormData(defaultSellerFormData)
-      setSuccessMessage("Accredited seller created successfully")
+      setFormData(emptyFormData)
+      setSuccessMessage("Seller added successfully")
     },
   })
 
   const updateSellerMutation = useMutation({
     mutationFn: updateSeller,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["accredited-sellers"] })
-      queryClient.invalidateQueries({ queryKey: ["possible-parent-sellers"] })
+      invalidateSellerAndCommissionQueries()
       setEditSeller(null)
-      setSuccessMessage("Accredited seller updated successfully")
+      setEditFormData(emptyFormData)
+      setSuccessMessage("Seller updated successfully")
     },
   })
 
@@ -275,6 +290,9 @@ const AccredittedSellers = () => {
       (seller.email || "").toLowerCase().includes(search) ||
       (seller.contact_no || "").toLowerCase().includes(search) ||
       seller.seller_role.toLowerCase().includes(search) ||
+      seller.status.toLowerCase().includes(search) ||
+      (seller.parent_seller_name || "").toLowerCase().includes(search) ||
+      (seller.custom_reports_under || "").toLowerCase().includes(search) ||
       (seller.reports_under_display || "").toLowerCase().includes(search)
 
     const matchesRole =
@@ -288,17 +306,36 @@ const AccredittedSellers = () => {
 
   const paginatedSellers = paginateRows(filteredSellers, page, rowsPerPage)
 
-  const roleCounts = useMemo(() => {
-    return sellerRoles.reduce<Record<string, number>>((counts, role) => {
-      counts[role.value] = sellers.filter(
-        (seller) => seller.seller_role === role.value
-      ).length
-
-      return counts
-    }, {})
+  const activeCount = useMemo(() => {
+    return sellers.filter((seller) => seller.status === "active").length
   }, [sellers])
 
-  const handleAddSeller = () => {
+  const inactiveCount = useMemo(() => {
+    return sellers.filter((seller) => seller.status === "inactive").length
+  }, [sellers])
+
+  const withRateCount = useMemo(() => {
+    return sellers.filter(
+      (seller) =>
+        seller.commission_rate !== null &&
+        seller.commission_rate !== undefined &&
+        seller.commission_rate !== ""
+    ).length
+  }, [sellers])
+
+  const openAddModal = () => {
+    setFormData(emptyFormData)
+    setSuccessMessage("")
+    setIsAddOpen(true)
+  }
+
+  const openEditModal = (seller: AccreditedSeller) => {
+    setEditSeller(seller)
+    setEditFormData(sellerToFormData(seller))
+    setSuccessMessage("")
+  }
+
+  const handleCreateSeller = () => {
     createSellerMutation.mutate(formData)
   }
 
@@ -311,20 +348,9 @@ const AccredittedSellers = () => {
     })
   }
 
-  const openAddModal = () => {
-    setFormData(defaultSellerFormData)
-    setSuccessMessage("")
-    setIsAddOpen(true)
-  }
-
-  const openEditModal = (seller: AccreditedSeller) => {
-    setEditSeller(seller)
-    setEditFormData(sellerToFormData(seller))
-    setSuccessMessage("")
-  }
-
   const mutationError =
-    createSellerMutation.error?.message || updateSellerMutation.error?.message
+    createSellerMutation.error?.message ||
+    updateSellerMutation.error?.message
 
   if (isLoading) {
     return <LoadingState label="Loading accredited sellers..." />
@@ -339,7 +365,7 @@ const AccredittedSellers = () => {
       <PageHeader
         icon={<FiUsers />}
         title="Accredited Sellers"
-        subtitle="Manage brokers, agents, reporting hierarchy, accreditation dates, and default commission rates."
+        subtitle="Manage accredited brokers, agents, reporting lines, and default commission rates."
         actions={
           <Button icon={<FiPlus />} onClick={openAddModal} variant="primary">
             Add Seller
@@ -351,45 +377,42 @@ const AccredittedSellers = () => {
       {mutationError ? <Alert variant="error" title={mutationError} /> : null}
 
       <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-4">
-        <StatCard label="All Sellers" value={sellers.length} />
-        <StatCard label="Agents" value={roleCounts.agent || 0} />
-        <StatCard label="Brokers" value={roleCounts.broker || 0} />
-        <StatCard
-          label="Network Managers"
-          value={roleCounts.broker_network_manager || 0}
-        />
+        <StatCard label="Total Sellers" value={sellers.length} />
+        <StatCard label="Active" value={activeCount} />
+        <StatCard label="Inactive" value={inactiveCount} />
+        <StatCard label="With Default Rate" value={withRateCount} />
       </div>
 
       <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-4">
         <Input
           icon={<FiSearch />}
-          placeholder="Search seller, email, role, reports under..."
+          placeholder="Search sellers..."
           value={searchInput}
-          onChange={(e) => {
-            setSearchInput(e.target.value)
+          onChange={(event) => {
+            setSearchInput(event.target.value)
             setPage(1)
           }}
         />
 
         <Select
           value={roleFilter}
-          onChange={(e) => {
-            setRoleFilter(e.target.value)
+          onChange={(event) => {
+            setRoleFilter(event.target.value)
             setPage(1)
           }}
         >
           <option value="all">All Roles</option>
           {sellerRoles.map((role) => (
-            <option key={role.value} value={role.value}>
-              {role.label}
+            <option key={role} value={role}>
+              {formatText(role)}
             </option>
           ))}
         </Select>
 
         <Select
           value={statusFilter}
-          onChange={(e) => {
-            setStatusFilter(e.target.value)
+          onChange={(event) => {
+            setStatusFilter(event.target.value)
             setPage(1)
           }}
         >
@@ -418,12 +441,13 @@ const AccredittedSellers = () => {
           <thead className="bg-slate-50">
             <tr className="border-b border-slate-200">
               <th className="px-4 py-3 text-left">Seller</th>
-              <th className="px-4 py-3 text-left">Role</th>
-              <th className="px-4 py-3 text-left">Default Commission Rate</th>
-              <th className="px-4 py-3 text-left">Reports Under</th>
               <th className="px-4 py-3 text-left">Contact</th>
+              <th className="px-4 py-3 text-left">Role</th>
+              <th className="px-4 py-3 text-left">Reports Under</th>
+              <th className="px-4 py-3 text-left">Default Rate</th>
               <th className="px-4 py-3 text-left">Accreditation Date</th>
               <th className="px-4 py-3 text-left">Status</th>
+              <th className="px-4 py-3 text-left">Created</th>
               <th className="px-4 py-3 text-left">Actions</th>
             </tr>
           </thead>
@@ -436,7 +460,14 @@ const AccredittedSellers = () => {
                     {seller.full_name}
                   </p>
                   <p className="text-xs text-slate-500">
-                    {seller.email || "-"}
+                    User: {seller.user_full_name || "-"}
+                  </p>
+                </td>
+
+                <td className="px-4 py-3 text-slate-600">
+                  <p>{seller.email || "-"}</p>
+                  <p className="text-xs text-slate-500">
+                    {seller.contact_no || "-"}
                   </p>
                 </td>
 
@@ -445,18 +476,11 @@ const AccredittedSellers = () => {
                 </td>
 
                 <td className="px-4 py-3 text-slate-600">
-                  {seller.commission_rate === null ||
-                  seller.commission_rate === undefined
-                    ? "-"
-                    : `${formatNumber(seller.commission_rate)}%`}
+                  {seller.reports_under_display || "-"}
                 </td>
 
-                <td className="px-4 py-3 text-slate-600">
-                  {seller.reports_under_display || "None"}
-                </td>
-
-                <td className="px-4 py-3 text-slate-600">
-                  {seller.contact_no || "-"}
+                <td className="px-4 py-3 font-semibold text-slate-900">
+                  {getCommissionRateDisplay(seller.commission_rate)}
                 </td>
 
                 <td className="px-4 py-3 text-slate-600">
@@ -465,6 +489,10 @@ const AccredittedSellers = () => {
 
                 <td className="px-4 py-3">
                   <StatusBadge status={seller.status} />
+                </td>
+
+                <td className="px-4 py-3 text-slate-600">
+                  {formatDate(seller.created_at)}
                 </td>
 
                 <td className="px-4 py-3">
@@ -480,8 +508,11 @@ const AccredittedSellers = () => {
 
             {paginatedSellers.length === 0 ? (
               <tr>
-                <td colSpan={8}>
-                  <EmptyState title="No accredited sellers found" />
+                <td colSpan={9}>
+                  <EmptyState
+                    title="No sellers found"
+                    description="Add accredited sellers so reservations can generate commissions."
+                  />
                 </td>
               </tr>
             ) : null}
@@ -498,223 +529,246 @@ const AccredittedSellers = () => {
       />
 
       {isAddOpen ? (
-        <Modal
+        <SellerFormModal
           title="Add Accredited Seller"
+          formData={formData}
+          setFormData={setFormData}
+          possibleParentSellers={possibleParentSellers}
           onClose={() => setIsAddOpen(false)}
-          size="lg"
-          footer={
-            <div className="flex justify-end gap-2">
-              <Button onClick={() => setIsAddOpen(false)}>Cancel</Button>
-              <Button
-                disabled={createSellerMutation.isPending}
-                onClick={handleAddSeller}
-                variant="primary"
-              >
-                {createSellerMutation.isPending ? "Saving..." : "Add Seller"}
-              </Button>
-            </div>
-          }
-        >
-          <SellerForm
-            formData={formData}
-            setFormData={setFormData}
-            possibleParentSellers={possibleParentSellers}
-          />
-        </Modal>
+          onSave={handleCreateSeller}
+          isPending={createSellerMutation.isPending}
+          submitLabel="Add Seller"
+        />
       ) : null}
 
       {editSeller ? (
-        <Modal
-          title="Edit Accredited Seller"
+        <SellerFormModal
+          title={`Edit Seller - ${editSeller.full_name}`}
+          formData={editFormData}
+          setFormData={setEditFormData}
+          possibleParentSellers={possibleParentSellers}
           onClose={() => setEditSeller(null)}
-          size="lg"
-          footer={
-            <div className="flex justify-end gap-2">
-              <Button onClick={() => setEditSeller(null)}>Cancel</Button>
-              <Button
-                disabled={updateSellerMutation.isPending}
-                onClick={handleUpdateSeller}
-                variant="primary"
-              >
-                {updateSellerMutation.isPending ? "Saving..." : "Save Changes"}
-              </Button>
-            </div>
-          }
-        >
-          <SellerForm
-            formData={editFormData}
-            setFormData={setEditFormData}
-            possibleParentSellers={possibleParentSellers}
-          />
-        </Modal>
+          onSave={handleUpdateSeller}
+          isPending={updateSellerMutation.isPending}
+          submitLabel="Save Changes"
+        />
       ) : null}
     </div>
   )
 }
 
-type SellerFormProps = {
+type SellerFormModalProps = {
+  title: string
   formData: SellerFormData
-  setFormData: (formData: SellerFormData) => void
+  setFormData: (data: SellerFormData) => void
   possibleParentSellers: AccreditedSeller[]
+  onClose: () => void
+  onSave: () => void
+  isPending: boolean
+  submitLabel: string
 }
 
-const SellerForm = ({
+const SellerFormModal = ({
+  title,
   formData,
   setFormData,
   possibleParentSellers,
-}: SellerFormProps) => {
+  onClose,
+  onSave,
+  isPending,
+  submitLabel,
+}: SellerFormModalProps) => {
   return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-      <Input
-        label="Full Name"
-        value={formData.full_name}
-        onChange={(e) =>
-          setFormData({
-            ...formData,
-            full_name: e.target.value,
-          })
-        }
-        required
-      />
-
-      <Input
-        label="Email"
-        type="email"
-        value={formData.email}
-        onChange={(e) =>
-          setFormData({
-            ...formData,
-            email: e.target.value,
-          })
-        }
-      />
-
-      <Input
-        label="Contact No."
-        value={formData.contact_no}
-        onChange={(e) =>
-          setFormData({
-            ...formData,
-            contact_no: e.target.value,
-          })
-        }
-      />
-
-      <Select
-        label="Seller Role"
-        value={formData.seller_role}
-        onChange={(e) =>
-          setFormData({
-            ...formData,
-            seller_role: e.target.value,
-          })
-        }
-      >
-        {sellerRoles.map((role) => (
-          <option key={role.value} value={role.value}>
-            {role.label}
-          </option>
-        ))}
-      </Select>
-
-      <Input
-        label="Default Commission Rate (%)"
-        type="number"
-        min={0}
-        max={100}
-        step="0.01"
-        placeholder="Optional"
-        value={formData.commission_rate}
-        onChange={(e) =>
-          setFormData({
-            ...formData,
-            commission_rate: e.target.value,
-          })
-        }
-      />
-
-      <Input
-        label="Accreditation Date"
-        type="date"
-        value={formData.accreditation_date}
-        onChange={(e) =>
-          setFormData({
-            ...formData,
-            accreditation_date: e.target.value,
-          })
-        }
-      />
-
-      <Select
-        label="Reports Under"
-        value={formData.reports_under_mode}
-        onChange={(e) =>
-          setFormData({
-            ...formData,
-            reports_under_mode: e.target.value as SellerFormData["reports_under_mode"],
-            parent_seller_id: "",
-            custom_reports_under: "",
-          })
-        }
-      >
-        <option value="none">None</option>
-        <option value="seller">Existing Seller</option>
-        <option value="custom">Custom Name</option>
-      </Select>
-
-      {formData.reports_under_mode === "seller" ? (
-        <Select
-          label="Select Parent Seller"
-          value={formData.parent_seller_id}
-          onChange={(e) =>
-            setFormData({
-              ...formData,
-              parent_seller_id: e.target.value,
-            })
-          }
-          required
-        >
-          <option value="">Select seller</option>
-          {possibleParentSellers.map((seller) => (
-            <option key={seller.id} value={seller.id}>
-              {seller.full_name} - {formatText(seller.seller_role)}
-            </option>
-          ))}
-        </Select>
-      ) : null}
-
-      {formData.reports_under_mode === "custom" ? (
+    <Modal
+      title={title}
+      onClose={onClose}
+      size="lg"
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button onClick={onClose}>Cancel</Button>
+          <Button disabled={isPending} onClick={onSave} variant="primary">
+            {isPending ? "Saving..." : submitLabel}
+          </Button>
+        </div>
+      }
+    >
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <Input
-          label="Custom Reports Under"
-          placeholder="Example: external broker / old manager name"
-          value={formData.custom_reports_under}
-          onChange={(e) =>
+          label="Full Name"
+          value={formData.full_name}
+          onChange={(event) =>
             setFormData({
               ...formData,
-              custom_reports_under: e.target.value,
+              full_name: event.target.value,
             })
           }
           required
         />
-      ) : null}
 
-      <Select
-        label="Status"
-        value={formData.status}
-        onChange={(e) =>
-          setFormData({
-            ...formData,
-            status: e.target.value,
-          })
-        }
-      >
-        {sellerStatuses.map((status) => (
-          <option key={status} value={status}>
-            {formatText(status)}
-          </option>
-        ))}
-      </Select>
-    </div>
+        <Input
+          label="Email"
+          type="email"
+          value={formData.email}
+          onChange={(event) =>
+            setFormData({
+              ...formData,
+              email: event.target.value,
+            })
+          }
+        />
+
+        <Input
+          label="Contact No."
+          value={formData.contact_no}
+          onChange={(event) =>
+            setFormData({
+              ...formData,
+              contact_no: event.target.value,
+            })
+          }
+        />
+
+        <Select
+          label="Seller Role"
+          value={formData.seller_role}
+          onChange={(event) =>
+            setFormData({
+              ...formData,
+              seller_role: event.target.value,
+            })
+          }
+        >
+          {sellerRoles.map((role) => (
+            <option key={role} value={role}>
+              {formatText(role)}
+            </option>
+          ))}
+        </Select>
+
+        <Input
+          label="Default Commission Rate (%)"
+          type="number"
+          min={0}
+          max={100}
+          step="0.01"
+          value={formData.commission_rate}
+          onChange={(event) =>
+            setFormData({
+              ...formData,
+              commission_rate: event.target.value,
+            })
+          }
+          placeholder="Optional. Example: 5"
+        />
+
+        <Input
+          label="Accreditation Date"
+          type="date"
+          value={formData.accreditation_date}
+          onChange={(event) =>
+            setFormData({
+              ...formData,
+              accreditation_date: event.target.value,
+            })
+          }
+        />
+
+        <Select
+          label="Status"
+          value={formData.status}
+          onChange={(event) =>
+            setFormData({
+              ...formData,
+              status: event.target.value,
+            })
+          }
+        >
+          {sellerStatuses.map((status) => (
+            <option key={status} value={status}>
+              {formatText(status)}
+            </option>
+          ))}
+        </Select>
+
+        <Input
+          label="Linked User ID"
+          type="number"
+          min={1}
+          value={formData.user_id}
+          onChange={(event) =>
+            setFormData({
+              ...formData,
+              user_id: event.target.value,
+            })
+          }
+          placeholder="Optional"
+        />
+      </div>
+
+      <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
+        <h3 className="mb-3 text-sm font-bold text-slate-900">
+          Reports Under
+        </h3>
+
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <Select
+            label="Reports Under Mode"
+            value={formData.reports_under_mode}
+            onChange={(event) =>
+              setFormData({
+                ...formData,
+                reports_under_mode: event.target.value as ReportsUnderMode,
+                parent_seller_id: "",
+                custom_reports_under: "",
+              })
+            }
+          >
+            <option value="none">None</option>
+            <option value="seller">Existing Seller</option>
+            <option value="custom">Custom Name</option>
+          </Select>
+
+          {formData.reports_under_mode === "seller" ? (
+            <Select
+              label="Existing Seller"
+              value={formData.parent_seller_id}
+              onChange={(event) =>
+                setFormData({
+                  ...formData,
+                  parent_seller_id: event.target.value,
+                })
+              }
+            >
+              <option value="">Select seller</option>
+              {possibleParentSellers.map((seller) => (
+                <option key={seller.id} value={seller.id}>
+                  {seller.full_name} - {formatText(seller.seller_role)}
+                </option>
+              ))}
+            </Select>
+          ) : null}
+
+          {formData.reports_under_mode === "custom" ? (
+            <Input
+              label="Custom Reports Under"
+              value={formData.custom_reports_under}
+              onChange={(event) =>
+                setFormData({
+                  ...formData,
+                  custom_reports_under: event.target.value,
+                })
+              }
+              placeholder="Example: Outside Broker / Referral"
+            />
+          ) : null}
+        </div>
+
+        <p className="mt-3 text-sm text-slate-500">
+          Changing the default commission rate syncs open commissions that have
+          no released payout yet.
+        </p>
+      </div>
+    </Modal>
   )
 }
 

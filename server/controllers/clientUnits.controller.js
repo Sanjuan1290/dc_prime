@@ -15,6 +15,7 @@ const allowedClientUnitStatuses = [
 ]
 
 const allowedSaleTypes = ['distributed', 'direct']
+const allowedModeOfPayments = ['cash', 'installment']
 
 const isMissing = (value) => {
   return value === undefined || value === null || value === ''
@@ -23,10 +24,6 @@ const isMissing = (value) => {
 const nullableValue = (value) => {
   if (isMissing(value)) return null
   return value
-}
-
-const numberValue = (value) => {
-  return Number(value || 0)
 }
 
 const normalizeMoney = (value) => {
@@ -67,6 +64,12 @@ const validateSaleType = (saleType) => {
   return saleType
 }
 
+const validateModeOfPayment = (modeOfPayment) => {
+  if (isMissing(modeOfPayment)) return 'installment'
+  if (!allowedModeOfPayments.includes(modeOfPayment)) return 'installment'
+  return modeOfPayment
+}
+
 const clientUnitFields = `
   cu.id,
   cu.client_id,
@@ -91,6 +94,7 @@ const clientUnitFields = `
     THEN ROUND((COALESCE(payment_summary.paid_amount, 0) / l.total_contract_price) * 100, 2)
     ELSE 0
   END AS payment_percentage,
+  cu.mode_of_payment,
   cu.due_day,
   cu.status,
   cu.assigned_user_id,
@@ -367,12 +371,14 @@ export const getClientUnits = async (req, res) => {
         OR p.name LIKE ?
         OR l.lot_type LIKE ?
         OR cu.status LIKE ?
+        OR cu.mode_of_payment LIKE ?
         OR seller.full_name LIKE ?
         OR seller.seller_role LIKE ?
       )
     `)
 
     params.push(
+      searchTerm,
       searchTerm,
       searchTerm,
       searchTerm,
@@ -540,6 +546,7 @@ export const reserveListing = async (req, res) => {
     seller_id,
     due_day,
     status = 'reserved',
+    mode_of_payment = 'installment',
     assigned_user_id,
     main_commission_rate_override,
     sale_type = 'distributed',
@@ -587,6 +594,7 @@ export const reserveListing = async (req, res) => {
   }
 
   const finalSaleType = validateSaleType(sale_type)
+  const finalModeOfPayment = validateModeOfPayment(mode_of_payment)
 
   const connection = await db.getConnection()
 
@@ -684,9 +692,10 @@ export const reserveListing = async (req, res) => {
         assigned_user_id,
         seller_id,
         status,
+        mode_of_payment,
         balance,
         due_day
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         clientId,
@@ -694,6 +703,7 @@ export const reserveListing = async (req, res) => {
         nullableValue(assigned_user_id || req.user.id),
         finalSellerId,
         status,
+        finalModeOfPayment,
         totalContractPrice,
         dueDayValidation.value,
       ]
@@ -766,6 +776,7 @@ export const updateClientUnit = async (req, res) => {
     seller_id,
     due_day,
     status,
+    mode_of_payment,
     regenerate_commission = false,
     main_commission_rate_override,
     sale_type,
@@ -798,6 +809,12 @@ export const updateClientUnit = async (req, res) => {
   const finalSellerId = !isMissing(seller_id)
     ? seller_id
     : existingClientUnit.seller_id
+
+  const finalModeOfPayment = validateModeOfPayment(
+    isMissing(mode_of_payment)
+      ? existingClientUnit.mode_of_payment
+      : mode_of_payment
+  )
 
   const connection = await db.getConnection()
 
@@ -853,7 +870,8 @@ export const updateClientUnit = async (req, res) => {
         assigned_user_id = ?,
         seller_id = ?,
         due_day = ?,
-        status = ?
+        status = ?,
+        mode_of_payment = ?
       WHERE id = ?
       `,
       [
@@ -861,6 +879,7 @@ export const updateClientUnit = async (req, res) => {
         nullableValue(finalSellerId),
         nextDueDay,
         finalStatus,
+        finalModeOfPayment,
         id,
       ]
     )

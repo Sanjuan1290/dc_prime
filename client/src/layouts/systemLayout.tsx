@@ -111,9 +111,7 @@ const SystemLayout = () => {
     <aside className="flex h-full w-72 flex-col border-r border-slate-200 bg-white shadow-sm lg:w-64">
       <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-sm font-bold text-white shadow-sm">
-            DC
-          </div>
+            <img src="/logo2.png" alt="logo"  className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-sm font-bold text-white shadow-sm"/>
 
           <div>
             <p className="text-sm font-bold text-slate-900">D&C Prime</p>

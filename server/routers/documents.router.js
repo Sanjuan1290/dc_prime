@@ -8,7 +8,7 @@ import {
   createChecklistForClientUnit,
   updateClientDocumentStatus,
   applyExistingReusableDocuments,
-  getClientUnitDocumentStatus
+  getClientUnitDocumentStatus,
 } from '../controllers/documents.controller.js'
 import { auth } from '../middlewares/auth.middleware.js'
 
@@ -20,9 +20,10 @@ router.post('/documents', auth, createDocument)
 router.patch('/documents/:id', auth, updateDocument)
 
 router.get('/client-units/:clientUnitId/documents', auth, getClientUnitDocuments)
-router.post('/client-units/:clientUnitId/documents/create-checklist', auth, createChecklistForClientUnit)
-router.post('/client-units/:clientUnitId/documents/apply-existing', auth, applyExistingReusableDocuments)
 router.get('/client-units/:clientUnitId/document-status', auth, getClientUnitDocumentStatus)
+router.post('/client-units/:clientUnitId/documents/checklist', auth, createChecklistForClientUnit)
+router.post('/client-units/:clientUnitId/documents/apply-existing', auth, applyExistingReusableDocuments)
+
 router.patch('/client-documents/:id/status', auth, updateClientDocumentStatus)
 
 export default router

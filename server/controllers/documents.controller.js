@@ -1,11 +1,13 @@
 import { db } from '../db/connect.js'
 import { createAuditLog } from '../utils/createAuditLog.js'
+import { getClientIp } from '../utils/getClientIp.js'
+import { refreshCommissionEligibility } from './commissions.controller.js'
 
 const allowedClientDocumentStatuses = [
   'not_submitted',
   'submitted',
   'approved',
-  'rejected'
+  'rejected',
 ]
 
 const isMissing = (value) => {
@@ -13,17 +15,12 @@ const isMissing = (value) => {
 }
 
 const nullableValue = (value) => {
-  if (isMissing(value)) {
-    return null
-  }
-
+  if (isMissing(value)) return null
   return value
 }
 
 const booleanValue = (value, defaultValue = false) => {
-  if (isMissing(value)) {
-    return defaultValue ? 1 : 0
-  }
+  if (isMissing(value)) return defaultValue ? 1 : 0
 
   if (typeof value === 'boolean') {
     return value ? 1 : 0
@@ -47,13 +44,14 @@ const documentFields = `
   updated_at
 `
 
-const getClientUnitById = async (clientUnitId) => {
-  const [rows] = await db.query(
+const getClientUnitById = async (clientUnitId, connectionOrDb = db) => {
+  const [rows] = await connectionOrDb.query(
     `
     SELECT
       id,
       client_id,
-      listing_id
+      listing_id,
+      status
     FROM client_units
     WHERE id = ?
     LIMIT 1
@@ -69,7 +67,7 @@ export const getDocuments = async (req, res) => {
     search,
     status,
     is_required,
-    can_reuse
+    can_reuse,
   } = req.query
 
   const conditions = []
@@ -89,24 +87,23 @@ export const getDocuments = async (req, res) => {
     params.push(searchTerm, searchTerm, searchTerm)
   }
 
-  if (!isMissing(status)) {
+  if (!isMissing(status) && status !== 'all') {
     conditions.push('status = ?')
     params.push(status)
   }
 
-  if (!isMissing(is_required)) {
+  if (!isMissing(is_required) && is_required !== 'all') {
     conditions.push('is_required = ?')
     params.push(booleanValue(is_required))
   }
 
-  if (!isMissing(can_reuse)) {
+  if (!isMissing(can_reuse) && can_reuse !== 'all') {
     conditions.push('can_reuse = ?')
     params.push(booleanValue(can_reuse))
   }
 
-  const whereClause = conditions.length > 0
-    ? `WHERE ${conditions.join(' AND ')}`
-    : ''
+  const whereClause =
+    conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
 
   const [documents] = await db.query(
     `
@@ -120,7 +117,9 @@ export const getDocuments = async (req, res) => {
   )
 
   res.status(200).json({
-    documents
+    message: 'Documents fetched successfully',
+    documents,
+    data: documents,
   })
 }
 
@@ -142,12 +141,14 @@ export const getDocument = async (req, res) => {
 
   if (!document) {
     return res.status(404).json({
-      message: 'Document not found'
+      message: 'Document not found',
     })
   }
 
   res.status(200).json({
-    document
+    message: 'Document fetched successfully',
+    document,
+    data: document,
   })
 }
 
@@ -157,12 +158,12 @@ export const createDocument = async (req, res) => {
     description,
     is_required,
     can_reuse,
-    status
+    status = 'active',
   } = req.body
 
   if (isMissing(name)) {
     return res.status(400).json({
-      message: 'Document name is required'
+      message: 'Document name is required',
     })
   }
 
@@ -179,9 +180,9 @@ export const createDocument = async (req, res) => {
     [
       name,
       nullableValue(description),
-      booleanValue(is_required),
+      booleanValue(is_required, true),
       booleanValue(can_reuse),
-      status || 'active'
+      status || 'active',
     ]
   )
 
@@ -190,12 +191,15 @@ export const createDocument = async (req, res) => {
     action: 'create',
     module: 'Documents',
     description: `Created document ${name}`,
-    ipAddress: req.ip
+    ipAddress: getClientIp(req),
   })
 
   res.status(201).json({
     message: 'Document created successfully',
-    documentId: result.insertId
+    documentId: result.insertId,
+    data: {
+      documentId: result.insertId,
+    },
   })
 }
 
@@ -206,12 +210,12 @@ export const updateDocument = async (req, res) => {
     description,
     is_required,
     can_reuse,
-    status
+    status,
   } = req.body
 
   if (isMissing(name)) {
     return res.status(400).json({
-      message: 'Document name is required'
+      message: 'Document name is required',
     })
   }
 
@@ -232,13 +236,13 @@ export const updateDocument = async (req, res) => {
       booleanValue(is_required),
       booleanValue(can_reuse),
       status || 'active',
-      id
+      id,
     ]
   )
 
   if (result.affectedRows === 0) {
     return res.status(404).json({
-      message: 'Document not found'
+      message: 'Document not found',
     })
   }
 
@@ -247,21 +251,22 @@ export const updateDocument = async (req, res) => {
     action: 'update',
     module: 'Documents',
     description: `Updated document ${name}`,
-    ipAddress: req.ip
+    ipAddress: getClientIp(req),
   })
 
   res.status(200).json({
-    message: 'Document updated successfully'
+    message: 'Document updated successfully',
   })
 }
 
 export const getClientUnitDocuments = async (req, res) => {
   const { clientUnitId } = req.params
+
   const clientUnit = await getClientUnitById(clientUnitId)
 
   if (!clientUnit) {
     return res.status(404).json({
-      message: 'Client unit not found'
+      message: 'Client unit not found',
     })
   }
 
@@ -278,13 +283,13 @@ export const getClientUnitDocuments = async (req, res) => {
       cdl.file_url,
       cdl.status,
       cdl.reviewed_by,
-      u.full_name AS reviewed_by_name,
+      reviewer.full_name AS reviewed_by_name,
       cdl.reviewed_at,
       cdl.created_at,
       cdl.updated_at
     FROM client_document_list cdl
     INNER JOIN documents d ON d.id = cdl.document_id
-    LEFT JOIN users u ON u.id = cdl.reviewed_by
+    LEFT JOIN users reviewer ON reviewer.id = cdl.reviewed_by
     WHERE cdl.client_unit_id = ?
     ORDER BY d.id ASC
     `,
@@ -292,41 +297,59 @@ export const getClientUnitDocuments = async (req, res) => {
   )
 
   res.status(200).json({
-    documents
+    message: 'Client unit documents fetched successfully',
+    documents,
+    clientDocuments: documents,
+    data: documents,
   })
 }
 
 export const createChecklistForClientUnit = async (req, res) => {
   const { clientUnitId } = req.params
+
   const clientUnit = await getClientUnitById(clientUnitId)
 
   if (!clientUnit) {
     return res.status(404).json({
-      message: 'Client unit not found'
+      message: 'Client unit not found',
     })
   }
 
-  await db.query(
+  const [documents] = await db.query(
+    `
+    SELECT id
+    FROM documents
+    WHERE status = 'active'
+      AND is_required = TRUE
+    ORDER BY id ASC
+    `
+  )
+
+  if (documents.length === 0) {
+    return res.status(200).json({
+      message: 'No required documents found',
+      data: {
+        clientUnitId: Number(clientUnitId),
+        insertedDocuments: 0,
+      },
+    })
+  }
+
+  const values = documents.map((document) => [
+    clientUnitId,
+    document.id,
+    'not_submitted',
+  ])
+
+  const [result] = await db.query(
     `
     INSERT IGNORE INTO client_document_list (
       client_unit_id,
       document_id,
-      file_url,
-      status,
-      reviewed_by,
-      reviewed_at
-    )
-    SELECT
-      ?,
-      id,
-      NULL,
-      'not_submitted',
-      NULL,
-      NULL
-    FROM documents
-    WHERE status = ?
+      status
+    ) VALUES ?
     `,
-    [clientUnitId, 'active']
+    [values]
   )
 
   await createAuditLog({
@@ -334,194 +357,270 @@ export const createChecklistForClientUnit = async (req, res) => {
     action: 'create',
     module: 'Client Documents',
     description: `Created document checklist for client unit ${clientUnitId}`,
-    ipAddress: req.ip
+    ipAddress: getClientIp(req),
   })
 
-  res.status(200).json({
-    message: 'Document checklist created successfully'
+  res.status(201).json({
+    message: 'Document checklist created successfully',
+    data: {
+      clientUnitId: Number(clientUnitId),
+      insertedDocuments: result.affectedRows,
+    },
   })
 }
 
 export const updateClientDocumentStatus = async (req, res) => {
   const { id } = req.params
-  const {
-    status,
-    file_url
-  } = req.body
-
-  if (isMissing(status)) {
-    return res.status(400).json({
-      message: 'Status is required'
-    })
-  }
+  const { status, file_url } = req.body
 
   if (!allowedClientDocumentStatuses.includes(status)) {
     return res.status(400).json({
-      message: 'Invalid client document status'
+      message: 'Invalid document status',
     })
   }
 
-  const [rows] = await db.query(
+  const [existingRows] = await db.query(
     `
     SELECT
-      id,
-      file_url
-    FROM client_document_list
-    WHERE id = ?
+      cdl.id,
+      cdl.client_unit_id,
+      cdl.document_id,
+      cdl.file_url,
+      cdl.status,
+      d.name AS document_name
+    FROM client_document_list cdl
+    INNER JOIN documents d ON d.id = cdl.document_id
+    WHERE cdl.id = ?
     LIMIT 1
     `,
     [id]
   )
 
-  const clientDocument = rows[0]
+  const existingDocument = existingRows[0]
 
-  if (!clientDocument) {
+  if (!existingDocument) {
     return res.status(404).json({
-      message: 'Client document not found'
+      message: 'Client document not found',
     })
   }
 
-  const nextFileUrl = Object.prototype.hasOwnProperty.call(req.body, 'file_url')
-    ? nullableValue(file_url)
-    : clientDocument.file_url
+  const nextFileUrl =
+    file_url !== undefined
+      ? nullableValue(file_url)
+      : existingDocument.file_url
 
-  await db.query(
-    `
-    UPDATE client_document_list
-    SET
-      status = ?,
-      file_url = ?,
-      reviewed_by = ?,
-      reviewed_at = CASE WHEN ? = 'not_submitted' THEN NULL ELSE NOW() END
-    WHERE id = ?
-    `,
-    [
-      status,
-      nextFileUrl,
-      status === 'not_submitted' ? null : req.user.id,
-      status,
-      id
-    ]
-  )
+  const connection = await db.getConnection()
 
-  await createAuditLog({
-    userId: req.user.id,
-    action: 'document_check',
-    module: 'Client Documents',
-    description: `Updated client document ${id} to ${status}`,
-    ipAddress: req.ip
-  })
+  try {
+    await connection.beginTransaction()
 
-  res.status(200).json({
-    message: 'Client document updated successfully'
-  })
+    await connection.query(
+      `
+      UPDATE client_document_list
+      SET
+        status = ?,
+        file_url = ?,
+        reviewed_by = ?,
+        reviewed_at = CASE
+          WHEN ? = 'not_submitted' THEN NULL
+          ELSE NOW()
+        END
+      WHERE id = ?
+      `,
+      [
+        status,
+        nextFileUrl,
+        status === 'not_submitted' ? null : req.user.id,
+        status,
+        id,
+      ]
+    )
+
+    const eligibilitySummary = await refreshCommissionEligibility(
+      existingDocument.client_unit_id,
+      connection
+    )
+
+    await connection.commit()
+
+    await createAuditLog({
+      userId: req.user.id,
+      action: 'document_check',
+      module: 'Client Documents',
+      description: `Updated client document ${id} to ${status}`,
+      ipAddress: getClientIp(req),
+    })
+
+    res.status(200).json({
+      message: 'Client document updated successfully',
+      data: {
+        clientDocumentId: Number(id),
+        client_unit_id: existingDocument.client_unit_id,
+        eligibilitySummary,
+      },
+    })
+  } catch (err) {
+    await connection.rollback()
+    throw err
+  } finally {
+    connection.release()
+  }
 }
 
 export const applyExistingReusableDocuments = async (req, res) => {
   const { clientUnitId } = req.params
+
   const clientUnit = await getClientUnitById(clientUnitId)
 
   if (!clientUnit) {
     return res.status(404).json({
-      message: 'Client unit not found'
+      message: 'Client unit not found',
     })
   }
 
-  await db.query(
-    `
-    UPDATE client_document_list target
-    INNER JOIN documents target_document
-      ON target_document.id = target.document_id
-      AND target_document.can_reuse = TRUE
-    INNER JOIN (
-      SELECT
-        source.document_id,
-        CASE
-          WHEN MAX(CASE WHEN source.status = 'approved' THEN 2 ELSE 1 END) = 2
-          THEN 'approved'
-          ELSE 'submitted'
-        END AS source_status
-      FROM client_document_list source
-      INNER JOIN client_units source_unit
-        ON source_unit.id = source.client_unit_id
-      INNER JOIN documents source_document
-        ON source_document.id = source.document_id
-        AND source_document.can_reuse = TRUE
-      WHERE source_unit.client_id = ?
-        AND source_unit.id <> ?
-        AND source.status IN ('submitted', 'approved')
-      GROUP BY source.document_id
-    ) reusable_source
-      ON reusable_source.document_id = target.document_id
-    SET
-      target.status = reusable_source.source_status,
-      target.reviewed_by = ?,
-      target.reviewed_at = NOW()
-    WHERE target.client_unit_id = ?
-    `,
-    [
-      clientUnit.client_id,
+  const connection = await db.getConnection()
+
+  try {
+    await connection.beginTransaction()
+
+    const [result] = await connection.query(
+      `
+      UPDATE client_document_list target
+      INNER JOIN documents target_document
+        ON target_document.id = target.document_id
+        AND target_document.can_reuse = TRUE
+      INNER JOIN (
+        SELECT
+          source.document_id,
+          CASE
+            WHEN MAX(CASE WHEN source.status = 'approved' THEN 2 ELSE 1 END) = 2
+            THEN 'approved'
+            ELSE 'submitted'
+          END AS source_status
+        FROM client_document_list source
+        INNER JOIN client_units source_unit
+          ON source_unit.id = source.client_unit_id
+        INNER JOIN documents source_document
+          ON source_document.id = source.document_id
+          AND source_document.can_reuse = TRUE
+        WHERE source_unit.client_id = ?
+          AND source_unit.id <> ?
+          AND source.status IN ('submitted', 'approved')
+        GROUP BY source.document_id
+      ) reusable_source
+        ON reusable_source.document_id = target.document_id
+      SET
+        target.status = reusable_source.source_status,
+        target.reviewed_by = ?,
+        target.reviewed_at = NOW()
+      WHERE target.client_unit_id = ?
+      `,
+      [
+        clientUnit.client_id,
+        clientUnitId,
+        req.user.id,
+        clientUnitId,
+      ]
+    )
+
+    const eligibilitySummary = await refreshCommissionEligibility(
       clientUnitId,
-      req.user.id,
-      clientUnitId
-    ]
-  )
+      connection
+    )
 
-  await createAuditLog({
-    userId: req.user.id,
-    action: 'document_check',
-    module: 'Client Documents',
-    description: `Applied reusable documents to client unit ${clientUnitId}`,
-    ipAddress: req.ip
-  })
+    await connection.commit()
 
-  res.status(200).json({
-    message: 'Reusable documents applied successfully'
-  })
+    await createAuditLog({
+      userId: req.user.id,
+      action: 'document_check',
+      module: 'Client Documents',
+      description: `Applied reusable documents to client unit ${clientUnitId}`,
+      ipAddress: getClientIp(req),
+    })
+
+    res.status(200).json({
+      message: 'Reusable documents applied successfully',
+      data: {
+        clientUnitId: Number(clientUnitId),
+        updatedDocuments: result.affectedRows,
+        eligibilitySummary,
+      },
+    })
+  } catch (err) {
+    await connection.rollback()
+    throw err
+  } finally {
+    connection.release()
+  }
 }
 
 export const getClientUnitDocumentStatus = async (req, res) => {
   const { clientUnitId } = req.params
+
   const clientUnit = await getClientUnitById(clientUnitId)
 
   if (!clientUnit) {
     return res.status(404).json({
-      message: 'Client unit not found'
+      message: 'Client unit not found',
     })
   }
 
   const [rows] = await db.query(
     `
     SELECT
-      COUNT(d.id) AS required_count,
-      COALESCE(SUM(
+      COUNT(d.id) AS total_documents,
+      SUM(CASE WHEN d.is_required = TRUE THEN 1 ELSE 0 END) AS required_documents,
+      SUM(CASE WHEN cdl.status = 'not_submitted' THEN 1 ELSE 0 END) AS not_submitted_count,
+      SUM(CASE WHEN cdl.status = 'submitted' THEN 1 ELSE 0 END) AS submitted_count,
+      SUM(CASE WHEN cdl.status = 'approved' THEN 1 ELSE 0 END) AS approved_count,
+      SUM(CASE WHEN cdl.status = 'rejected' THEN 1 ELSE 0 END) AS rejected_count,
+      SUM(
         CASE
-          WHEN cdl.status IN ('submitted', 'approved') THEN 1
+          WHEN d.is_required = TRUE
+            AND cdl.status IN ('submitted', 'approved')
+          THEN 1
           ELSE 0
         END
-      ), 0) AS submitted_required_count
-    FROM documents d
-    LEFT JOIN client_document_list cdl
-      ON cdl.document_id = d.id
-      AND cdl.client_unit_id = ?
-    WHERE d.is_required = TRUE
-      AND d.status = ?
+      ) AS submitted_required_count
+    FROM client_document_list cdl
+    INNER JOIN documents d ON d.id = cdl.document_id
+    WHERE cdl.client_unit_id = ?
     `,
-    [clientUnitId, 'active']
+    [clientUnitId]
   )
 
-  const counts = rows[0]
-  const requiredCount = Number(counts.required_count)
-  const submittedRequiredCount = Number(counts.submitted_required_count)
-  const missingRequiredCount = requiredCount - submittedRequiredCount
-  const documentStatus = requiredCount > 0 && submittedRequiredCount === requiredCount
-    ? 'complete'
-    : 'incomplete'
+  const summary = rows[0] || {}
+
+  const requiredDocuments = Number(summary.required_documents || 0)
+  const submittedRequiredCount = Number(summary.submitted_required_count || 0)
+
+  const documentStatus =
+    requiredDocuments > 0 && submittedRequiredCount >= requiredDocuments
+      ? 'complete'
+      : 'incomplete'
 
   res.status(200).json({
-    documentStatus,
-    requiredCount,
-    submittedRequiredCount,
-    missingRequiredCount
+    message: 'Client unit document status fetched successfully',
+    status: documentStatus,
+    summary: {
+      total_documents: Number(summary.total_documents || 0),
+      required_documents: requiredDocuments,
+      not_submitted_count: Number(summary.not_submitted_count || 0),
+      submitted_count: Number(summary.submitted_count || 0),
+      approved_count: Number(summary.approved_count || 0),
+      rejected_count: Number(summary.rejected_count || 0),
+      submitted_required_count: submittedRequiredCount,
+      document_status: documentStatus,
+    },
+    data: {
+      total_documents: Number(summary.total_documents || 0),
+      required_documents: requiredDocuments,
+      not_submitted_count: Number(summary.not_submitted_count || 0),
+      submitted_count: Number(summary.submitted_count || 0),
+      approved_count: Number(summary.approved_count || 0),
+      rejected_count: Number(summary.rejected_count || 0),
+      submitted_required_count: submittedRequiredCount,
+      document_status: documentStatus,
+    },
   })
 }

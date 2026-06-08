@@ -5,6 +5,7 @@ import {
   FiEdit2,
   FiPlus,
   FiSearch,
+  FiTrash2,
 } from "react-icons/fi"
 import Alert from "../components/ui/Alert"
 import Button from "../components/ui/Button"
@@ -102,7 +103,7 @@ const emptyFormData: PaymentFormData = {
 }
 
 const paymentTypes = [
-  "reservation",
+  "reservation_fee",
   "downpayment",
   "monthly",
   "legal_misc",
@@ -177,6 +178,19 @@ const updatePayment = async ({
       "Content-Type": "application/json",
     },
     body: JSON.stringify(formatPaymentPayload(paymentData)),
+  })
+
+  if (!response.ok) {
+    throw new Error(await getErrorMessage(response))
+  }
+
+  return response.json()
+}
+
+const deletePayment = async (id: number) => {
+  const response = await fetch(`${API_URL}/payments/${id}`, {
+    method: "DELETE",
+    credentials: "include",
   })
 
   if (!response.ok) {
@@ -267,6 +281,7 @@ const Payments = () => {
     queryClient.invalidateQueries({ queryKey: ["client-units"] })
     queryClient.invalidateQueries({ queryKey: ["commissions"] })
     queryClient.invalidateQueries({ queryKey: ["commission-summary"] })
+    queryClient.invalidateQueries({ queryKey: ["commission-releases"] })
     queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] })
     queryClient.invalidateQueries({ queryKey: ["reports"] })
   }
@@ -290,6 +305,14 @@ const Payments = () => {
       setEditFormData(emptyFormData)
       setEditClientUnitSearch("")
       setSuccessMessage("Payment updated successfully")
+    },
+  })
+
+  const deletePaymentMutation = useMutation({
+    mutationFn: deletePayment,
+    onSuccess: () => {
+      invalidateAfterPaymentChange()
+      setSuccessMessage("Payment deleted successfully")
     },
   })
 
@@ -408,9 +431,20 @@ const Payments = () => {
     })
   }
 
+  const handleDeletePayment = (payment: Payment) => {
+    const confirmed = window.confirm(
+      `Delete payment ${formatMoney(payment.amount)} for ${payment.client_name} - ${payment.unit_id}?`
+    )
+
+    if (!confirmed) return
+
+    deletePaymentMutation.mutate(payment.id)
+  }
+
   const mutationError =
     createPaymentMutation.error?.message ||
-    updatePaymentMutation.error?.message
+    updatePaymentMutation.error?.message ||
+    deletePaymentMutation.error?.message
 
   if (isLoading) {
     return <LoadingState label="Loading payments..." />
@@ -585,12 +619,25 @@ const Payments = () => {
                   <StatusBadge status={payment.status} />
                 </td>
                 <td className="px-4 py-3">
-                  <Button
-                    icon={<FiEdit2 />}
-                    onClick={() => openEditModal(payment)}
-                  >
-                    Edit
-                  </Button>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      icon={<FiEdit2 />}
+                      onClick={() => openEditModal(payment)}
+                    >
+                      Edit
+                    </Button>
+
+                    {payment.status !== "verified" ? (
+                      <Button
+                        icon={<FiTrash2 />}
+                        disabled={deletePaymentMutation.isPending}
+                        onClick={() => handleDeletePayment(payment)}
+                        variant="danger"
+                      >
+                        Delete
+                      </Button>
+                    ) : null}
+                  </div>
                 </td>
               </tr>
             ))}
@@ -720,9 +767,18 @@ const PaymentModal = ({
 
         {selectedClientUnit ? (
           <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
-            <MiniDetail label="TCP" value={formatMoney(selectedClientUnit.total_contract_price)} />
-            <MiniDetail label="Paid" value={formatMoney(selectedClientUnit.paid_amount)} />
-            <MiniDetail label="Balance" value={formatMoney(selectedClientUnit.balance)} />
+            <MiniDetail
+              label="TCP"
+              value={formatMoney(selectedClientUnit.total_contract_price)}
+            />
+            <MiniDetail
+              label="Paid"
+              value={formatMoney(selectedClientUnit.paid_amount)}
+            />
+            <MiniDetail
+              label="Balance"
+              value={formatMoney(selectedClientUnit.balance)}
+            />
             <MiniDetail
               label="Payment %"
               value={`${formatNumber(selectedClientUnit.payment_percentage || 0)}%`}
@@ -812,7 +868,8 @@ const PaymentModal = ({
         </div>
 
         <p className="text-sm text-slate-500">
-          Only verified payments affect collection percentage and commission release eligibility.
+          Only verified payments affect collection percentage and commission
+          release eligibility.
         </p>
       </div>
     </Modal>

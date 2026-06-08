@@ -5,7 +5,7 @@ import {
   createAccreditedSeller,
   updateAccreditedSeller,
   getSellerHierarchy,
-  getPossibleParentSellers
+  getPossibleParentSellers,
 } from '../controllers/accreditedSellers.controller.js'
 import { auth } from '../middlewares/auth.middleware.js'
 

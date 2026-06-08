@@ -75,6 +75,9 @@ type Commission = {
   eligible_amount: number | string
   released_amount: number | string
   cash_advance_deduction: number | string
+  cash_advance_amount: number | string
+  cash_advance_remaining: number | string
+  cash_advance_deducted: number | string
   remaining_amount: number | string
   total_released_percent: number | string
   first_release_amount: number | string
@@ -512,6 +515,35 @@ const groupCommissionsByClientUnit = (commissions: Commission[]) => {
   })
 }
 
+const CashAdvanceCell = ({
+  amount,
+  remaining,
+  deducted,
+}: {
+  amount: number | string
+  remaining: number | string
+  deducted: number | string
+}) => {
+  const hasCashAdvance =
+    Number(amount || 0) > 0 ||
+    Number(remaining || 0) > 0 ||
+    Number(deducted || 0) > 0
+
+  if (!hasCashAdvance) return <span>-</span>
+
+  return (
+    <>
+      <p>{formatMoney(amount || 0)}</p>
+      <p className="text-xs text-slate-500">
+        Rem: {formatMoney(remaining || 0)}
+      </p>
+      <p className="text-xs text-slate-500">
+        Deducted: {formatMoney(deducted || 0)}
+      </p>
+    </>
+  )
+}
+
 const Commissions = () => {
   const queryClient = useQueryClient()
 
@@ -571,6 +603,9 @@ const Commissions = () => {
   const invalidateCommissionQueries = () => {
     queryClient.invalidateQueries({ queryKey: ["commissions"] })
     queryClient.invalidateQueries({ queryKey: ["commission-summary"] })
+    queryClient.invalidateQueries({ queryKey: ["commission-releases"] })
+    queryClient.invalidateQueries({ queryKey: ["cash-advances"] })
+    queryClient.invalidateQueries({ queryKey: ["cash-advances-summary"] })
 
     if (viewCommissionId) {
       queryClient.invalidateQueries({
@@ -655,6 +690,7 @@ const Commissions = () => {
       commission.seller_name.toLowerCase().includes(search) ||
       (commission.commission_role || "").toLowerCase().includes(search) ||
       (commission.reports_under || "").toLowerCase().includes(search) ||
+      (commission.mode_of_payment || "").toLowerCase().includes(search) ||
       commission.sale_type.toLowerCase().includes(search) ||
       commission.source_type.toLowerCase().includes(search)
 
@@ -819,7 +855,7 @@ const Commissions = () => {
 
       <TableContainer>
         <div className="overflow-x-auto">
-          <table className="min-w-[3200px] text-sm">
+          <table className="min-w-[3400px] text-sm">
             <thead className="bg-slate-50">
               <tr className="border-b border-slate-200">
                 <th
@@ -829,7 +865,7 @@ const Commissions = () => {
                   Sale Details
                 </th>
                 <th
-                  colSpan={11}
+                  colSpan={12}
                   className="border-r border-slate-200 px-4 py-3 text-left text-slate-900"
                 >
                   Unit Manager / Main Seller Commission
@@ -864,8 +900,9 @@ const Commissions = () => {
                 <th className="px-4 py-3 text-left">4th Release 75%</th>
                 <th className="px-4 py-3 text-left">Retention 25%</th>
                 <th className="px-4 py-3 text-left">Received %</th>
+                <th className="px-4 py-3 text-left">Total Remaining</th>
                 <th className="border-r border-slate-200 px-4 py-3 text-left">
-                  Total Remaining
+                  Cash Advance
                 </th>
 
                 <th className="px-4 py-3 text-left">Agent’s Name</th>
@@ -902,7 +939,7 @@ const Commissions = () => {
                       {main.unit_id}
                     </td>
                     <td className="px-4 py-3 text-slate-600">
-                      {main.mode_of_payment || "-"}
+                      {formatText(main.mode_of_payment || "-")}
                     </td>
                     <td className="px-4 py-3 text-slate-600">
                       {formatNumber(main.lot_area_sqm)}
@@ -970,8 +1007,15 @@ const Commissions = () => {
                     <td className="px-4 py-3 text-slate-600">
                       {formatNumber(main.total_released_percent || 0)}%
                     </td>
-                    <td className="border-r border-slate-200 px-4 py-3 text-slate-600">
+                    <td className="px-4 py-3 text-slate-600">
                       {formatMoney(main.remaining_amount)}
+                    </td>
+                    <td className="border-r border-slate-200 px-4 py-3 text-slate-600">
+                      <CashAdvanceCell
+                        amount={main.cash_advance_amount || 0}
+                        remaining={main.cash_advance_remaining || 0}
+                        deducted={main.cash_advance_deducted || 0}
+                      />
                     </td>
 
                     <td className="px-4 py-3 text-slate-600">
@@ -1050,9 +1094,15 @@ const Commissions = () => {
                       {override ? formatMoney(override.remaining_amount) : "-"}
                     </td>
                     <td className="px-4 py-3 text-slate-600">
-                      {override
-                        ? formatMoney(override.cash_advance_deduction || 0)
-                        : "-"}
+                      {override ? (
+                        <CashAdvanceCell
+                          amount={override.cash_advance_amount || 0}
+                          remaining={override.cash_advance_remaining || 0}
+                          deducted={override.cash_advance_deducted || 0}
+                        />
+                      ) : (
+                        "-"
+                      )}
                     </td>
                     <td className="px-4 py-3 text-slate-600">
                       {override &&
@@ -1107,7 +1157,7 @@ const Commissions = () => {
 
               {paginatedGroups.length === 0 ? (
                 <tr>
-                  <td colSpan={33}>
+                  <td colSpan={34}>
                     <EmptyState
                       title="No commissions found"
                       description="Commissions are generated automatically when a listing is reserved."
@@ -1344,6 +1394,10 @@ const Commissions = () => {
                 <Detail label="Client" value={commissionDetails.client_name} />
                 <Detail label="Unit" value={commissionDetails.unit_id} />
                 <Detail label="Project" value={commissionDetails.project_name} />
+                <Detail
+                  label="Mode of Payment"
+                  value={formatText(commissionDetails.mode_of_payment || "-")}
+                />
                 <Detail label="Seller" value={commissionDetails.seller_name} />
                 <Detail
                   label="Type"
@@ -1364,6 +1418,22 @@ const Commissions = () => {
                 <Detail
                   label="Gross Commission"
                   value={formatMoney(commissionDetails.gross_commission)}
+                />
+                <Detail
+                  label="Cash Advance"
+                  value={formatMoney(commissionDetails.cash_advance_amount || 0)}
+                />
+                <Detail
+                  label="Cash Advance Remaining"
+                  value={formatMoney(
+                    commissionDetails.cash_advance_remaining || 0
+                  )}
+                />
+                <Detail
+                  label="Cash Advance Deducted"
+                  value={formatMoney(
+                    commissionDetails.cash_advance_deducted || 0
+                  )}
                 />
                 <Detail
                   label="Eligible"
@@ -1428,7 +1498,9 @@ const Commissions = () => {
                       <th className="px-4 py-3 text-left">Trigger</th>
                       <th className="px-4 py-3 text-left">Release %</th>
                       <th className="px-4 py-3 text-left">Gross Amount</th>
-                      <th className="px-4 py-3 text-left">Cash Advance Deduction</th>
+                      <th className="px-4 py-3 text-left">
+                        Cash Advance Deduction
+                      </th>
                       <th className="px-4 py-3 text-left">Net Amount</th>
                       <th className="px-4 py-3 text-left">Status</th>
                       <th className="px-4 py-3 text-left">Actions</th>
@@ -1561,7 +1633,9 @@ const Commissions = () => {
                         <th className="px-4 py-3 text-left">Release Stage</th>
                         <th className="px-4 py-3 text-left">Cash Advance</th>
                         <th className="px-4 py-3 text-left">Amount</th>
-                        <th className="px-4 py-3 text-left">Remaining Balance</th>
+                        <th className="px-4 py-3 text-left">
+                          Remaining Balance
+                        </th>
                         <th className="px-4 py-3 text-left">Created By</th>
                         <th className="px-4 py-3 text-left">Date</th>
                       </tr>

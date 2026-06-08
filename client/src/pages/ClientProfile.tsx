@@ -7,6 +7,7 @@ import {
   FiFileText,
   FiHome,
   FiPlus,
+  FiRefreshCw,
   FiUser,
 } from "react-icons/fi"
 import Alert from "../components/ui/Alert"
@@ -61,6 +62,7 @@ type ClientUnit = {
   paid_amount: number | string
   balance: number | string
   payment_percentage?: number | string
+  mode_of_payment?: string | null
   due_day: number | null
   status: string
   assigned_user_id: number | null
@@ -103,6 +105,23 @@ type Seller = {
   reports_under_display?: string | null
 }
 
+type ClientDocument = {
+  id: number
+  client_unit_id: number
+  document_id: number
+  name: string
+  description: string | null
+  is_required: number | boolean
+  can_reuse: number | boolean
+  file_url: string | null
+  status: "not_submitted" | "submitted" | "approved" | "rejected" | string
+  reviewed_by: number | null
+  reviewed_by_name: string | null
+  reviewed_at: string | null
+  created_at: string
+  updated_at: string
+}
+
 type ClientResponse = {
   client: Client
   data?: Client
@@ -127,11 +146,18 @@ type SellersResponse = {
   data?: Seller[]
 }
 
+type ClientDocumentsResponse = {
+  documents?: ClientDocument[]
+  clientDocuments?: ClientDocument[]
+  data?: ClientDocument[]
+}
+
 type ReserveListingData = {
   listing_id: number | ""
   seller_id: number | ""
   due_day: number | ""
   status: string
+  mode_of_payment: "cash" | "installment"
   sale_type: "distributed" | "direct"
   main_commission_rate_override: string
   override_seller_id: number | ""
@@ -146,6 +172,7 @@ type EditUnitData = {
   seller_id: string
   due_day: string
   status: string
+  mode_of_payment: "cash" | "installment"
   regenerate_commission: boolean
   main_commission_rate_override: string
   sale_type: "distributed" | "direct"
@@ -156,6 +183,7 @@ const defaultReserveData: ReserveListingData = {
   seller_id: "",
   due_day: "",
   status: "reserved",
+  mode_of_payment: "installment",
   sale_type: "distributed",
   main_commission_rate_override: "",
   override_seller_id: "",
@@ -170,6 +198,7 @@ const defaultEditUnitData: EditUnitData = {
   seller_id: "",
   due_day: "",
   status: "reserved",
+  mode_of_payment: "installment",
   regenerate_commission: false,
   main_commission_rate_override: "",
   sale_type: "distributed",
@@ -219,6 +248,19 @@ const fetchSellers = async () => {
   return data.accreditedSellers || data.sellers || data.data || []
 }
 
+const fetchClientDocuments = async (clientUnitId: number | null) => {
+  if (!clientUnitId) return []
+
+  const res = await fetch(`${API_URL}/client-units/${clientUnitId}/documents`, {
+    credentials: "include",
+  })
+
+  if (!res.ok) throw new Error(await getErrorMessage(res))
+
+  const data = (await res.json()) as ClientDocumentsResponse
+  return data.documents || data.clientDocuments || data.data || []
+}
+
 const reserveListing = async ({
   clientId,
   reserveData,
@@ -237,6 +279,7 @@ const reserveListing = async ({
       seller_id: reserveData.seller_id || null,
       due_day: reserveData.due_day || null,
       status: reserveData.status,
+      mode_of_payment: reserveData.mode_of_payment,
       sale_type: reserveData.sale_type,
       main_commission_rate_override:
         reserveData.main_commission_rate_override === ""
@@ -244,7 +287,9 @@ const reserveListing = async ({
           : Number(reserveData.main_commission_rate_override),
       override_seller_id: reserveData.override_seller_id || null,
       override_rate:
-        reserveData.override_rate === "" ? null : Number(reserveData.override_rate),
+        reserveData.override_rate === ""
+          ? null
+          : Number(reserveData.override_rate),
       override_notes: reserveData.override_notes || null,
       cash_kaliwaan_amount:
         reserveData.cash_kaliwaan_amount === ""
@@ -277,6 +322,7 @@ const updateClientUnit = async ({
       seller_id: unitData.seller_id ? Number(unitData.seller_id) : null,
       due_day: unitData.due_day ? Number(unitData.due_day) : null,
       status: unitData.status,
+      mode_of_payment: unitData.mode_of_payment,
       regenerate_commission: unitData.regenerate_commission,
       main_commission_rate_override:
         unitData.main_commission_rate_override === ""
@@ -285,6 +331,57 @@ const updateClientUnit = async ({
       sale_type: unitData.sale_type,
     }),
   })
+
+  if (!res.ok) throw new Error(await getErrorMessage(res))
+
+  return res.json()
+}
+
+const updateClientDocumentStatus = async ({
+  documentId,
+  status,
+}: {
+  documentId: number
+  status: "submitted" | "not_submitted"
+}) => {
+  const res = await fetch(`${API_URL}/client-documents/${documentId}/status`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      status,
+    }),
+  })
+
+  if (!res.ok) throw new Error(await getErrorMessage(res))
+
+  return res.json()
+}
+
+const createDocumentChecklist = async (clientUnitId: number) => {
+  const res = await fetch(
+    `${API_URL}/client-units/${clientUnitId}/documents/checklist`,
+    {
+      method: "POST",
+      credentials: "include",
+    }
+  )
+
+  if (!res.ok) throw new Error(await getErrorMessage(res))
+
+  return res.json()
+}
+
+const applyExistingReusableDocuments = async (clientUnitId: number) => {
+  const res = await fetch(
+    `${API_URL}/client-units/${clientUnitId}/documents/apply-existing`,
+    {
+      method: "POST",
+      credentials: "include",
+    }
+  )
 
   if (!res.ok) throw new Error(await getErrorMessage(res))
 
@@ -300,6 +397,14 @@ const getSellerRateLabel = (seller?: Seller | null) => {
   return `${formatNumber(seller.commission_rate)}%`
 }
 
+const isRequired = (value: number | boolean) => {
+  return value === true || value === 1
+}
+
+const isSubmitted = (status: string) => {
+  return status === "submitted" || status === "approved"
+}
+
 const ClientProfile = () => {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -313,6 +418,8 @@ const ClientProfile = () => {
   const [editUnit, setEditUnit] = useState<ClientUnit | null>(null)
   const [editUnitData, setEditUnitData] =
     useState<EditUnitData>(defaultEditUnitData)
+  const [selectedDocumentsUnit, setSelectedDocumentsUnit] =
+    useState<ClientUnit | null>(null)
   const [successMessage, setSuccessMessage] = useState("")
 
   const {
@@ -345,13 +452,31 @@ const ClientProfile = () => {
     queryFn: fetchSellers,
   })
 
+  const {
+    data: clientDocuments = [],
+    isLoading: areDocumentsLoading,
+    error: documentsError,
+  } = useQuery({
+    queryKey: ["client-unit-documents", selectedDocumentsUnit?.id || null],
+    queryFn: () => fetchClientDocuments(selectedDocumentsUnit?.id || null),
+    enabled: Boolean(selectedDocumentsUnit?.id),
+  })
+
   const invalidateClientProfile = () => {
     queryClient.invalidateQueries({ queryKey: ["client", clientId] })
     queryClient.invalidateQueries({ queryKey: ["client-units", clientId] })
+    queryClient.invalidateQueries({ queryKey: ["client-units"] })
     queryClient.invalidateQueries({ queryKey: ["available-listings"] })
     queryClient.invalidateQueries({ queryKey: ["listings"] })
     queryClient.invalidateQueries({ queryKey: ["commissions"] })
     queryClient.invalidateQueries({ queryKey: ["commission-summary"] })
+    queryClient.invalidateQueries({ queryKey: ["commission-releases"] })
+
+    if (selectedDocumentsUnit?.id) {
+      queryClient.invalidateQueries({
+        queryKey: ["client-unit-documents", selectedDocumentsUnit.id],
+      })
+    }
   }
 
   const reserveMutation = useMutation({
@@ -370,6 +495,30 @@ const ClientProfile = () => {
       invalidateClientProfile()
       setEditUnit(null)
       setSuccessMessage("Client unit updated successfully")
+    },
+  })
+
+  const updateDocumentMutation = useMutation({
+    mutationFn: updateClientDocumentStatus,
+    onSuccess: () => {
+      invalidateClientProfile()
+      setSuccessMessage("Document checklist updated successfully")
+    },
+  })
+
+  const createChecklistMutation = useMutation({
+    mutationFn: createDocumentChecklist,
+    onSuccess: () => {
+      invalidateClientProfile()
+      setSuccessMessage("Document checklist created successfully")
+    },
+  })
+
+  const applyReusableMutation = useMutation({
+    mutationFn: applyExistingReusableDocuments,
+    onSuccess: () => {
+      invalidateClientProfile()
+      setSuccessMessage("Reusable documents applied successfully")
     },
   })
 
@@ -400,10 +549,17 @@ const ClientProfile = () => {
       seller_id: unit.seller_id ? String(unit.seller_id) : "",
       due_day: unit.due_day ? String(unit.due_day) : "",
       status: unit.status || "reserved",
+      mode_of_payment:
+        unit.mode_of_payment === "cash" ? "cash" : "installment",
       regenerate_commission: false,
       main_commission_rate_override: "",
       sale_type: "distributed",
     })
+  }
+
+  const openDocumentsModal = (unit: ClientUnit) => {
+    setSelectedDocumentsUnit(unit)
+    setSuccessMessage("")
   }
 
   const handleReserveListing = () => {
@@ -422,6 +578,28 @@ const ClientProfile = () => {
     })
   }
 
+  const handleDocumentChecklistToggle = (
+    document: ClientDocument,
+    checked: boolean
+  ) => {
+    updateDocumentMutation.mutate({
+      documentId: document.id,
+      status: checked ? "submitted" : "not_submitted",
+    })
+  }
+
+  const submittedDocumentCount = clientDocuments.filter((document) =>
+    isSubmitted(document.status)
+  ).length
+
+  const requiredDocumentCount = clientDocuments.filter((document) =>
+    isRequired(document.is_required)
+  ).length
+
+  const submittedRequiredDocumentCount = clientDocuments.filter(
+    (document) => isRequired(document.is_required) && isSubmitted(document.status)
+  ).length
+
   const totalTcp = useMemo(() => {
     return clientUnits.reduce(
       (sum, unit) => sum + Number(unit.total_contract_price || 0),
@@ -439,7 +617,11 @@ const ClientProfile = () => {
   const totalBalance = Math.max(totalTcp - totalPaid, 0)
 
   const mutationError =
-    reserveMutation.error?.message || updateUnitMutation.error?.message
+    reserveMutation.error?.message ||
+    updateUnitMutation.error?.message ||
+    updateDocumentMutation.error?.message ||
+    createChecklistMutation.error?.message ||
+    applyReusableMutation.error?.message
 
   if (isClientLoading || areUnitsLoading) {
     return <LoadingState label="Loading client profile..." />
@@ -454,7 +636,7 @@ const ClientProfile = () => {
       <PageHeader
         icon={<FiUser />}
         title="Client Profile"
-        subtitle="View client details, reserved units, documents, and commission setup."
+        subtitle="View client details, reserved units, document checklist, and commission setup."
         actions={
           <div className="flex flex-wrap gap-2">
             <Button icon={<FiArrowLeft />} onClick={() => navigate("/clients")}>
@@ -527,8 +709,8 @@ const ClientProfile = () => {
                 <tr className="border-b border-slate-200">
                   <th className="px-4 py-3 text-left">Unit</th>
                   <th className="px-4 py-3 text-left">Project</th>
+                  <th className="px-4 py-3 text-left">MOP</th>
                   <th className="px-4 py-3 text-left">Lot Type</th>
-                  <th className="px-4 py-3 text-left">Area</th>
                   <th className="px-4 py-3 text-left">TCP</th>
                   <th className="px-4 py-3 text-left">Paid</th>
                   <th className="px-4 py-3 text-left">Payment %</th>
@@ -551,10 +733,10 @@ const ClientProfile = () => {
                       {unit.project_name}
                     </td>
                     <td className="px-4 py-3 text-slate-600">
-                      {formatText(unit.lot_type)}
+                      {formatText(unit.mode_of_payment || "-")}
                     </td>
                     <td className="px-4 py-3 text-slate-600">
-                      {formatNumber(unit.lot_area_sqm)}
+                      {formatText(unit.lot_type)}
                     </td>
                     <td className="px-4 py-3 text-slate-600">
                       {formatMoney(unit.total_contract_price)}
@@ -591,12 +773,20 @@ const ClientProfile = () => {
                       <StatusBadge status={unit.status} />
                     </td>
                     <td className="px-4 py-3">
-                      <Button
-                        icon={<FiEdit2 />}
-                        onClick={() => openEditUnitModal(unit)}
-                      >
-                        Edit
-                      </Button>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          icon={<FiFileText />}
+                          onClick={() => openDocumentsModal(unit)}
+                        >
+                          Docs
+                        </Button>
+                        <Button
+                          icon={<FiEdit2 />}
+                          onClick={() => openEditUnitModal(unit)}
+                        >
+                          Edit
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -673,6 +863,22 @@ const ClientProfile = () => {
                 </Select>
 
                 <Select
+                  label="Mode of Payment"
+                  value={reserveData.mode_of_payment}
+                  onChange={(e) =>
+                    setReserveData({
+                      ...reserveData,
+                      mode_of_payment: e.target.value as
+                        | "cash"
+                        | "installment",
+                    })
+                  }
+                >
+                  <option value="installment">Installment</option>
+                  <option value="cash">Cash</option>
+                </Select>
+
+                <Select
                   label="Distributed / Direct"
                   value={reserveData.sale_type}
                   onChange={(e) =>
@@ -718,7 +924,7 @@ const ClientProfile = () => {
                       main_commission_rate_override: e.target.value,
                     })
                   }
-                  placeholder="Optional. Uses seller/system default if blank."
+                  placeholder="Optional"
                 />
 
                 <Input
@@ -898,46 +1104,6 @@ const ClientProfile = () => {
                 />
               </div>
             </section>
-
-            {selectedListing ? (
-              <section>
-                <h3 className="mb-3 text-base font-bold text-slate-900">
-                  Selected Listing Summary
-                </h3>
-
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
-                  <MiniDetail label="Unit" value={selectedListing.unit_id} />
-                  <MiniDetail
-                    label="Lot Type"
-                    value={formatText(selectedListing.lot_type)}
-                  />
-                  <MiniDetail
-                    label="Area"
-                    value={formatNumber(selectedListing.lot_area_sqm)}
-                  />
-                  <MiniDetail
-                    label="Price / SQM"
-                    value={formatMoney(selectedListing.price_per_sqm)}
-                  />
-                  <MiniDetail
-                    label="Net Selling Price"
-                    value={formatMoney(selectedListing.net_selling_price)}
-                  />
-                  <MiniDetail
-                    label="LMF"
-                    value={formatMoney(selectedListing.legal_misc_fee)}
-                  />
-                  <MiniDetail
-                    label="Reservation Fee"
-                    value={formatMoney(selectedListing.reservation_fee)}
-                  />
-                  <MiniDetail
-                    label="TCP"
-                    value={formatMoney(selectedListing.total_contract_price)}
-                  />
-                </div>
-              </section>
-            ) : null}
           </div>
         </Modal>
       ) : null}
@@ -977,6 +1143,20 @@ const ClientProfile = () => {
                   {seller.full_name} - {formatText(seller.seller_role)}
                 </option>
               ))}
+            </Select>
+
+            <Select
+              label="Mode of Payment"
+              value={editUnitData.mode_of_payment}
+              onChange={(e) =>
+                setEditUnitData({
+                  ...editUnitData,
+                  mode_of_payment: e.target.value as "cash" | "installment",
+                })
+              }
+            >
+              <option value="installment">Installment</option>
+              <option value="cash">Cash</option>
             </Select>
 
             <Input
@@ -1058,6 +1238,159 @@ const ClientProfile = () => {
           <p className="mt-3 text-sm text-slate-500">
             Seller/rate cannot be changed if a commission release was already paid.
           </p>
+        </Modal>
+      ) : null}
+
+      {selectedDocumentsUnit ? (
+        <Modal
+          title={`Document Checklist - ${selectedDocumentsUnit.unit_id}`}
+          onClose={() => setSelectedDocumentsUnit(null)}
+          size="xl"
+          footer={
+            <div className="flex justify-between gap-2">
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  icon={<FiRefreshCw />}
+                  disabled={createChecklistMutation.isPending}
+                  onClick={() =>
+                    createChecklistMutation.mutate(selectedDocumentsUnit.id)
+                  }
+                >
+                  Create Checklist
+                </Button>
+                <Button
+                  disabled={applyReusableMutation.isPending}
+                  onClick={() =>
+                    applyReusableMutation.mutate(selectedDocumentsUnit.id)
+                  }
+                >
+                  Apply Reusable Docs
+                </Button>
+              </div>
+
+              <Button onClick={() => setSelectedDocumentsUnit(null)}>
+                Close
+              </Button>
+            </div>
+          }
+        >
+          {areDocumentsLoading ? (
+            <LoadingState label="Loading document checklist..." />
+          ) : null}
+
+          {documentsError ? (
+            <Alert variant="error" title="Failed to load document checklist" />
+          ) : null}
+
+          {!areDocumentsLoading && clientDocuments.length === 0 ? (
+            <EmptyState
+              title="No checklist found"
+              description="Create a checklist for this client unit."
+              action={
+                <Button
+                  icon={<FiRefreshCw />}
+                  disabled={createChecklistMutation.isPending}
+                  onClick={() =>
+                    createChecklistMutation.mutate(selectedDocumentsUnit.id)
+                  }
+                  variant="primary"
+                >
+                  Create Checklist
+                </Button>
+              }
+            />
+          ) : null}
+
+          {clientDocuments.length > 0 ? (
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                <MiniDetail
+                  label="Submitted Docs"
+                  value={`${submittedDocumentCount} / ${clientDocuments.length}`}
+                />
+                <MiniDetail
+                  label="Required Submitted"
+                  value={`${submittedRequiredDocumentCount} / ${requiredDocumentCount}`}
+                />
+                <MiniDetail
+                  label="Checklist Status"
+                  value={
+                    requiredDocumentCount > 0 &&
+                    submittedRequiredDocumentCount >= requiredDocumentCount
+                      ? "Complete"
+                      : "Incomplete"
+                  }
+                />
+              </div>
+
+              <TableContainer>
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50">
+                    <tr className="border-b border-slate-200">
+                      <th className="px-4 py-3 text-left">Submitted</th>
+                      <th className="px-4 py-3 text-left">Document</th>
+                      <th className="px-4 py-3 text-left">Required</th>
+                      <th className="px-4 py-3 text-left">Reusable</th>
+                      <th className="px-4 py-3 text-left">Status</th>
+                      <th className="px-4 py-3 text-left">Updated</th>
+                    </tr>
+                  </thead>
+
+                  <tbody>
+                    {clientDocuments.map((document) => (
+                      <tr key={document.id} className="border-b border-slate-100">
+                        <td className="px-4 py-3">
+                          <input
+                            type="checkbox"
+                            checked={isSubmitted(document.status)}
+                            disabled={updateDocumentMutation.isPending}
+                            onChange={(e) =>
+                              handleDocumentChecklistToggle(
+                                document,
+                                e.target.checked
+                              )
+                            }
+                            className="h-5 w-5"
+                          />
+                        </td>
+
+                        <td className="px-4 py-3">
+                          <p className="font-semibold text-slate-900">
+                            {document.name}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            {document.description || "-"}
+                          </p>
+                        </td>
+
+                        <td className="px-4 py-3 text-slate-600">
+                          {isRequired(document.is_required) ? "Yes" : "No"}
+                        </td>
+
+                        <td className="px-4 py-3 text-slate-600">
+                          {isRequired(document.can_reuse) ? "Yes" : "No"}
+                        </td>
+
+                        <td className="px-4 py-3">
+                          <StatusBadge
+                            status={
+                              isSubmitted(document.status)
+                                ? "submitted"
+                                : "not_submitted"
+                            }
+                          />
+                        </td>
+
+                        <td className="px-4 py-3 text-slate-600">
+                          {formatDate(document.updated_at)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </TableContainer>
+            </div>
+          ) : null}
         </Modal>
       ) : null}
     </div>

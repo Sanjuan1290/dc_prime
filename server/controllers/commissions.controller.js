@@ -23,23 +23,6 @@ const calculateGrossCommission = (commissionBase, rate) => {
   return normalizeMoney(normalizeMoney(commissionBase) * (normalizeRate(rate) / 100))
 }
 
-const getReleaseStageOrder = (stage) => {
-  switch (stage) {
-    case '1st_release':
-      return 1
-    case '2nd_release':
-      return 2
-    case '3rd_release':
-      return 3
-    case '4th_release':
-      return 4
-    case 'retention':
-      return 5
-    default:
-      return 99
-  }
-}
-
 const commissionFields = `
   cm.id,
   cm.client_unit_id,
@@ -58,7 +41,7 @@ const commissionFields = `
   client.full_name AS client_name,
   listing.unit_id,
   project.name AS project_name,
-  '-' AS mode_of_payment,
+  COALESCE(cu.mode_of_payment, '-') AS mode_of_payment,
   listing.lot_area_sqm,
   listing.price_per_sqm,
   listing.net_selling_price,
@@ -70,6 +53,9 @@ const commissionFields = `
   COALESCE(release_summary.eligible_amount, 0) AS eligible_amount,
   COALESCE(release_summary.released_amount, 0) AS released_amount,
   COALESCE(release_summary.cash_advance_deduction, 0) AS cash_advance_deduction,
+  COALESCE(cash_advance_summary.cash_advance_amount, 0) AS cash_advance_amount,
+  COALESCE(cash_advance_summary.cash_advance_remaining, 0) AS cash_advance_remaining,
+  COALESCE(cash_advance_summary.cash_advance_deducted, 0) AS cash_advance_deducted,
   GREATEST(cm.gross_commission - COALESCE(release_summary.released_amount, 0), 0) AS remaining_amount,
   COALESCE(release_summary.total_released_percent, 0) AS total_released_percent,
   COALESCE(release_summary.first_release_amount, 0) AS first_release_amount,
@@ -147,6 +133,37 @@ const commissionJoins = `
     INNER JOIN listings l ON l.id = cu2.listing_id
     GROUP BY p.client_unit_id
   ) payment_summary ON payment_summary.client_unit_id = cm.client_unit_id
+  LEFT JOIN (
+    SELECT
+      base.commission_id,
+      SUM(base.amount) AS cash_advance_amount,
+      SUM(base.remaining_balance) AS cash_advance_remaining,
+      SUM(base.amount - base.remaining_balance) AS cash_advance_deducted
+    FROM (
+      SELECT
+        ca.commission_id,
+        ca.amount,
+        ca.remaining_balance
+      FROM cash_advances ca
+      WHERE ca.commission_id IS NOT NULL
+        AND ca.status IN ('approved', 'partially_deducted', 'deducted')
+
+      UNION ALL
+
+      SELECT
+        cm2.id AS commission_id,
+        ca.amount,
+        ca.remaining_balance
+      FROM cash_advances ca
+      INNER JOIN commissions cm2
+        ON cm2.client_unit_id = ca.client_unit_id
+        AND cm2.seller_id = ca.seller_id
+      WHERE ca.commission_id IS NULL
+        AND ca.client_unit_id IS NOT NULL
+        AND ca.status IN ('approved', 'partially_deducted', 'deducted')
+    ) base
+    GROUP BY base.commission_id
+  ) cash_advance_summary ON cash_advance_summary.commission_id = cm.id
 `
 
 const getDefaultCommissionRate = async (connectionOrDb = db) => {
@@ -454,7 +471,15 @@ export const refreshCommissionEligibility = async (
         l.net_selling_price,
         0
       ) AS total_contract_price,
-      COALESCE(SUM(CASE WHEN p.status = 'verified' THEN p.amount ELSE 0 END), 0) AS total_paid
+      COALESCE(
+        SUM(
+          CASE
+            WHEN p.status = 'verified' THEN p.amount
+            ELSE 0
+          END
+        ),
+        0
+      ) AS total_paid
     FROM client_units cu
     INNER JOIN listings l ON l.id = cu.listing_id
     LEFT JOIN payments p ON p.client_unit_id = cu.id
@@ -469,6 +494,9 @@ export const refreshCommissionEligibility = async (
   if (!paymentInfo) {
     return {
       paymentPercentage: 0,
+      totalPaid: 0,
+      totalContractPrice: 0,
+      demotedReleaseCount: 0,
       updatedReleaseCount: 0,
       retentionUpdated: false,
     }
@@ -476,10 +504,25 @@ export const refreshCommissionEligibility = async (
 
   const totalContractPrice = normalizeMoney(paymentInfo.total_contract_price)
   const totalPaid = normalizeMoney(paymentInfo.total_paid)
+
   const paymentPercentage =
     totalContractPrice > 0
       ? normalizeRate((totalPaid / totalContractPrice) * 100)
       : 0
+
+  const [demotionResult] = await connectionOrDb.query(
+    `
+    UPDATE commission_releases cr
+    INNER JOIN commissions cm ON cm.id = cr.commission_id
+    SET cr.status = 'pending'
+    WHERE cm.client_unit_id = ?
+      AND cr.status = 'eligible'
+      AND cr.release_stage <> 'retention'
+      AND cr.trigger_payment_percent IS NOT NULL
+      AND ? < cr.trigger_payment_percent
+    `,
+    [clientUnitId, paymentPercentage]
+  )
 
   const [eligibleResult] = await connectionOrDb.query(
     `
@@ -520,6 +563,20 @@ export const refreshCommissionEligibility = async (
     )
 
     retentionUpdated = retentionResult.affectedRows > 0
+  } else {
+    const [retentionResult] = await connectionOrDb.query(
+      `
+      UPDATE commission_releases cr
+      INNER JOIN commissions cm ON cm.id = cr.commission_id
+      SET cr.status = 'pending'
+      WHERE cm.client_unit_id = ?
+        AND cr.status = 'eligible'
+        AND cr.release_stage = 'retention'
+      `,
+      [clientUnitId]
+    )
+
+    retentionUpdated = retentionResult.affectedRows > 0
   }
 
   const [commissionRows] = await connectionOrDb.query(
@@ -537,6 +594,9 @@ export const refreshCommissionEligibility = async (
 
   return {
     paymentPercentage,
+    totalPaid,
+    totalContractPrice,
+    demotedReleaseCount: demotionResult.affectedRows,
     updatedReleaseCount: eligibleResult.affectedRows,
     retentionUpdated,
   }
@@ -1186,6 +1246,7 @@ export const markReleaseStage = async (req, res) => {
       INNER JOIN commissions cm ON cm.id = cr.commission_id
       WHERE cr.id = ?
       LIMIT 1
+      FOR UPDATE
       `,
       [releaseId]
     )
@@ -1194,17 +1255,26 @@ export const markReleaseStage = async (req, res) => {
 
     if (!release) {
       await connection.rollback()
-      return res.status(404).json({ message: 'Release not found' })
+      return res.status(404).json({
+        message: 'Release not found',
+      })
+    }
+
+    if (release.status === 'released') {
+      await connection.rollback()
+      return res.status(400).json({
+        message: 'This release has already been marked as released.',
+      })
     }
 
     if (release.status !== 'eligible') {
       await connection.rollback()
       return res.status(400).json({
-        message: 'Only eligible releases can be marked as released',
+        message: 'Only eligible releases can be marked as released.',
       })
     }
 
-    await connection.query(
+    const [updateResult] = await connection.query(
       `
       UPDATE commission_releases
       SET
@@ -1213,9 +1283,18 @@ export const markReleaseStage = async (req, res) => {
         released_by = ?,
         notes = ?
       WHERE id = ?
+        AND status = 'eligible'
       `,
       [req.user.id, nullableValue(notes), releaseId]
     )
+
+    if (updateResult.affectedRows === 0) {
+      await connection.rollback()
+      return res.status(400).json({
+        message:
+          'Release could not be marked as released. It may have already been processed.',
+      })
+    }
 
     await refreshCommissionStatus(connection, release.commission_id)
 
@@ -1231,7 +1310,10 @@ export const markReleaseStage = async (req, res) => {
 
     return res.status(200).json({
       message: 'Release marked as released successfully',
-      data: { releaseId: Number(releaseId) },
+      data: {
+        releaseId: Number(releaseId),
+        commissionId: release.commission_id,
+      },
     })
   } catch (err) {
     await connection.rollback()
@@ -1243,11 +1325,7 @@ export const markReleaseStage = async (req, res) => {
 
 export const deductCashAdvance = async (req, res) => {
   const { id: releaseId } = req.params
-  const {
-    cash_advance_id,
-    amount,
-    notes,
-  } = req.body
+  const { cash_advance_id, amount, notes } = req.body
 
   const deductionAmount = normalizeMoney(amount)
 

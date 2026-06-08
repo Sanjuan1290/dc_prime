@@ -2,7 +2,8 @@ import { db } from '../db/connect.js'
 import { createAuditLog } from '../utils/createAuditLog.js'
 import { getClientIp } from '../utils/getClientIp.js'
 
-const sellerRoles = ['broker_network_manager', 'broker', 'agent']
+const allowedSellerRoles = ['broker_network_manager', 'broker', 'agent']
+const allowedStatuses = ['active', 'inactive']
 
 const isMissing = (value) => {
   return value === undefined || value === null || value === ''
@@ -13,48 +14,42 @@ const nullableValue = (value) => {
   return value
 }
 
-const normalizeSellerRole = (role) => {
-  if (isMissing(role)) return 'agent'
-  return String(role)
+const normalizeRate = (value) => {
+  if (isMissing(value)) return null
+  return Number(Number(value).toFixed(2))
 }
 
-const validateSellerRole = (role) => {
-  return sellerRoles.includes(role)
+const normalizeMoney = (value) => {
+  return Number(Number(value || 0).toFixed(2))
 }
 
 const sellerFields = `
   seller.id,
   seller.user_id,
+  user.full_name AS user_full_name,
   seller.full_name,
   seller.email,
   seller.contact_no,
   seller.seller_role,
-  seller.commission_rate,
   seller.parent_seller_id,
   parent.full_name AS parent_seller_name,
-  parent.seller_role AS parent_seller_role,
   seller.custom_reports_under,
   COALESCE(parent.full_name, seller.custom_reports_under, 'None') AS reports_under_display,
   seller.status,
   seller.accreditation_date,
+  seller.commission_rate,
   seller.created_at,
   seller.updated_at
 `
 
 const sellerJoins = `
   FROM accredited_sellers seller
-  LEFT JOIN accredited_sellers parent
-    ON parent.id = seller.parent_seller_id
+  LEFT JOIN users user ON user.id = seller.user_id
+  LEFT JOIN accredited_sellers parent ON parent.id = seller.parent_seller_id
 `
 
-const mapSeller = (seller) => ({
-  ...seller,
-  reports_under_display:
-    seller.parent_seller_name || seller.custom_reports_under || 'None',
-})
-
-const getSellerById = async (id) => {
-  const [rows] = await db.query(
+const getSellerById = async (sellerId, connectionOrDb = db) => {
+  const [rows] = await connectionOrDb.query(
     `
     SELECT
       ${sellerFields}
@@ -62,64 +57,139 @@ const getSellerById = async (id) => {
     WHERE seller.id = ?
     LIMIT 1
     `,
-    [id]
+    [sellerId]
   )
 
-  return rows[0] ? mapSeller(rows[0]) : null
+  return rows[0] || null
 }
 
-const validateParentSeller = async ({ sellerId = null, parentSellerId }) => {
-  if (isMissing(parentSellerId)) {
-    return {
-      isValid: true,
-      message: null,
-    }
-  }
+const validateSellerRole = (sellerRole) => {
+  if (isMissing(sellerRole)) return 'agent'
+  if (!allowedSellerRoles.includes(sellerRole)) return null
+  return sellerRole
+}
 
-  if (sellerId && Number(sellerId) === Number(parentSellerId)) {
+const validateStatus = (status) => {
+  if (isMissing(status)) return 'active'
+  if (!allowedStatuses.includes(status)) return null
+  return status
+}
+
+const validateParentSeller = async ({
+  connectionOrDb = db,
+  sellerId = null,
+  parentSellerId,
+}) => {
+  if (isMissing(parentSellerId)) return null
+
+  if (!isMissing(sellerId) && Number(sellerId) === Number(parentSellerId)) {
     return {
       isValid: false,
       message: 'Seller cannot report under themselves',
     }
   }
 
-  const [rows] = await db.query(
-    `
-    SELECT id
-    FROM accredited_sellers
-    WHERE id = ?
-      AND status = 'active'
-    LIMIT 1
-    `,
-    [parentSellerId]
-  )
+  const parentSeller = await getSellerById(parentSellerId, connectionOrDb)
 
-  if (rows.length === 0) {
+  if (!parentSeller) {
     return {
       isValid: false,
-      message: 'Reports under seller not found or inactive',
+      message: 'Parent seller not found',
     }
   }
 
-  return {
-    isValid: true,
-    message: null,
+  if (parentSeller.status !== 'active') {
+    return {
+      isValid: false,
+      message: 'Parent seller is inactive',
+    }
   }
+
+  return null
 }
 
-const buildReportsUnderValues = ({ parent_seller_id, custom_reports_under }) => {
-  const hasCustomReportsUnder = !isMissing(custom_reports_under)
+const syncOpenCommissionsForSellerRate = async ({
+  connection,
+  sellerId,
+  commissionRate,
+}) => {
+  const finalRate = normalizeRate(commissionRate)
 
-  if (hasCustomReportsUnder) {
+  if (isMissing(sellerId) || finalRate === null) {
     return {
-      parentSellerId: null,
-      customReportsUnder: String(custom_reports_under).trim(),
+      updatedCommissions: 0,
+      updatedReleases: 0,
     }
   }
 
+  const [commissionRows] = await connection.query(
+    `
+    SELECT
+      cm.id,
+      cm.client_unit_id,
+      cm.commission_base
+    FROM commissions cm
+    WHERE cm.seller_id = ?
+      AND cm.status IN ('active', 'partially_released', 'on_hold')
+      AND NOT EXISTS (
+        SELECT 1
+        FROM commission_releases cr
+        WHERE cr.commission_id = cm.id
+          AND cr.status = 'released'
+      )
+    `,
+    [sellerId]
+  )
+
+  let updatedReleases = 0
+
+  for (const commission of commissionRows) {
+    const nextGrossCommission = normalizeMoney(
+      normalizeMoney(commission.commission_base) * (finalRate / 100)
+    )
+
+    await connection.query(
+      `
+      UPDATE commissions
+      SET
+        rate = ?,
+        gross_commission = ?,
+        amount = ?
+      WHERE id = ?
+      `,
+      [
+        finalRate,
+        nextGrossCommission,
+        nextGrossCommission,
+        commission.id,
+      ]
+    )
+
+    const [releaseResult] = await connection.query(
+      `
+      UPDATE commission_releases
+      SET
+        gross_release_amount = ROUND(? * (release_percent / 100), 2),
+        net_release_amount = GREATEST(
+          ROUND(? * (release_percent / 100), 2) - cash_advance_deduction,
+          0
+        )
+      WHERE commission_id = ?
+        AND status IN ('pending', 'eligible', 'on_hold')
+      `,
+      [
+        nextGrossCommission,
+        nextGrossCommission,
+        commission.id,
+      ]
+    )
+
+    updatedReleases += releaseResult.affectedRows
+  }
+
   return {
-    parentSellerId: nullableValue(parent_seller_id),
-    customReportsUnder: null,
+    updatedCommissions: commissionRows.length,
+    updatedReleases,
   }
 }
 
@@ -168,7 +238,7 @@ export const getAccreditedSellers = async (req, res) => {
   const whereClause =
     conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
 
-  const [rows] = await db.query(
+  const [sellers] = await db.query(
     `
     SELECT
       ${sellerFields}
@@ -180,7 +250,10 @@ export const getAccreditedSellers = async (req, res) => {
   )
 
   res.status(200).json({
-    accreditedSellers: rows.map(mapSeller),
+    message: 'Accredited sellers fetched successfully',
+    accreditedSellers: sellers,
+    sellers,
+    data: sellers,
   })
 }
 
@@ -196,7 +269,10 @@ export const getAccreditedSeller = async (req, res) => {
   }
 
   res.status(200).json({
+    message: 'Accredited seller fetched successfully',
+    seller,
     accreditedSeller: seller,
+    data: seller,
   })
 }
 
@@ -209,81 +285,100 @@ export const createAccreditedSeller = async (req, res) => {
     seller_role,
     parent_seller_id,
     custom_reports_under,
-    status = 'active',
+    status,
     accreditation_date,
     commission_rate,
   } = req.body
 
   if (isMissing(full_name)) {
     return res.status(400).json({
-      message: 'Seller full name is required',
+      message: 'Full name is required',
     })
   }
 
-  const finalSellerRole = normalizeSellerRole(seller_role)
+  const finalSellerRole = validateSellerRole(seller_role)
 
-  if (!validateSellerRole(finalSellerRole)) {
+  if (!finalSellerRole) {
     return res.status(400).json({
       message: 'Invalid seller role',
     })
   }
 
-  const { parentSellerId, customReportsUnder } = buildReportsUnderValues({
-    parent_seller_id,
-    custom_reports_under,
-  })
+  const finalStatus = validateStatus(status)
+
+  if (!finalStatus) {
+    return res.status(400).json({
+      message: 'Invalid seller status',
+    })
+  }
 
   const parentValidation = await validateParentSeller({
-    parentSellerId,
+    parentSellerId: parent_seller_id,
   })
 
-  if (!parentValidation.isValid) {
+  if (parentValidation && !parentValidation.isValid) {
     return res.status(400).json({
       message: parentValidation.message,
     })
   }
 
-  const [result] = await db.query(
-    `
-    INSERT INTO accredited_sellers (
-      user_id,
-      full_name,
-      email,
-      contact_no,
-      seller_role,
-      parent_seller_id,
-      custom_reports_under,
-      status,
-      accreditation_date,
-      commission_rate
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `,
-    [
-      nullableValue(user_id),
-      full_name,
-      nullableValue(email),
-      nullableValue(contact_no),
-      finalSellerRole,
-      parentSellerId,
-      customReportsUnder,
-      status,
-      nullableValue(accreditation_date),
-      nullableValue(commission_rate),
-    ]
-  )
+  const connection = await db.getConnection()
 
-  await createAuditLog({
-    userId: req.user.id,
-    action: 'create',
-    module: 'Accredited Sellers',
-    description: `Created accredited seller ${full_name}`,
-    ipAddress: getClientIp(req),
-  })
+  try {
+    await connection.beginTransaction()
 
-  res.status(201).json({
-    message: 'Accredited seller created successfully',
-    sellerId: result.insertId,
-  })
+    const [result] = await connection.query(
+      `
+      INSERT INTO accredited_sellers (
+        user_id,
+        full_name,
+        email,
+        contact_no,
+        seller_role,
+        parent_seller_id,
+        custom_reports_under,
+        status,
+        accreditation_date,
+        commission_rate
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        nullableValue(user_id),
+        full_name,
+        nullableValue(email),
+        nullableValue(contact_no),
+        finalSellerRole,
+        nullableValue(parent_seller_id),
+        nullableValue(custom_reports_under),
+        finalStatus,
+        nullableValue(accreditation_date),
+        normalizeRate(commission_rate),
+      ]
+    )
+
+    await connection.commit()
+
+    await createAuditLog({
+      userId: req.user.id,
+      action: 'create',
+      module: 'Accredited Sellers',
+      description: `Created accredited seller ${full_name}`,
+      ipAddress: getClientIp(req),
+    })
+
+    res.status(201).json({
+      message: 'Accredited seller created successfully',
+      sellerId: result.insertId,
+      data: {
+        sellerId: result.insertId,
+      },
+    })
+  } catch (err) {
+    await connection.rollback()
+    throw err
+  } finally {
+    connection.release()
+  }
 }
 
 export const updateAccreditedSeller = async (req, res) => {
@@ -297,14 +392,14 @@ export const updateAccreditedSeller = async (req, res) => {
     seller_role,
     parent_seller_id,
     custom_reports_under,
-    status = 'active',
+    status,
     accreditation_date,
     commission_rate,
   } = req.body
 
   if (isMissing(full_name)) {
     return res.status(400).json({
-      message: 'Seller full name is required',
+      message: 'Full name is required',
     })
   }
 
@@ -316,146 +411,196 @@ export const updateAccreditedSeller = async (req, res) => {
     })
   }
 
-  const finalSellerRole = normalizeSellerRole(seller_role)
+  const finalSellerRole = validateSellerRole(seller_role)
 
-  if (!validateSellerRole(finalSellerRole)) {
+  if (!finalSellerRole) {
     return res.status(400).json({
       message: 'Invalid seller role',
     })
   }
 
-  const { parentSellerId, customReportsUnder } = buildReportsUnderValues({
-    parent_seller_id,
-    custom_reports_under,
-  })
+  const finalStatus = validateStatus(status)
+
+  if (!finalStatus) {
+    return res.status(400).json({
+      message: 'Invalid seller status',
+    })
+  }
 
   const parentValidation = await validateParentSeller({
     sellerId: id,
-    parentSellerId,
+    parentSellerId: parent_seller_id,
   })
 
-  if (!parentValidation.isValid) {
+  if (parentValidation && !parentValidation.isValid) {
     return res.status(400).json({
       message: parentValidation.message,
     })
   }
 
-  await db.query(
+  const oldRate =
+    existingSeller.commission_rate === null ||
+    existingSeller.commission_rate === undefined
+      ? null
+      : normalizeRate(existingSeller.commission_rate)
+
+  const newRate = normalizeRate(commission_rate)
+
+  const rateChanged =
+    String(oldRate ?? '') !== String(newRate ?? '')
+
+  const connection = await db.getConnection()
+
+  try {
+    await connection.beginTransaction()
+
+    await connection.query(
+      `
+      UPDATE accredited_sellers
+      SET
+        user_id = ?,
+        full_name = ?,
+        email = ?,
+        contact_no = ?,
+        seller_role = ?,
+        parent_seller_id = ?,
+        custom_reports_under = ?,
+        status = ?,
+        accreditation_date = ?,
+        commission_rate = ?
+      WHERE id = ?
+      `,
+      [
+        nullableValue(user_id),
+        full_name,
+        nullableValue(email),
+        nullableValue(contact_no),
+        finalSellerRole,
+        nullableValue(parent_seller_id),
+        nullableValue(custom_reports_under),
+        finalStatus,
+        nullableValue(accreditation_date),
+        newRate,
+        id,
+      ]
+    )
+
+    let commissionSync = {
+      updatedCommissions: 0,
+      updatedReleases: 0,
+    }
+
+    if (rateChanged && newRate !== null) {
+      commissionSync = await syncOpenCommissionsForSellerRate({
+        connection,
+        sellerId: id,
+        commissionRate: newRate,
+      })
+    }
+
+    await connection.commit()
+
+    await createAuditLog({
+      userId: req.user.id,
+      action: 'update',
+      module: 'Accredited Sellers',
+      description: `Updated accredited seller ${full_name}. Synced ${commissionSync.updatedCommissions} open commission(s).`,
+      ipAddress: getClientIp(req),
+    })
+
+    res.status(200).json({
+      message: 'Accredited seller updated successfully',
+      data: {
+        sellerId: Number(id),
+        commissionSync,
+      },
+    })
+  } catch (err) {
+    await connection.rollback()
+    throw err
+  } finally {
+    connection.release()
+  }
+}
+
+export const getSellerHierarchy = async (req, res) => {
+  const [sellers] = await db.query(
     `
-    UPDATE accredited_sellers
-    SET
-      user_id = ?,
-      full_name = ?,
-      email = ?,
-      contact_no = ?,
-      seller_role = ?,
-      parent_seller_id = ?,
-      custom_reports_under = ?,
-      status = ?,
-      accreditation_date = ?,
-      commission_rate = ?
-    WHERE id = ?
-    `,
-    [
-      nullableValue(user_id),
-      full_name,
-      nullableValue(email),
-      nullableValue(contact_no),
-      finalSellerRole,
-      parentSellerId,
-      customReportsUnder,
-      status,
-      nullableValue(accreditation_date),
-      nullableValue(commission_rate),
-      id,
-    ]
+    SELECT
+      ${sellerFields}
+    ${sellerJoins}
+    ORDER BY
+      CASE seller.seller_role
+        WHEN 'broker_network_manager' THEN 1
+        WHEN 'broker' THEN 2
+        WHEN 'agent' THEN 3
+        ELSE 4
+      END,
+      seller.full_name ASC
+    `
   )
 
-  await createAuditLog({
-    userId: req.user.id,
-    action: 'update',
-    module: 'Accredited Sellers',
-    description: `Updated accredited seller ${full_name}`,
-    ipAddress: getClientIp(req),
+  const sellerMap = new Map()
+
+  sellers.forEach((seller) => {
+    sellerMap.set(seller.id, {
+      ...seller,
+      children: [],
+    })
+  })
+
+  const hierarchy = []
+
+  sellerMap.forEach((seller) => {
+    if (seller.parent_seller_id && sellerMap.has(seller.parent_seller_id)) {
+      sellerMap.get(seller.parent_seller_id).children.push(seller)
+    } else {
+      hierarchy.push(seller)
+    }
   })
 
   res.status(200).json({
-    message: 'Accredited seller updated successfully',
+    message: 'Seller hierarchy fetched successfully',
+    hierarchy,
+    data: hierarchy,
   })
 }
 
 export const getPossibleParentSellers = async (req, res) => {
   const { exclude_id } = req.query
 
-  const conditions = ['seller.status = ?']
-  const params = ['active']
+  const conditions = [
+    `seller.status = 'active'`,
+  ]
+
+  const params = []
 
   if (!isMissing(exclude_id)) {
     conditions.push('seller.id <> ?')
     params.push(exclude_id)
   }
 
-  const [rows] = await db.query(
+  const [sellers] = await db.query(
     `
     SELECT
-      seller.id,
-      seller.user_id,
-      seller.full_name,
-      seller.email,
-      seller.contact_no,
-      seller.seller_role,
-      seller.commission_rate,
-      seller.parent_seller_id,
-      parent.full_name AS parent_seller_name,
-      parent.seller_role AS parent_seller_role,
-      seller.custom_reports_under,
-      COALESCE(parent.full_name, seller.custom_reports_under, 'None') AS reports_under_display,
-      seller.status,
-      seller.accreditation_date,
-      seller.created_at,
-      seller.updated_at
-    FROM accredited_sellers seller
-    LEFT JOIN accredited_sellers parent
-      ON parent.id = seller.parent_seller_id
+      ${sellerFields}
+    ${sellerJoins}
     WHERE ${conditions.join(' AND ')}
     ORDER BY
-      FIELD(seller.seller_role, 'broker_network_manager', 'broker', 'agent'),
+      CASE seller.seller_role
+        WHEN 'broker_network_manager' THEN 1
+        WHEN 'broker' THEN 2
+        WHEN 'agent' THEN 3
+        ELSE 4
+      END,
       seller.full_name ASC
     `,
     params
   )
 
   res.status(200).json({
-    possibleParentSellers: rows.map(mapSeller),
-  })
-}
-
-export const getSellerHierarchy = async (req, res) => {
-  const [rows] = await db.query(
-    `
-    SELECT
-      ${sellerFields}
-    ${sellerJoins}
-    ORDER BY
-      FIELD(seller.seller_role, 'broker_network_manager', 'broker', 'agent'),
-      seller.full_name ASC
-    `
-  )
-
-  const sellers = rows.map(mapSeller)
-
-  const brokerNetworkManagers = sellers.filter(
-    (seller) => seller.seller_role === 'broker_network_manager'
-  )
-
-  const brokers = sellers.filter((seller) => seller.seller_role === 'broker')
-
-  const agents = sellers.filter((seller) => seller.seller_role === 'agent')
-
-  res.status(200).json({
-    brokerNetworkManagers,
-    brokers,
-    agents,
-    sellers,
+    message: 'Possible parent sellers fetched successfully',
+    possibleParentSellers: sellers,
+    data: sellers,
   })
 }
