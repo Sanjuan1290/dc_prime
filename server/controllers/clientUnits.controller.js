@@ -1,12 +1,13 @@
 import { db } from '../db/connect.js'
 import { createAuditLog } from '../utils/createAuditLog.js'
+import { getClientIp } from '../utils/getClientIp.js'
 
 const allowedClientUnitStatuses = [
   'reserved',
   'active',
   'cancelled',
   'fully_paid',
-  'closed'
+  'closed',
 ]
 
 const isMissing = (value) => {
@@ -14,10 +15,7 @@ const isMissing = (value) => {
 }
 
 const nullableValue = (value) => {
-  if (isMissing(value)) {
-    return null
-  }
-
+  if (isMissing(value)) return null
   return value
 }
 
@@ -25,15 +23,18 @@ const validateDueDay = (dueDay) => {
   if (isMissing(dueDay)) {
     return {
       isValid: true,
-      value: null
+      value: null,
     }
   }
 
   const parsedDueDay = Number(dueDay)
 
   return {
-    isValid: Number.isInteger(parsedDueDay) && parsedDueDay >= 1 && parsedDueDay <= 31,
-    value: parsedDueDay
+    isValid:
+      Number.isInteger(parsedDueDay) &&
+      parsedDueDay >= 1 &&
+      parsedDueDay <= 31,
+    value: parsedDueDay,
   }
 }
 
@@ -42,15 +43,47 @@ const listingStatusFromClientUnitStatus = (status) => {
     return 'available'
   }
 
-  if (status === 'reserved' || status === 'active') {
+  if (status === 'reserved') {
     return 'reserved'
   }
 
-  if (status === 'fully_paid' || status === 'closed') {
+  if (status === 'active' || status === 'fully_paid' || status === 'closed') {
     return 'sold'
   }
 
   return null
+}
+
+const validateSeller = async (connection, sellerId) => {
+  if (isMissing(sellerId)) {
+    return {
+      isValid: true,
+      message: null,
+    }
+  }
+
+  const [sellerRows] = await connection.query(
+    `
+    SELECT id
+    FROM accredited_sellers
+    WHERE id = ?
+      AND status = 'active'
+    LIMIT 1
+    `,
+    [sellerId]
+  )
+
+  if (!sellerRows[0]) {
+    return {
+      isValid: false,
+      message: 'Seller not found or inactive',
+    }
+  }
+
+  return {
+    isValid: true,
+    message: null,
+  }
 }
 
 const clientUnitFields = `
@@ -63,12 +96,18 @@ const clientUnitFields = `
   l.lot_type,
   l.lot_area_sqm,
   l.net_selling_price,
+  l.legal_misc_fee,
+  l.total_contract_price,
   COALESCE(payment_summary.paid_amount, 0) AS paid_amount,
   cu.balance,
   cu.due_day,
   cu.status,
   cu.assigned_user_id,
   u.full_name AS assigned_user_name,
+  cu.seller_id,
+  seller.full_name AS seller_name,
+  seller.seller_role AS seller_role,
+  COALESCE(parent_seller.full_name, seller.custom_reports_under, 'None') AS reports_under,
   CASE
     WHEN COALESCE(document_summary.required_count, 0) > 0
       AND COALESCE(document_summary.submitted_count, 0) = document_summary.required_count
@@ -85,18 +124,26 @@ const clientUnitJoins = `
   INNER JOIN listings l ON l.id = cu.listing_id
   INNER JOIN projects p ON p.id = l.project_id
   LEFT JOIN users u ON u.id = cu.assigned_user_id
+  LEFT JOIN accredited_sellers seller ON seller.id = cu.seller_id
+  LEFT JOIN accredited_sellers parent_seller ON parent_seller.id = seller.parent_seller_id
   LEFT JOIN (
     SELECT
       client_unit_id,
       SUM(amount) AS paid_amount
     FROM payments
+    WHERE status = 'verified'
     GROUP BY client_unit_id
   ) payment_summary ON payment_summary.client_unit_id = cu.id
   LEFT JOIN (
     SELECT
       cu_docs.id AS client_unit_id,
       COUNT(d.id) AS required_count,
-      SUM(CASE WHEN cdl.status IN ('submitted', 'approved') THEN 1 ELSE 0 END) AS submitted_count
+      SUM(
+        CASE
+          WHEN cdl.status IN ('submitted', 'approved') THEN 1
+          ELSE 0
+        END
+      ) AS submitted_count
     FROM client_units cu_docs
     LEFT JOIN documents d
       ON d.is_required = TRUE
@@ -124,11 +171,7 @@ const getClientUnitsForWhereClause = async (whereClause = '', params = []) => {
 }
 
 export const getClientUnits = async (req, res) => {
-  const {
-    search,
-    status,
-    client_id
-  } = req.query
+  const { search, status, client_id } = req.query
 
   const conditions = []
   const params = []
@@ -142,10 +185,23 @@ export const getClientUnits = async (req, res) => {
         OR l.unit_id LIKE ?
         OR p.name LIKE ?
         OR cu.status LIKE ?
+        OR seller.full_name LIKE ?
+        OR seller.seller_role LIKE ?
+        OR parent_seller.full_name LIKE ?
+        OR seller.custom_reports_under LIKE ?
       )
     `)
 
-    params.push(searchTerm, searchTerm, searchTerm, searchTerm)
+    params.push(
+      searchTerm,
+      searchTerm,
+      searchTerm,
+      searchTerm,
+      searchTerm,
+      searchTerm,
+      searchTerm,
+      searchTerm
+    )
   }
 
   if (!isMissing(status)) {
@@ -158,14 +214,13 @@ export const getClientUnits = async (req, res) => {
     params.push(client_id)
   }
 
-  const whereClause = conditions.length > 0
-    ? `WHERE ${conditions.join(' AND ')}`
-    : ''
+  const whereClause =
+    conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
 
   const clientUnits = await getClientUnitsForWhereClause(whereClause, params)
 
   res.status(200).json({
-    clientUnits
+    clientUnits,
   })
 }
 
@@ -174,21 +229,27 @@ export const getClientUnitsByClient = async (req, res) => {
 
   if (isMissing(clientId)) {
     return res.status(400).json({
-      message: 'Client ID is required'
+      message: 'Client ID is required',
     })
   }
 
   const [clientRows] = await db.query(
     `
     SELECT
-      id,
-      full_name,
-      spouse_co_owner_name,
-      email,
-      contact_no,
-      address
-    FROM clients
-    WHERE id = ?
+      c.id,
+      c.full_name,
+      c.spouse_co_owner_name,
+      c.email,
+      c.contact_no,
+      c.address,
+      c.region,
+      c.default_seller_id,
+      seller.full_name AS default_seller_name,
+      seller.seller_role AS default_seller_role
+    FROM clients c
+    LEFT JOIN accredited_sellers seller
+      ON seller.id = c.default_seller_id
+    WHERE c.id = ?
     LIMIT 1
     `,
     [clientId]
@@ -198,7 +259,7 @@ export const getClientUnitsByClient = async (req, res) => {
 
   if (!client) {
     return res.status(404).json({
-      message: 'Client not found'
+      message: 'Client not found',
     })
   }
 
@@ -209,7 +270,7 @@ export const getClientUnitsByClient = async (req, res) => {
 
   res.status(200).json({
     client,
-    units
+    units,
   })
 }
 
@@ -231,21 +292,17 @@ export const getClientUnit = async (req, res) => {
 
   if (!clientUnit) {
     return res.status(404).json({
-      message: 'Client unit not found'
+      message: 'Client unit not found',
     })
   }
 
   res.status(200).json({
-    clientUnit
+    clientUnit,
   })
 }
 
 export const getAvailableListings = async (req, res) => {
-  const {
-    search,
-    project_id,
-    lot_type
-  } = req.query
+  const { search, project_id, lot_type } = req.query
 
   const conditions = ['l.status = ?']
   const params = ['available']
@@ -285,7 +342,10 @@ export const getAvailableListings = async (req, res) => {
       l.unit_id,
       l.lot_type,
       l.lot_area_sqm,
+      l.price_per_sqm,
       l.net_selling_price,
+      l.legal_misc_fee,
+      l.total_contract_price,
       l.status,
       l.created_at,
       l.updated_at
@@ -298,27 +358,29 @@ export const getAvailableListings = async (req, res) => {
   )
 
   res.status(200).json({
-    listings
+    listings,
   })
 }
 
 export const reserveListing = async (req, res) => {
   const { clientId } = req.params
+
   const {
     listing_id,
     assigned_user_id,
-    due_day
+    seller_id,
+    due_day,
   } = req.body
 
   if (isMissing(clientId)) {
     return res.status(400).json({
-      message: 'Client ID is required'
+      message: 'Client ID is required',
     })
   }
 
   if (isMissing(listing_id)) {
     return res.status(400).json({
-      message: 'Listing ID is required'
+      message: 'Listing ID is required',
     })
   }
 
@@ -326,7 +388,7 @@ export const reserveListing = async (req, res) => {
 
   if (!dueDayValidation.isValid) {
     return res.status(400).json({
-      message: 'Due day must be between 1 and 31'
+      message: 'Due day must be between 1 and 31',
     })
   }
 
@@ -345,7 +407,8 @@ export const reserveListing = async (req, res) => {
       `
       SELECT
         id,
-        full_name
+        full_name,
+        default_seller_id
       FROM clients
       WHERE id = ?
       LIMIT 1
@@ -358,7 +421,20 @@ export const reserveListing = async (req, res) => {
     if (!client) {
       await connection.rollback()
       return res.status(404).json({
-        message: 'Client not found'
+        message: 'Client not found',
+      })
+    }
+
+    const finalSellerId = isMissing(seller_id)
+      ? client.default_seller_id
+      : seller_id
+
+    const sellerValidation = await validateSeller(connection, finalSellerId)
+
+    if (!sellerValidation.isValid) {
+      await connection.rollback()
+      return res.status(400).json({
+        message: sellerValidation.message,
       })
     }
 
@@ -375,7 +451,7 @@ export const reserveListing = async (req, res) => {
     if (!assignedUserRows[0]) {
       await connection.rollback()
       return res.status(404).json({
-        message: 'Assigned user not found'
+        message: 'Assigned user not found',
       })
     }
 
@@ -385,6 +461,8 @@ export const reserveListing = async (req, res) => {
         id,
         unit_id,
         net_selling_price,
+        legal_misc_fee,
+        total_contract_price,
         status
       FROM listings
       WHERE id = ?
@@ -399,16 +477,22 @@ export const reserveListing = async (req, res) => {
     if (!listing) {
       await connection.rollback()
       return res.status(404).json({
-        message: 'Listing not found'
+        message: 'Listing not found',
       })
     }
 
     if (listing.status !== 'available') {
       await connection.rollback()
       return res.status(409).json({
-        message: 'Listing is no longer available'
+        message: 'Listing is no longer available',
       })
     }
+
+    const contractPrice =
+      Number(listing.total_contract_price || 0) > 0
+        ? listing.total_contract_price
+        : Number(listing.net_selling_price || 0) +
+          Number(listing.legal_misc_fee || 0)
 
     const [result] = await connection.query(
       `
@@ -416,18 +500,20 @@ export const reserveListing = async (req, res) => {
         client_id,
         listing_id,
         assigned_user_id,
+        seller_id,
         status,
         balance,
         due_day
-      ) VALUES (?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
       `,
       [
         clientId,
         listing_id,
         assignedUserId,
+        nullableValue(finalSellerId),
         'reserved',
-        listing.net_selling_price,
-        dueDayValidation.value
+        contractPrice,
+        dueDayValidation.value,
       ]
     )
 
@@ -477,35 +563,37 @@ export const reserveListing = async (req, res) => {
     action: 'reserve',
     module: 'Client Units',
     description: auditDescription,
-    ipAddress: req.ip
+    ipAddress: getClientIp(req),
   })
 
   return res.status(201).json({
     message: 'Listing reserved successfully',
-    clientUnitId
+    clientUnitId,
   })
 }
 
 export const updateClientUnit = async (req, res) => {
   const { id } = req.params
+
   const {
     assigned_user_id,
+    seller_id,
     status,
     balance,
-    due_day
+    due_day,
   } = req.body
 
   const dueDayValidation = validateDueDay(due_day)
 
   if (!dueDayValidation.isValid) {
     return res.status(400).json({
-      message: 'Due day must be between 1 and 31'
+      message: 'Due day must be between 1 and 31',
     })
   }
 
   if (!isMissing(status) && !allowedClientUnitStatuses.includes(status)) {
     return res.status(400).json({
-      message: 'Invalid client unit status'
+      message: 'Invalid client unit status',
     })
   }
 
@@ -520,6 +608,7 @@ export const updateClientUnit = async (req, res) => {
         id,
         listing_id,
         assigned_user_id,
+        seller_id,
         status,
         balance,
         due_day
@@ -536,7 +625,7 @@ export const updateClientUnit = async (req, res) => {
     if (!clientUnit) {
       await connection.rollback()
       return res.status(404).json({
-        message: 'Client unit not found'
+        message: 'Client unit not found',
       })
     }
 
@@ -558,20 +647,36 @@ export const updateClientUnit = async (req, res) => {
       if (!assignedUserRows[0]) {
         await connection.rollback()
         return res.status(404).json({
-          message: 'Assigned user not found'
+          message: 'Assigned user not found',
         })
       }
     }
 
+    const nextSellerId = isMissing(seller_id)
+      ? clientUnit.seller_id
+      : seller_id
+
+    const sellerValidation = await validateSeller(connection, nextSellerId)
+
+    if (!sellerValidation.isValid) {
+      await connection.rollback()
+      return res.status(400).json({
+        message: sellerValidation.message,
+      })
+    }
+
     const nextStatus = isMissing(status) ? clientUnit.status : status
     const nextBalance = isMissing(balance) ? clientUnit.balance : balance
-    const nextDueDay = isMissing(due_day) ? clientUnit.due_day : dueDayValidation.value
+    const nextDueDay = isMissing(due_day)
+      ? clientUnit.due_day
+      : dueDayValidation.value
 
     await connection.query(
       `
       UPDATE client_units
       SET
         assigned_user_id = ?,
+        seller_id = ?,
         status = ?,
         balance = ?,
         due_day = ?
@@ -579,10 +684,11 @@ export const updateClientUnit = async (req, res) => {
       `,
       [
         nextAssignedUserId,
+        nullableValue(nextSellerId),
         nextStatus,
         nextBalance,
         nextDueDay,
-        id
+        id,
       ]
     )
 
@@ -612,10 +718,10 @@ export const updateClientUnit = async (req, res) => {
     action: 'update',
     module: 'Client Units',
     description: `Updated client unit ${id}`,
-    ipAddress: req.ip
+    ipAddress: getClientIp(req),
   })
 
   return res.status(200).json({
-    message: 'Client unit updated successfully'
+    message: 'Client unit updated successfully',
   })
 }

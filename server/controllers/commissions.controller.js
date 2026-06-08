@@ -1,26 +1,32 @@
 import { db } from '../db/connect.js'
 import { createAuditLog } from '../utils/createAuditLog.js'
+import { getClientIp } from '../utils/getClientIp.js'
 
 const allowedCommissionStatuses = [
   'pending',
   'payable',
   'released',
-  'cancelled'
+  'cancelled',
 ]
 
-const sellerRoles = [
+const allowedCommissionRoles = [
   'agent',
-  'manager',
+  'unit_manager',
   'broker',
-  'broker_network_manager'
+  'broker_network_manager',
 ]
 
 const isMissing = (value) => {
   return value === undefined || value === null || value === ''
 }
 
+const nullableValue = (value) => {
+  if (isMissing(value)) return null
+  return value
+}
+
 const normalizeMoney = (value) => {
-  return Number(Number(value).toFixed(2))
+  return Number(Number(value || 0).toFixed(2))
 }
 
 const validateNonNegativeNumber = (value) => {
@@ -28,24 +34,47 @@ const validateNonNegativeNumber = (value) => {
 
   return {
     isValid: !Number.isNaN(parsedValue) && parsedValue >= 0,
-    value: parsedValue
+    value: parsedValue,
   }
 }
 
-export const computeCommissionAmount = (netSellingPrice, rate) => {
-  return normalizeMoney(Number(netSellingPrice) * (Number(rate) / 100))
+const getCommissionBase = (clientUnit) => {
+  const totalContractPrice = Number(clientUnit.total_contract_price || 0)
+
+  if (totalContractPrice > 0) {
+    return totalContractPrice
+  }
+
+  return (
+    Number(clientUnit.net_selling_price || 0) +
+    Number(clientUnit.legal_misc_fee || 0)
+  )
+}
+
+export const computeCommissionAmount = (commissionBase, rate) => {
+  return normalizeMoney(Number(commissionBase || 0) * (Number(rate || 0) / 100))
 }
 
 const commissionFields = `
   cm.id,
   cm.client_unit_id,
   cm.seller_id,
+  cm.commission_role,
   seller.full_name AS seller_name,
   seller.seller_role,
+  COALESCE(parent.full_name, seller.custom_reports_under, 'None') AS reports_under,
   client.full_name AS client_name,
   listing.unit_id,
   project.name AS project_name,
   listing.net_selling_price,
+  listing.legal_misc_fee,
+  listing.total_contract_price,
+  CASE
+    WHEN listing.total_contract_price IS NOT NULL
+      AND listing.total_contract_price > 0
+    THEN listing.total_contract_price
+    ELSE listing.net_selling_price + listing.legal_misc_fee
+  END AS commission_base,
   cm.rate,
   cm.amount,
   cm.released_amount,
@@ -62,6 +91,7 @@ const commissionJoins = `
   INNER JOIN listings listing ON listing.id = cu.listing_id
   INNER JOIN projects project ON project.id = listing.project_id
   INNER JOIN accredited_sellers seller ON seller.id = cm.seller_id
+  LEFT JOIN accredited_sellers parent ON parent.id = seller.parent_seller_id
 `
 
 const getClientUnitWithListing = async (connectionOrDb, clientUnitId) => {
@@ -69,9 +99,16 @@ const getClientUnitWithListing = async (connectionOrDb, clientUnitId) => {
     `
     SELECT
       cu.id,
+      cu.client_id,
       cu.listing_id,
-      listing.net_selling_price
+      cu.seller_id,
+      client.full_name AS client_name,
+      listing.unit_id,
+      listing.net_selling_price,
+      listing.legal_misc_fee,
+      listing.total_contract_price
     FROM client_units cu
+    INNER JOIN clients client ON client.id = cu.client_id
     INNER JOIN listings listing ON listing.id = cu.listing_id
     WHERE cu.id = ?
     LIMIT 1
@@ -82,7 +119,7 @@ const getClientUnitWithListing = async (connectionOrDb, clientUnitId) => {
   return rows[0]
 }
 
-const getActiveSeller = async (connectionOrDb, sellerId) => {
+const getSeller = async (connectionOrDb, sellerId) => {
   const [rows] = await connectionOrDb.query(
     `
     SELECT
@@ -105,16 +142,16 @@ const hasDuplicateCommission = async (
   connectionOrDb,
   clientUnitId,
   sellerId,
+  commissionRole,
   currentCommissionId = null
 ) => {
   const conditions = [
     'client_unit_id = ?',
-    'seller_id = ?'
+    'seller_id = ?',
+    'commission_role = ?',
   ]
-  const params = [
-    clientUnitId,
-    sellerId
-  ]
+
+  const params = [clientUnitId, sellerId, commissionRole]
 
   if (!isMissing(currentCommissionId)) {
     conditions.push('id <> ?')
@@ -139,19 +176,20 @@ const validateCommissionPayload = async (
   {
     client_unit_id,
     seller_id,
+    commission_role,
     rate,
     released_amount,
     status,
     currentCommissionId = null,
     allowInactiveSeller = false,
-    defaultStatus = 'pending'
+    defaultStatus = 'pending',
   }
 ) => {
   if (isMissing(client_unit_id)) {
     return {
       isValid: false,
       statusCode: 400,
-      message: 'Client unit ID is required'
+      message: 'Client unit ID is required',
     }
   }
 
@@ -159,7 +197,19 @@ const validateCommissionPayload = async (
     return {
       isValid: false,
       statusCode: 400,
-      message: 'Seller ID is required'
+      message: 'Seller ID is required',
+    }
+  }
+
+  const nextCommissionRole = isMissing(commission_role)
+    ? 'agent'
+    : commission_role
+
+  if (!allowedCommissionRoles.includes(nextCommissionRole)) {
+    return {
+      isValid: false,
+      statusCode: 400,
+      message: 'Invalid commission role',
     }
   }
 
@@ -167,7 +217,7 @@ const validateCommissionPayload = async (
     return {
       isValid: false,
       statusCode: 400,
-      message: 'Commission rate is required'
+      message: 'Commission rate is required',
     }
   }
 
@@ -177,7 +227,7 @@ const validateCommissionPayload = async (
     return {
       isValid: false,
       statusCode: 400,
-      message: 'Commission rate must be greater than or equal to 0'
+      message: 'Commission rate must be greater than or equal to 0',
     }
   }
 
@@ -189,15 +239,7 @@ const validateCommissionPayload = async (
     return {
       isValid: false,
       statusCode: 400,
-      message: 'Released amount cannot be less than 0'
-    }
-  }
-
-  if (isMissing(status) && isMissing(defaultStatus)) {
-    return {
-      isValid: false,
-      statusCode: 400,
-      message: 'Commission status is required'
+      message: 'Released amount cannot be less than 0',
     }
   }
 
@@ -207,7 +249,7 @@ const validateCommissionPayload = async (
     return {
       isValid: false,
       statusCode: 400,
-      message: 'Invalid commission status'
+      message: 'Invalid commission status',
     }
   }
 
@@ -217,17 +259,17 @@ const validateCommissionPayload = async (
     return {
       isValid: false,
       statusCode: 404,
-      message: 'Client unit not found'
+      message: 'Client unit not found',
     }
   }
 
-  const seller = await getActiveSeller(connectionOrDb, seller_id)
+  const seller = await getSeller(connectionOrDb, seller_id)
 
   if (!seller) {
     return {
       isValid: false,
       statusCode: 404,
-      message: 'Seller not found'
+      message: 'Seller not found',
     }
   }
 
@@ -235,33 +277,34 @@ const validateCommissionPayload = async (
     return {
       isValid: false,
       statusCode: 403,
-      message: 'Seller is not active'
+      message: 'Seller is inactive',
     }
   }
 
-  if (
-    await hasDuplicateCommission(
-      connectionOrDb,
-      client_unit_id,
-      seller_id,
-      currentCommissionId
-    )
-  ) {
+  const duplicate = await hasDuplicateCommission(
+    connectionOrDb,
+    client_unit_id,
+    seller_id,
+    nextCommissionRole,
+    currentCommissionId
+  )
+
+  if (duplicate) {
     return {
       isValid: false,
       statusCode: 409,
-      message: 'Commission already exists for this seller and client unit'
+      message: 'Commission already exists for this unit, seller, and role',
     }
   }
 
-  const amount = computeCommissionAmount(clientUnit.net_selling_price, rateValidation.value)
-  const releasedAmount = normalizeMoney(releasedAmountValidation.value)
+  const commissionBase = getCommissionBase(clientUnit)
+  const amount = computeCommissionAmount(commissionBase, rateValidation.value)
 
-  if (releasedAmount > amount) {
+  if (releasedAmountValidation.value > amount) {
     return {
       isValid: false,
       statusCode: 400,
-      message: 'Released amount cannot be greater than commission amount'
+      message: 'Released amount cannot be greater than commission amount',
     }
   }
 
@@ -269,21 +312,22 @@ const validateCommissionPayload = async (
     isValid: true,
     clientUnit,
     seller,
+    commissionRole: nextCommissionRole,
     rate: rateValidation.value,
-    releasedAmount,
+    releasedAmount: releasedAmountValidation.value,
+    status: nextStatus,
+    commissionBase,
     amount,
-    remainingAmount: normalizeMoney(amount - releasedAmount),
-    status: releasedAmount === amount ? 'released' : nextStatus
   }
 }
 
 export const getCommissions = async (req, res) => {
   const {
     search,
-    client_unit_id,
-    seller_id,
     status,
-    seller_role
+    seller_role,
+    commission_role,
+    client_unit_id,
   } = req.query
 
   const conditions = []
@@ -295,15 +339,39 @@ export const getCommissions = async (req, res) => {
     conditions.push(`
       (
         seller.full_name LIKE ?
+        OR seller.seller_role LIKE ?
+        OR cm.commission_role LIKE ?
         OR client.full_name LIKE ?
         OR listing.unit_id LIKE ?
         OR project.name LIKE ?
         OR cm.status LIKE ?
-        OR seller.seller_role LIKE ?
       )
     `)
 
-    params.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm)
+    params.push(
+      searchTerm,
+      searchTerm,
+      searchTerm,
+      searchTerm,
+      searchTerm,
+      searchTerm,
+      searchTerm
+    )
+  }
+
+  if (!isMissing(status) && status !== 'all') {
+    conditions.push('cm.status = ?')
+    params.push(status)
+  }
+
+  if (!isMissing(seller_role) && seller_role !== 'all') {
+    conditions.push('seller.seller_role = ?')
+    params.push(seller_role)
+  }
+
+  if (!isMissing(commission_role) && commission_role !== 'all') {
+    conditions.push('cm.commission_role = ?')
+    params.push(commission_role)
   }
 
   if (!isMissing(client_unit_id)) {
@@ -311,24 +379,8 @@ export const getCommissions = async (req, res) => {
     params.push(client_unit_id)
   }
 
-  if (!isMissing(seller_id)) {
-    conditions.push('cm.seller_id = ?')
-    params.push(seller_id)
-  }
-
-  if (!isMissing(status)) {
-    conditions.push('cm.status = ?')
-    params.push(status)
-  }
-
-  if (!isMissing(seller_role)) {
-    conditions.push('seller.seller_role = ?')
-    params.push(seller_role)
-  }
-
-  const whereClause = conditions.length > 0
-    ? `WHERE ${conditions.join(' AND ')}`
-    : ''
+  const whereClause =
+    conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
 
   const [commissions] = await db.query(
     `
@@ -342,7 +394,7 @@ export const getCommissions = async (req, res) => {
   )
 
   res.status(200).json({
-    commissions
+    commissions,
   })
 }
 
@@ -364,25 +416,17 @@ export const getCommission = async (req, res) => {
 
   if (!commission) {
     return res.status(404).json({
-      message: 'Commission not found'
+      message: 'Commission not found',
     })
   }
 
   res.status(200).json({
-    commission
+    commission,
   })
 }
 
 export const getCommissionsByClientUnit = async (req, res) => {
   const { clientUnitId } = req.params
-
-  const clientUnit = await getClientUnitWithListing(db, clientUnitId)
-
-  if (!clientUnit) {
-    return res.status(404).json({
-      message: 'Client unit not found'
-    })
-  }
 
   const [commissions] = await db.query(
     `
@@ -396,7 +440,7 @@ export const getCommissionsByClientUnit = async (req, res) => {
   )
 
   res.status(200).json({
-    commissions
+    commissions,
   })
 }
 
@@ -404,22 +448,24 @@ export const createCommission = async (req, res) => {
   const {
     client_unit_id,
     seller_id,
+    commission_role,
     rate,
-    released_amount,
-    status
+    released_amount = 0,
+    status = 'pending',
   } = req.body
 
   const validation = await validateCommissionPayload(db, {
     client_unit_id,
     seller_id,
+    commission_role,
     rate,
     released_amount,
-    status
+    status,
   })
 
   if (!validation.isValid) {
     return res.status(validation.statusCode).json({
-      message: validation.message
+      message: validation.message,
     })
   }
 
@@ -428,19 +474,21 @@ export const createCommission = async (req, res) => {
     INSERT INTO commissions (
       client_unit_id,
       seller_id,
+      commission_role,
       rate,
       amount,
       released_amount,
       status
-    ) VALUES (?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
     `,
     [
       client_unit_id,
       seller_id,
+      validation.commissionRole,
       validation.rate,
       validation.amount,
       validation.releasedAmount,
-      validation.status
+      validation.status,
     ]
   )
 
@@ -448,31 +496,31 @@ export const createCommission = async (req, res) => {
     userId: req.user.id,
     action: 'create',
     module: 'Commissions',
-    description: `Created commission for client unit ${client_unit_id}`,
-    ipAddress: req.ip
+    description: `Created ${validation.commissionRole} commission for ${validation.seller.full_name}`,
+    ipAddress: getClientIp(req),
   })
 
   res.status(201).json({
     message: 'Commission created successfully',
     commissionId: result.insertId,
+    commissionBase: validation.commissionBase,
     amount: validation.amount,
-    remainingAmount: validation.remainingAmount
   })
 }
 
 export const updateCommission = async (req, res) => {
   const { id } = req.params
-  const {
-    client_unit_id,
-    seller_id,
-    rate,
-    released_amount,
-    status
-  } = req.body
 
-  const [commissionRows] = await db.query(
+  const [existingRows] = await db.query(
     `
-    SELECT id
+    SELECT
+      id,
+      client_unit_id,
+      seller_id,
+      commission_role,
+      rate,
+      released_amount,
+      status
     FROM commissions
     WHERE id = ?
     LIMIT 1
@@ -480,35 +528,54 @@ export const updateCommission = async (req, res) => {
     [id]
   )
 
-  if (!commissionRows[0]) {
+  const existingCommission = existingRows[0]
+
+  if (!existingCommission) {
     return res.status(404).json({
-      message: 'Commission not found'
+      message: 'Commission not found',
     })
   }
 
+  const nextPayload = {
+    client_unit_id: isMissing(req.body.client_unit_id)
+      ? existingCommission.client_unit_id
+      : req.body.client_unit_id,
+    seller_id: isMissing(req.body.seller_id)
+      ? existingCommission.seller_id
+      : req.body.seller_id,
+    commission_role: isMissing(req.body.commission_role)
+      ? existingCommission.commission_role
+      : req.body.commission_role,
+    rate: isMissing(req.body.rate)
+      ? existingCommission.rate
+      : req.body.rate,
+    released_amount: isMissing(req.body.released_amount)
+      ? existingCommission.released_amount
+      : req.body.released_amount,
+    status: isMissing(req.body.status)
+      ? existingCommission.status
+      : req.body.status,
+  }
+
   const validation = await validateCommissionPayload(db, {
-    client_unit_id,
-    seller_id,
-    rate,
-    released_amount,
-    status,
+    ...nextPayload,
     currentCommissionId: id,
-    allowInactiveSeller: status === 'cancelled',
-    defaultStatus: null
+    allowInactiveSeller: true,
   })
 
   if (!validation.isValid) {
     return res.status(validation.statusCode).json({
-      message: validation.message
+      message: validation.message,
     })
   }
 
-  const [result] = await db.query(
+  await db.query(
     `
     UPDATE commissions
     SET
       client_unit_id = ?,
       seller_id = ?,
+      commission_role = ?,
       rate = ?,
       amount = ?,
       released_amount = ?,
@@ -516,34 +583,29 @@ export const updateCommission = async (req, res) => {
     WHERE id = ?
     `,
     [
-      client_unit_id,
-      seller_id,
+      nextPayload.client_unit_id,
+      nextPayload.seller_id,
+      validation.commissionRole,
       validation.rate,
       validation.amount,
       validation.releasedAmount,
       validation.status,
-      id
+      id,
     ]
   )
-
-  if (result.affectedRows === 0) {
-    return res.status(404).json({
-      message: 'Commission not found'
-    })
-  }
 
   await createAuditLog({
     userId: req.user.id,
     action: 'update',
     module: 'Commissions',
     description: `Updated commission ${id}`,
-    ipAddress: req.ip
+    ipAddress: getClientIp(req),
   })
 
   res.status(200).json({
     message: 'Commission updated successfully',
+    commissionBase: validation.commissionBase,
     amount: validation.amount,
-    remainingAmount: validation.remainingAmount
   })
 }
 
@@ -551,9 +613,10 @@ export const getCommissionSummary = async (req, res) => {
   const [rows] = await db.query(
     `
     SELECT
-      COALESCE(SUM(CASE WHEN status <> 'cancelled' THEN amount ELSE 0 END), 0) AS commission_payable,
-      COALESCE(SUM(CASE WHEN status <> 'cancelled' THEN released_amount ELSE 0 END), 0) AS commission_released,
-      COALESCE(SUM(CASE WHEN status <> 'cancelled' THEN amount - released_amount ELSE 0 END), 0) AS commission_remaining,
+      COUNT(*) AS total_commissions,
+      COALESCE(SUM(amount), 0) AS total_amount,
+      COALESCE(SUM(released_amount), 0) AS total_released,
+      COALESCE(SUM(GREATEST(amount - released_amount, 0)), 0) AS total_remaining,
       SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending_count,
       SUM(CASE WHEN status = 'payable' THEN 1 ELSE 0 END) AS payable_count,
       SUM(CASE WHEN status = 'released' THEN 1 ELSE 0 END) AS released_count,
@@ -562,56 +625,20 @@ export const getCommissionSummary = async (req, res) => {
     `
   )
 
-  const summary = rows[0]
-
   res.status(200).json({
-    summary: {
-      commissionPayable: Number(summary.commission_payable),
-      commissionReleased: Number(summary.commission_released),
-      commissionRemaining: Number(summary.commission_remaining),
-      pendingCount: Number(summary.pending_count),
-      payableCount: Number(summary.payable_count),
-      releasedCount: Number(summary.released_count),
-      cancelledCount: Number(summary.cancelled_count)
-    }
+    summary: rows[0],
   })
 }
 
 export const createHierarchyCommissions = async (req, res) => {
   const { clientUnitId } = req.params
   const {
-    seller_id,
-    rates
+    agent_rate = 7,
+    broker_rate = 5,
+    broker_network_manager_rate = 2,
   } = req.body
 
-  if (isMissing(clientUnitId)) {
-    return res.status(400).json({
-      message: 'Client unit ID is required'
-    })
-  }
-
-  if (isMissing(seller_id)) {
-    return res.status(400).json({
-      message: 'Seller ID is required'
-    })
-  }
-
-  if (!rates || typeof rates !== 'object' || Array.isArray(rates)) {
-    return res.status(400).json({
-      message: 'Rates object is required'
-    })
-  }
-
-  for (const role of sellerRoles) {
-    if (!isMissing(rates[role]) && !validateNonNegativeNumber(rates[role]).isValid) {
-      return res.status(400).json({
-        message: 'Commission rates cannot be negative'
-      })
-    }
-  }
-
   const connection = await db.getConnection()
-  let createdCount = 0
 
   try {
     await connection.beginTransaction()
@@ -621,95 +648,139 @@ export const createHierarchyCommissions = async (req, res) => {
     if (!clientUnit) {
       await connection.rollback()
       return res.status(404).json({
-        message: 'Client unit not found'
+        message: 'Client unit not found',
       })
     }
 
-    let seller = await getActiveSeller(connection, seller_id)
+    if (isMissing(clientUnit.seller_id)) {
+      await connection.rollback()
+      return res.status(400).json({
+        message: 'This client unit has no seller assigned',
+      })
+    }
 
-    if (!seller) {
+    const primarySeller = await getSeller(connection, clientUnit.seller_id)
+
+    if (!primarySeller || primarySeller.status !== 'active') {
       await connection.rollback()
       return res.status(404).json({
-        message: 'Seller not found'
+        message: 'Client unit seller not found or inactive',
       })
     }
 
-    if (seller.status !== 'active') {
-      await connection.rollback()
-      return res.status(403).json({
-        message: 'Seller is not active'
+    const commissionBase = getCommissionBase(clientUnit)
+    const createdCommissions = []
+
+    const addCommissionIfMissing = async ({
+      seller,
+      commissionRole,
+      rate,
+    }) => {
+      if (!seller || seller.status !== 'active') return
+
+      const duplicate = await hasDuplicateCommission(
+        connection,
+        clientUnit.id,
+        seller.id,
+        commissionRole
+      )
+
+      if (duplicate) return
+
+      const amount = computeCommissionAmount(commissionBase, rate)
+
+      const [result] = await connection.query(
+        `
+        INSERT INTO commissions (
+          client_unit_id,
+          seller_id,
+          commission_role,
+          rate,
+          amount,
+          released_amount,
+          status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        `,
+        [
+          clientUnit.id,
+          seller.id,
+          commissionRole,
+          rate,
+          amount,
+          0,
+          'pending',
+        ]
+      )
+
+      createdCommissions.push({
+        id: result.insertId,
+        seller_id: seller.id,
+        seller_name: seller.full_name,
+        commission_role: commissionRole,
+        rate,
+        amount,
       })
     }
 
-    const visitedSellerIds = new Set()
+    const primaryCommissionRole = allowedCommissionRoles.includes(
+      primarySeller.seller_role
+    )
+      ? primarySeller.seller_role
+      : 'agent'
 
-    while (seller && !visitedSellerIds.has(String(seller.id))) {
-      visitedSellerIds.add(String(seller.id))
+    const primaryRate =
+      primaryCommissionRole === 'broker_network_manager'
+        ? broker_network_manager_rate
+        : primaryCommissionRole === 'broker'
+          ? broker_rate
+          : agent_rate
 
-      const rateValue = isMissing(rates[seller.seller_role])
-        ? 0
-        : Number(rates[seller.seller_role])
+    await addCommissionIfMissing({
+      seller: primarySeller,
+      commissionRole: primaryCommissionRole,
+      rate: primaryRate,
+    })
 
-      if (rateValue > 0) {
-        const alreadyExists = await hasDuplicateCommission(
-          connection,
-          clientUnitId,
-          seller.id
-        )
+    if (primarySeller.parent_seller_id) {
+      const parentSeller = await getSeller(connection, primarySeller.parent_seller_id)
 
-        if (!alreadyExists) {
-          const amount = computeCommissionAmount(clientUnit.net_selling_price, rateValue)
+      if (parentSeller) {
+        const parentRole = allowedCommissionRoles.includes(parentSeller.seller_role)
+          ? parentSeller.seller_role
+          : 'broker'
 
-          await connection.query(
-            `
-            INSERT INTO commissions (
-              client_unit_id,
-              seller_id,
-              rate,
-              amount,
-              released_amount,
-              status
-            ) VALUES (?, ?, ?, ?, ?, ?)
-            `,
-            [
-              clientUnitId,
-              seller.id,
-              rateValue,
-              amount,
-              0,
-              'pending'
-            ]
-          )
+        const parentRate =
+          parentRole === 'broker_network_manager'
+            ? broker_network_manager_rate
+            : broker_rate
 
-          createdCount += 1
-        }
-      }
-
-      if (isMissing(seller.parent_seller_id)) {
-        seller = null
-      } else {
-        seller = await getActiveSeller(connection, seller.parent_seller_id)
+        await addCommissionIfMissing({
+          seller: parentSeller,
+          commissionRole: parentRole,
+          rate: parentRate,
+        })
       }
     }
 
     await connection.commit()
+
+    await createAuditLog({
+      userId: req.user.id,
+      action: 'create',
+      module: 'Commissions',
+      description: `Generated hierarchy commissions for client unit ${clientUnitId}`,
+      ipAddress: getClientIp(req),
+    })
+
+    res.status(201).json({
+      message: 'Hierarchy commissions generated successfully',
+      commissionBase,
+      createdCommissions,
+    })
   } catch (err) {
     await connection.rollback()
     throw err
   } finally {
     connection.release()
   }
-
-  await createAuditLog({
-    userId: req.user.id,
-    action: 'create',
-    module: 'Commissions',
-    description: `Generated hierarchy commissions for client unit ${clientUnitId}`,
-    ipAddress: req.ip
-  })
-
-  res.status(200).json({
-    message: 'Hierarchy commissions generated successfully',
-    createdCount
-  })
 }

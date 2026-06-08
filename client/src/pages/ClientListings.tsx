@@ -1,15 +1,7 @@
 import { useMemo, useState } from "react"
-import { useNavigate, useParams } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import {
-  FiArrowLeft,
-  FiCheckSquare,
-  FiFileText,
-  FiPlus,
-  FiRefreshCw,
-  FiSearch,
-  FiUser,
-} from "react-icons/fi"
+import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts"
+import { FiEdit2, FiEye, FiGrid, FiPlus, FiSearch } from "react-icons/fi"
 import Alert from "../components/ui/Alert"
 import Button from "../components/ui/Button"
 import EmptyState from "../components/ui/EmptyState"
@@ -18,105 +10,104 @@ import LoadingState from "../components/ui/LoadingState"
 import Modal from "../components/ui/Modal"
 import PageHeader from "../components/ui/PageHeader"
 import Pagination from "../components/ui/Pagination"
+import Select from "../components/ui/Select"
 import StatCard from "../components/ui/StatCard"
 import StatusBadge from "../components/ui/StatusBadge"
 import TableContainer from "../components/ui/TableContainer"
 import { API_URL, getErrorMessage } from "../utils/api"
-import { formatDate, formatMoney, formatNumber, formatText } from "../utils/formatters"
+import {
+  formatDate,
+  formatMoney,
+  formatNumber,
+  formatText,
+} from "../utils/formatters"
 import { paginateRows } from "../utils/pagination"
 
-type Client = {
-  id: number
-  full_name: string
-  spouse_co_owner_name: string | null
-  email: string | null
-  contact_no: string | null
-  address: string | null
-}
+type ListingStatus =
+  | "available"
+  | "reserved"
+  | "hold"
+  | "sold"
+  | "inactive"
+  | string
 
-type ClientUnit = {
-  id: number
-  client_id: number
-  client_name: string
-  listing_id: number
-  unit_id: string
-  project_name: string
-  lot_type: string | null
-  lot_area_sqm: number | string
-  net_selling_price: number | string
-  paid_amount: number | string
-  balance: number | string
-  due_day: number | null
-  status: string
-  assigned_user_id: number | null
-  assigned_user_name: string | null
-  document_status: "complete" | "incomplete" | string
-  created_at: string
-  updated_at: string
-}
-
-type AvailableListing = {
+type Listing = {
   id: number
   project_id: number
   project_name: string
+  project_location?: string | null
+  project_administrator?: string | null
   cadastral_lot_no: string | null
   unit_id: string
   lot_type: string | null
+  promo_discount: number | string
+  downpayment: number | string
+  reservation_fee: number | string
+  price_per_sqm: number | string
   lot_area_sqm: number | string
+  gross_selling_price?: number | string
   net_selling_price: number | string
+  legal_misc_rate: number | string
   legal_misc_fee: number | string
-  status: string
-}
-
-type ClientDocument = {
-  id: number
-  client_unit_id: number
-  document_id: number
-  name: string
-  description: string | null
-  is_required: boolean | number
-  can_reuse: boolean | number
-  file_url: string | null
-  status: "not_submitted" | "submitted" | "approved" | "rejected" | string
-  reviewed_by: number | null
-  reviewed_by_name: string | null
-  reviewed_at: string | null
+  total_contract_price: number | string
+  status: ListingStatus
   created_at: string
   updated_at: string
 }
 
-type ClientUnitsResponse = {
-  client: Client
-  units: ClientUnit[]
-}
-
-type ReserveListingPayload = {
-  clientId: number
-  listing_id: number
-  due_day: number
-}
-
-type UpdateClientDocumentStatusPayload = {
-  documentChecklistId: number
+type Project = {
+  id: number
+  name: string
+  location: string | null
   status: string
 }
 
-const fetchClientUnits = async (
-  clientId: number
-): Promise<ClientUnitsResponse> => {
-  const res = await fetch(`${API_URL}/clients/${clientId}/units`, {
-    credentials: "include",
-  })
-
-  if (!res.ok) {
-    throw new Error(await getErrorMessage(res))
-  }
-
-  return res.json()
+type ListingFormData = {
+  project_id: number | ""
+  cadastral_lot_no: string
+  unit_id: string
+  lot_type: string
+  promo_discount: number
+  downpayment: number
+  reservation_fee: number
+  price_per_sqm: number
+  lot_area_sqm: number
+  legal_misc_rate: number
+  status: ListingStatus
 }
 
-const fetchAvailableListings = async (): Promise<AvailableListing[]> => {
-  const res = await fetch(`${API_URL}/available-listings`, {
+type ListingsResponse = {
+  listings: Listing[]
+}
+
+type ProjectsResponse = {
+  projects: Project[]
+}
+
+const listingStatuses = [
+  "available",
+  "reserved",
+  "hold",
+  "sold",
+  "inactive",
+]
+
+const emptyFormData: ListingFormData = {
+  project_id: "",
+  cadastral_lot_no: "",
+  unit_id: "",
+  lot_type: "",
+  promo_discount: 0,
+  downpayment: 0,
+  reservation_fee: 0,
+  price_per_sqm: 0,
+  lot_area_sqm: 0,
+  legal_misc_rate: 10,
+  status: "available",
+}
+
+const fetchListings = async (): Promise<Listing[]> => {
+  const res = await fetch(`${API_URL}/listings`, {
     credentials: "include",
   })
 
@@ -124,25 +115,31 @@ const fetchAvailableListings = async (): Promise<AvailableListing[]> => {
     throw new Error(await getErrorMessage(res))
   }
 
-  const data = await res.json()
+  const data = (await res.json()) as ListingsResponse
   return data.listings
 }
 
-const reserveListing = async ({
-  clientId,
-  listing_id,
-  due_day,
-}: ReserveListingPayload) => {
-  const res = await fetch(`${API_URL}/clients/${clientId}/reserve-listing`, {
+const fetchProjects = async (): Promise<Project[]> => {
+  const res = await fetch(`${API_URL}/projects`, {
+    credentials: "include",
+  })
+
+  if (!res.ok) {
+    throw new Error(await getErrorMessage(res))
+  }
+
+  const data = (await res.json()) as ProjectsResponse
+  return data.projects
+}
+
+const createListing = async (listingData: ListingFormData) => {
+  const res = await fetch(`${API_URL}/listings`, {
     method: "POST",
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      listing_id,
-      due_day,
-    }),
+    body: JSON.stringify(listingData),
   })
 
   if (!res.ok) {
@@ -152,613 +149,782 @@ const reserveListing = async ({
   return res.json()
 }
 
-const fetchClientUnitDocuments = async (
-  clientUnitId: number
-): Promise<ClientDocument[]> => {
-  const res = await fetch(`${API_URL}/client-units/${clientUnitId}/documents`, {
+const updateListing = async ({
+  id,
+  listingData,
+}: {
+  id: number
+  listingData: ListingFormData
+}) => {
+  const res = await fetch(`${API_URL}/listings/${id}`, {
+    method: "PATCH",
     credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(listingData),
   })
 
   if (!res.ok) {
     throw new Error(await getErrorMessage(res))
   }
 
-  const data = await res.json()
-  return data.documents
-}
-
-const createChecklist = async (clientUnitId: number) => {
-  const res = await fetch(
-    `${API_URL}/client-units/${clientUnitId}/documents/create-checklist`,
-    {
-      method: "POST",
-      credentials: "include",
-    }
-  )
-
-  if (!res.ok) {
-    throw new Error(await getErrorMessage(res))
-  }
-
   return res.json()
 }
 
-const updateClientDocumentStatus = async ({
-  documentChecklistId,
-  status,
-}: UpdateClientDocumentStatusPayload) => {
-  const res = await fetch(
-    `${API_URL}/client-documents/${documentChecklistId}/status`,
-    {
-      method: "PATCH",
-      credentials: "include",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        status,
-      }),
-    }
-  )
+const listingToFormData = (listing: Listing): ListingFormData => ({
+  project_id: listing.project_id,
+  cadastral_lot_no: listing.cadastral_lot_no || "",
+  unit_id: listing.unit_id || "",
+  lot_type: listing.lot_type || "",
+  promo_discount: Number(listing.promo_discount || 0),
+  downpayment: Number(listing.downpayment || 0),
+  reservation_fee: Number(listing.reservation_fee || 0),
+  price_per_sqm: Number(listing.price_per_sqm || 0),
+  lot_area_sqm: Number(listing.lot_area_sqm || 0),
+  legal_misc_rate: Number(listing.legal_misc_rate || 10),
+  status: listing.status,
+})
 
-  if (!res.ok) {
-    throw new Error(await getErrorMessage(res))
-  }
-
-  return res.json()
+const getSearchText = (listing: Listing) => {
+  return [
+    listing.id,
+    listing.project_name,
+    listing.project_location,
+    listing.cadastral_lot_no,
+    listing.unit_id,
+    listing.lot_type,
+    listing.status,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase()
 }
 
-const applyExistingDocuments = async (clientUnitId: number) => {
-  const res = await fetch(
-    `${API_URL}/client-units/${clientUnitId}/documents/apply-existing`,
-    {
-      method: "POST",
-      credentials: "include",
-    }
-  )
-
-  if (!res.ok) {
-    throw new Error(await getErrorMessage(res))
-  }
-
-  return res.json()
+const computeGrossSellingPrice = (data: ListingFormData) => {
+  return Number(data.price_per_sqm || 0) * Number(data.lot_area_sqm || 0)
 }
 
-const ClientListings = () => {
-  const { id } = useParams()
-  const navigate = useNavigate()
+const computeNetSellingPrice = (data: ListingFormData) => {
+  const grossSellingPrice = computeGrossSellingPrice(data)
+  return grossSellingPrice - Number(data.promo_discount || 0)
+}
+
+const computeLegalMiscFee = (data: ListingFormData) => {
+  const netSellingPrice = computeNetSellingPrice(data)
+  return netSellingPrice * (Number(data.legal_misc_rate || 0) / 100)
+}
+
+const computeTotalContractPrice = (data: ListingFormData) => {
+  return computeNetSellingPrice(data) + computeLegalMiscFee(data)
+}
+
+const Listings = () => {
   const queryClient = useQueryClient()
 
-  const clientId = Number(id)
-  const isValidClientId = Number.isFinite(clientId)
-
-  const [isReserveOpen, setIsReserveOpen] = useState(false)
   const [searchInput, setSearchInput] = useState("")
-  const [dueDay, setDueDay] = useState(28)
-  const [unitPage, setUnitPage] = useState(1)
-  const [unitRowsPerPage, setUnitRowsPerPage] = useState(10)
-  const [listingPage, setListingPage] = useState(1)
-  const [listingRowsPerPage, setListingRowsPerPage] = useState(10)
-  const [selectedUnitForDocs, setSelectedUnitForDocs] =
-    useState<ClientUnit | null>(null)
+  const [statusFilter, setStatusFilter] = useState("all")
+  const [projectFilter, setProjectFilter] = useState("all")
+  const [lotTypeFilter, setLotTypeFilter] = useState("all")
 
-  const { data, isLoading, error } = useQuery<ClientUnitsResponse>({
-    queryKey: ["client-units", clientId],
-    queryFn: () => fetchClientUnits(clientId),
-    enabled: isValidClientId,
+  const [isAddOpen, setIsAddOpen] = useState(false)
+  const [editListing, setEditListing] = useState<Listing | null>(null)
+  const [viewListing, setViewListing] = useState<Listing | null>(null)
+
+  const [formData, setFormData] = useState<ListingFormData>(emptyFormData)
+  const [editFormData, setEditFormData] =
+    useState<ListingFormData>(emptyFormData)
+
+  const [page, setPage] = useState(1)
+  const [rowsPerPage, setRowsPerPage] = useState(10)
+  const [successMessage, setSuccessMessage] = useState("")
+
+  const {
+    data: listings = [],
+    isLoading,
+    error,
+  } = useQuery<Listing[]>({
+    queryKey: ["listings"],
+    queryFn: fetchListings,
   })
 
-  const { data: availableListings = [], isLoading: isAvailableListingsLoading } =
-    useQuery<AvailableListing[]>({
-      queryKey: ["available-listings"],
-      queryFn: fetchAvailableListings,
-      enabled: isReserveOpen,
-    })
+  const { data: projects = [] } = useQuery<Project[]>({
+    queryKey: ["projects"],
+    queryFn: fetchProjects,
+  })
 
-  const { data: selectedDocuments = [], isLoading: isDocumentsLoading } =
-    useQuery<ClientDocument[]>({
-      queryKey: ["client-unit-documents", selectedUnitForDocs?.id],
-      queryFn: () => fetchClientUnitDocuments(selectedUnitForDocs!.id),
-      enabled: !!selectedUnitForDocs,
-    })
-
-  const client = data?.client
-  const units = data?.units || []
-
-  const reserveListingMutation = useMutation({
-    mutationFn: reserveListing,
+  const createListingMutation = useMutation({
+    mutationFn: createListing,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["client-units", clientId] })
+      queryClient.invalidateQueries({ queryKey: ["listings"] })
       queryClient.invalidateQueries({ queryKey: ["available-listings"] })
-      setIsReserveOpen(false)
-      setSearchInput("")
-      setDueDay(28)
-      setListingPage(1)
+      setIsAddOpen(false)
+      setFormData(emptyFormData)
+      setSuccessMessage("Listing added successfully")
     },
   })
 
-  const createChecklistMutation = useMutation({
-    mutationFn: createChecklist,
+  const updateListingMutation = useMutation({
+    mutationFn: updateListing,
     onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["client-unit-documents", selectedUnitForDocs?.id],
-      })
-      queryClient.invalidateQueries({ queryKey: ["client-units", clientId] })
+      queryClient.invalidateQueries({ queryKey: ["listings"] })
+      queryClient.invalidateQueries({ queryKey: ["available-listings"] })
+      setEditListing(null)
+      setEditFormData(emptyFormData)
+      setSuccessMessage("Listing updated successfully")
     },
   })
 
-  const updateDocumentStatusMutation = useMutation({
-    mutationFn: updateClientDocumentStatus,
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["client-unit-documents", selectedUnitForDocs?.id],
-      })
-      queryClient.invalidateQueries({ queryKey: ["client-units", clientId] })
-    },
+  const lotTypes = useMemo(() => {
+    const values = listings
+      .map((listing) => listing.lot_type)
+      .filter((lotType): lotType is string => Boolean(lotType))
+
+    return Array.from(new Set(values))
+  }, [listings])
+
+  const filteredListings = listings.filter((listing) => {
+    const search = searchInput.trim().toLowerCase()
+
+    const matchesSearch = !search || getSearchText(listing).includes(search)
+    const matchesStatus =
+      statusFilter === "all" || listing.status === statusFilter
+    const matchesProject =
+      projectFilter === "all" || String(listing.project_id) === projectFilter
+    const matchesLotType =
+      lotTypeFilter === "all" || listing.lot_type === lotTypeFilter
+
+    return matchesSearch && matchesStatus && matchesProject && matchesLotType
   })
 
-  const applyExistingDocumentsMutation = useMutation({
-    mutationFn: applyExistingDocuments,
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: ["client-unit-documents", selectedUnitForDocs?.id],
-      })
-      queryClient.invalidateQueries({ queryKey: ["client-units", clientId] })
-    },
-  })
-
-  const filteredAvailableListings = useMemo(() => {
-    return availableListings.filter((listing) => {
-      const search = searchInput.toLowerCase().trim()
-
-      return (
-        search === "" ||
-        listing.project_name.toLowerCase().includes(search) ||
-        (listing.cadastral_lot_no || "").toLowerCase().includes(search) ||
-        listing.unit_id.toLowerCase().includes(search) ||
-        (listing.lot_type || "").toLowerCase().includes(search)
-      )
-    })
-  }, [availableListings, searchInput])
-
-  const paginatedUnits = paginateRows(units, unitPage, unitRowsPerPage)
   const paginatedListings = paginateRows(
-    filteredAvailableListings,
-    listingPage,
-    listingRowsPerPage
+    filteredListings,
+    page,
+    rowsPerPage
   )
-  const totalValue = units.reduce(
-    (sum, unit) => sum + Number(unit.net_selling_price || 0),
-    0
-  )
-  const totalPaid = units.reduce(
-    (sum, unit) => sum + Number(unit.paid_amount || 0),
-    0
-  )
-  const totalBalance = units.reduce(
-    (sum, unit) => sum + Number(unit.balance || 0),
-    0
-  )
-  const completedDocs = units.filter(
-    (unit) => unit.document_status === "complete"
+
+  const availableCount = listings.filter(
+    (listing) => listing.status === "available"
+  ).length
+  const reservedCount = listings.filter(
+    (listing) => listing.status === "reserved"
+  ).length
+  const holdCount = listings.filter(
+    (listing) => listing.status === "hold"
+  ).length
+  const soldCount = listings.filter(
+    (listing) => listing.status === "sold"
   ).length
 
-  const getMutationError = (...mutations: { error: unknown }[]) => {
-    const mutationWithError = mutations.find((mutation) => mutation.error)
+  const totalInventoryValue = listings.reduce(
+    (sum, listing) => sum + Number(listing.total_contract_price || 0),
+    0
+  )
 
-    if (!mutationWithError) return ""
+  const chartData = [
+    { name: "Available", value: availableCount },
+    { name: "Reserved", value: reservedCount },
+    { name: "Hold", value: holdCount },
+    { name: "Sold", value: soldCount },
+  ].filter((item) => item.value > 0)
 
-    return mutationWithError.error instanceof Error
-      ? mutationWithError.error.message
-      : "Something went wrong"
+  const openAddModal = () => {
+    setFormData(emptyFormData)
+    setSuccessMessage("")
+    setIsAddOpen(true)
   }
 
-  if (!isValidClientId) {
-    return <Alert title="Invalid client ID" variant="error" />
+  const openEditModal = (listing: Listing) => {
+    setEditListing(listing)
+    setEditFormData(listingToFormData(listing))
+    setSuccessMessage("")
   }
+
+  const resetFilters = () => {
+    setSearchInput("")
+    setStatusFilter("all")
+    setProjectFilter("all")
+    setLotTypeFilter("all")
+    setPage(1)
+  }
+
+  const handleAddListing = (e: { preventDefault: () => void }) => {
+    e.preventDefault()
+    createListingMutation.mutate(formData)
+  }
+
+  const handleUpdateListing = (e: { preventDefault: () => void }) => {
+    e.preventDefault()
+
+    if (!editListing) return
+
+    updateListingMutation.mutate({
+      id: editListing.id,
+      listingData: editFormData,
+    })
+  }
+
+  const mutationError =
+    createListingMutation.error?.message || updateListingMutation.error?.message
 
   if (isLoading) {
-    return <LoadingState label="Loading client units..." />
+    return <LoadingState label="Loading listings..." />
   }
 
   if (error) {
-    return <Alert title="Failed to load client units" variant="error" />
-  }
-
-  if (!client) {
-    return <Alert title="Client not found" variant="error" />
+    return <Alert variant="error" title="Failed to load listings" />
   }
 
   return (
-    <div className="p-4 sm:p-6">
+    <div>
       <PageHeader
-        icon={<FiUser />}
-        title={client.full_name}
-        subtitle="Client unit reservations and physical document checklist"
+        icon={<FiGrid />}
+        title="Listings"
+        subtitle="Manage project inventory, pricing, and listing status."
         actions={
-          <>
-            <Button icon={<FiArrowLeft />} onClick={() => navigate("/clients")}>
-              Back
-            </Button>
-            <Button
-              icon={<FiPlus />}
-              onClick={() => setIsReserveOpen(true)}
-              variant="primary"
-            >
-              Reserve Listing
-            </Button>
-          </>
+          <Button icon={<FiPlus />} onClick={openAddModal} variant="primary">
+            Add Listing
+          </Button>
         }
       />
 
+      {successMessage ? <Alert variant="success" title={successMessage} /> : null}
+      {mutationError ? <Alert variant="error" title={mutationError} /> : null}
+
+      <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-5">
+        <StatCard label="Available" value={availableCount} />
+        <StatCard label="Reserved" value={reservedCount} />
+        <StatCard label="Hold" value={holdCount} />
+        <StatCard label="Sold" value={soldCount} />
+        <StatCard label="Inventory Value" value={formatMoney(totalInventoryValue)} />
+      </div>
+
       <div className="mb-6 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="grid grid-cols-1 gap-3 text-sm md:grid-cols-2 xl:grid-cols-4">
-          <InfoItem label="Spouse / Co-owner" value={client.spouse_co_owner_name} />
-          <InfoItem label="Email" value={client.email} />
-          <InfoItem label="Contact" value={client.contact_no} />
-          <InfoItem label="Address" value={client.address} />
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
+          <div className="h-60">
+            {chartData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={chartData} dataKey="value" nameKey="name" outerRadius={90}>
+                    {chartData.map((entry) => (
+                      <Cell key={entry.name} />
+                    ))}
+                  </Pie>
+                  <Tooltip />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <EmptyState title="No chart data" />
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <StatusMeaning
+              status="available"
+              meaning="Open for reservation."
+            />
+            <StatusMeaning
+              status="reserved"
+              meaning="Reservation made, sale not yet confirmed."
+            />
+            <StatusMeaning
+              status="sold"
+              meaning="Sale confirmed or downpayment made."
+            />
+            <StatusMeaning
+              status="hold"
+              meaning="Manually blocked by admin."
+            />
+            <StatusMeaning
+              status="inactive"
+              meaning="Hidden or no longer used."
+            />
+          </div>
         </div>
       </div>
 
-      <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-4">
-        <StatCard label="Reserved Units" value={formatNumber(units.length)} />
-        <StatCard label="Contract Value" value={formatMoney(totalValue)} />
-        <StatCard label="Paid Amount" value={formatMoney(totalPaid)} />
-        <StatCard
-          label="Open Balance"
-          value={formatMoney(totalBalance)}
-          description={`${completedDocs} complete document checklist(s)`}
-        />
+      <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_160px_200px_180px_auto]">
+          <Input
+            icon={<FiSearch />}
+            placeholder="Search unit, project, lot type, status..."
+            value={searchInput}
+            onChange={(e) => {
+              setSearchInput(e.target.value)
+              setPage(1)
+            }}
+          />
+
+          <Select
+            value={statusFilter}
+            onChange={(e) => {
+              setStatusFilter(e.target.value)
+              setPage(1)
+            }}
+          >
+            <option value="all">All Status</option>
+            {listingStatuses.map((status) => (
+              <option key={status} value={status}>
+                {formatText(status)}
+              </option>
+            ))}
+          </Select>
+
+          <Select
+            value={projectFilter}
+            onChange={(e) => {
+              setProjectFilter(e.target.value)
+              setPage(1)
+            }}
+          >
+            <option value="all">All Projects</option>
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>
+                {project.name}
+              </option>
+            ))}
+          </Select>
+
+          <Select
+            value={lotTypeFilter}
+            onChange={(e) => {
+              setLotTypeFilter(e.target.value)
+              setPage(1)
+            }}
+          >
+            <option value="all">All Lot Types</option>
+            {lotTypes.map((lotType) => (
+              <option key={lotType} value={lotType}>
+                {formatText(lotType)}
+              </option>
+            ))}
+          </Select>
+
+          <Button onClick={resetFilters}>Reset</Button>
+        </div>
       </div>
 
       <TableContainer>
-        <table className="min-w-full divide-y divide-slate-200 text-sm">
+        <table className="w-full text-sm">
           <thead className="bg-slate-50">
-            <tr>
-              <th className="px-4 py-3 text-left font-semibold text-slate-600">
-                Unit ID
-              </th>
-              <th className="px-4 py-3 text-left font-semibold text-slate-600">
-                Project
-              </th>
-              <th className="px-4 py-3 text-left font-semibold text-slate-600">
-                Lot Type
-              </th>
-              <th className="px-4 py-3 text-left font-semibold text-slate-600">
-                Area
-              </th>
-              <th className="px-4 py-3 text-left font-semibold text-slate-600">
-                Net Price
-              </th>
-              <th className="px-4 py-3 text-left font-semibold text-slate-600">
-                Paid
-              </th>
-              <th className="px-4 py-3 text-left font-semibold text-slate-600">
-                Balance
-              </th>
-              <th className="px-4 py-3 text-left font-semibold text-slate-600">
-                Status
-              </th>
-              <th className="px-4 py-3 text-left font-semibold text-slate-600">
-                Documents
-              </th>
-              <th className="px-4 py-3 text-left font-semibold text-slate-600">
-                Action
-              </th>
+            <tr className="border-b border-slate-200">
+              <th className="px-4 py-3 text-left">Status</th>
+              <th className="px-4 py-3 text-left">Unit ID</th>
+              <th className="px-4 py-3 text-left">Project</th>
+              <th className="px-4 py-3 text-left">Lot Type</th>
+              <th className="px-4 py-3 text-left">Area</th>
+              <th className="px-4 py-3 text-left">Price / sqm</th>
+              <th className="px-4 py-3 text-left">Net Selling Price</th>
+              <th className="px-4 py-3 text-left">Legal/Misc Fee</th>
+              <th className="px-4 py-3 text-left">TCP</th>
+              <th className="px-4 py-3 text-left">Actions</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100 bg-white">
-            {paginatedUnits.map((unit) => (
-              <tr key={unit.id} className="hover:bg-slate-50">
+
+          <tbody>
+            {paginatedListings.map((listing) => (
+              <tr key={listing.id} className="border-b border-slate-100">
+                <td className="px-4 py-3">
+                  <StatusBadge status={listing.status} />
+                </td>
+
                 <td className="px-4 py-3 font-semibold text-slate-900">
-                  {unit.unit_id}
+                  {listing.unit_id}
                 </td>
-                <td className="px-4 py-3 text-slate-600">{unit.project_name}</td>
+
                 <td className="px-4 py-3 text-slate-600">
-                  {unit.lot_type || "-"}
+                  <p>{listing.project_name}</p>
+                  {listing.cadastral_lot_no ? (
+                    <p className="text-xs text-slate-500">
+                      Lot: {listing.cadastral_lot_no}
+                    </p>
+                  ) : null}
                 </td>
+
                 <td className="px-4 py-3 text-slate-600">
-                  {formatNumber(unit.lot_area_sqm)} sqm
+                  {listing.lot_type || "-"}
                 </td>
+
                 <td className="px-4 py-3 text-slate-600">
-                  {formatMoney(unit.net_selling_price)}
+                  {formatNumber(listing.lot_area_sqm)} sqm
                 </td>
+
                 <td className="px-4 py-3 text-slate-600">
-                  {formatMoney(unit.paid_amount)}
+                  {formatMoney(listing.price_per_sqm)}
                 </td>
+
                 <td className="px-4 py-3 text-slate-600">
-                  {formatMoney(unit.balance)}
+                  {formatMoney(listing.net_selling_price)}
                 </td>
+
+                <td className="px-4 py-3 text-slate-600">
+                  {formatMoney(listing.legal_misc_fee)}
+                </td>
+
+                <td className="px-4 py-3 font-semibold text-slate-900">
+                  {formatMoney(listing.total_contract_price)}
+                </td>
+
                 <td className="px-4 py-3">
-                  <StatusBadge status={unit.status} />
-                </td>
-                <td className="px-4 py-3">
-                  <StatusBadge status={unit.document_status} />
-                </td>
-                <td className="px-4 py-3">
-                  <Button
-                    icon={<FiFileText />}
-                    onClick={() => {
-                      setSelectedUnitForDocs(unit)
-                      createChecklistMutation.mutate(unit.id)
-                    }}
-                  >
-                    Documents
-                  </Button>
+                  <div className="flex flex-wrap gap-2">
+                    <Button icon={<FiEye />} onClick={() => setViewListing(listing)}>
+                      View
+                    </Button>
+
+                    <Button icon={<FiEdit2 />} onClick={() => openEditModal(listing)}>
+                      Edit
+                    </Button>
+                  </div>
                 </td>
               </tr>
             ))}
+
+            {paginatedListings.length === 0 ? (
+              <tr>
+                <td colSpan={10}>
+                  <EmptyState
+                    title="No listings found"
+                    description="Try another search or add a new listing."
+                  />
+                </td>
+              </tr>
+            ) : null}
           </tbody>
         </table>
-        {units.length === 0 ? (
-          <EmptyState
-            title="No units reserved"
-            description="Reserve an available listing to connect this client to a unit."
-          />
-        ) : null}
       </TableContainer>
 
       <Pagination
-        page={unitPage}
-        rowsPerPage={unitRowsPerPage}
-        totalRows={units.length}
-        onPageChange={setUnitPage}
-        onRowsPerPageChange={setUnitRowsPerPage}
+        page={page}
+        rowsPerPage={rowsPerPage}
+        totalRows={filteredListings.length}
+        onPageChange={setPage}
+        onRowsPerPageChange={setRowsPerPage}
       />
 
-      {isReserveOpen ? (
-        <Modal
-          title="Reserve Available Listing"
-          onClose={() => {
-            setSearchInput("")
-            setIsReserveOpen(false)
-            setDueDay(28)
-          }}
-        >
-          <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_140px_auto]">
-            <Input
-              icon={<FiSearch />}
-              placeholder="Search project, unit ID, cadastral lot no, lot type..."
-              value={searchInput}
-              onChange={(e) => {
-                setSearchInput(e.target.value)
-                setListingPage(1)
-              }}
-            />
-            <Input
-              label="Due Day"
-              type="number"
-              min={1}
-              max={31}
-              value={dueDay}
-              onChange={(e) => setDueDay(Number(e.target.value))}
-            />
-            <Button icon={<FiRefreshCw />} onClick={() => setSearchInput("")}>
-              Reset
-            </Button>
-          </div>
-
-          {reserveListingMutation.error instanceof Error ? (
-            <Alert title={reserveListingMutation.error.message} variant="error" />
-          ) : null}
-
-          {isAvailableListingsLoading ? (
-            <LoadingState label="Loading available listings..." />
-          ) : (
-            <>
-              <TableContainer>
-                <table className="min-w-full divide-y divide-slate-200 text-sm">
-                  <thead className="bg-slate-50">
-                    <tr>
-                      <th className="px-4 py-3 text-left font-semibold text-slate-600">
-                        Unit ID
-                      </th>
-                      <th className="px-4 py-3 text-left font-semibold text-slate-600">
-                        Project
-                      </th>
-                      <th className="px-4 py-3 text-left font-semibold text-slate-600">
-                        Cadastral Lot No.
-                      </th>
-                      <th className="px-4 py-3 text-left font-semibold text-slate-600">
-                        Lot Type
-                      </th>
-                      <th className="px-4 py-3 text-left font-semibold text-slate-600">
-                        Area
-                      </th>
-                      <th className="px-4 py-3 text-left font-semibold text-slate-600">
-                        Net Price
-                      </th>
-                      <th className="px-4 py-3 text-left font-semibold text-slate-600">
-                        Action
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 bg-white">
-                    {paginatedListings.map((listing) => (
-                      <tr key={listing.id} className="hover:bg-slate-50">
-                        <td className="px-4 py-3 font-semibold text-slate-900">
-                          {listing.unit_id}
-                        </td>
-                        <td className="px-4 py-3 text-slate-600">
-                          {listing.project_name}
-                        </td>
-                        <td className="px-4 py-3 text-slate-600">
-                          {listing.cadastral_lot_no || "-"}
-                        </td>
-                        <td className="px-4 py-3 text-slate-600">
-                          {listing.lot_type || "-"}
-                        </td>
-                        <td className="px-4 py-3 text-slate-600">
-                          {formatNumber(listing.lot_area_sqm)} sqm
-                        </td>
-                        <td className="px-4 py-3 text-slate-600">
-                          {formatMoney(listing.net_selling_price)}
-                        </td>
-                        <td className="px-4 py-3">
-                          <Button
-                            disabled={reserveListingMutation.isPending}
-                            onClick={() =>
-                              reserveListingMutation.mutate({
-                                clientId,
-                                listing_id: listing.id,
-                                due_day: dueDay,
-                              })
-                            }
-                            variant="primary"
-                          >
-                            {reserveListingMutation.isPending
-                              ? "Reserving..."
-                              : "Reserve"}
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {filteredAvailableListings.length === 0 ? (
-                  <EmptyState title="No available listings found" />
-                ) : null}
-              </TableContainer>
-              <Pagination
-                page={listingPage}
-                rowsPerPage={listingRowsPerPage}
-                totalRows={filteredAvailableListings.length}
-                onPageChange={setListingPage}
-                onRowsPerPageChange={setListingRowsPerPage}
-              />
-            </>
-          )}
+      {isAddOpen ? (
+        <Modal title="Add Listing" onClose={() => setIsAddOpen(false)} size="xl">
+          <ListingForm
+            listingData={formData}
+            setListingData={setFormData}
+            projects={projects}
+            onSubmit={handleAddListing}
+            onCancel={() => setIsAddOpen(false)}
+            isPending={createListingMutation.isPending}
+            submitLabel="Add Listing"
+            error={createListingMutation.error?.message}
+          />
         </Modal>
       ) : null}
 
-      {selectedUnitForDocs ? (
-        <Modal
-          title="Client Documents"
-          onClose={() => setSelectedUnitForDocs(null)}
-        >
-          <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-            <div>
-              <p className="font-semibold text-slate-900">
-                {selectedUnitForDocs.unit_id} - {selectedUnitForDocs.project_name}
-              </p>
-              <p className="mt-1 text-sm text-slate-500">
-                Document status: {formatText(selectedUnitForDocs.document_status)}
-              </p>
-            </div>
-            <Button
-              disabled={applyExistingDocumentsMutation.isPending}
-              icon={<FiCheckSquare />}
-              onClick={() =>
-                applyExistingDocumentsMutation.mutate(selectedUnitForDocs.id)
-              }
-            >
-              {applyExistingDocumentsMutation.isPending
-                ? "Applying..."
-                : "Apply Existing Docs"}
-            </Button>
-          </div>
+      {editListing ? (
+        <Modal title="Edit Listing" onClose={() => setEditListing(null)} size="xl">
+          <ListingForm
+            listingData={editFormData}
+            setListingData={setEditFormData}
+            projects={projects}
+            onSubmit={handleUpdateListing}
+            onCancel={() => setEditListing(null)}
+            isPending={updateListingMutation.isPending}
+            submitLabel="Save Changes"
+            error={updateListingMutation.error?.message}
+          />
+        </Modal>
+      ) : null}
 
-          {getMutationError(
-            createChecklistMutation,
-            applyExistingDocumentsMutation,
-            updateDocumentStatusMutation
-          ) ? (
-            <Alert
-              title={getMutationError(
-                createChecklistMutation,
-                applyExistingDocumentsMutation,
-                updateDocumentStatusMutation
+      {viewListing ? (
+        <Modal
+          title={`Listing Details - ${viewListing.unit_id}`}
+          onClose={() => setViewListing(null)}
+          size="lg"
+        >
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <InfoItem label="Status" value={formatText(viewListing.status)} />
+            <InfoItem label="Project" value={viewListing.project_name} />
+            <InfoItem label="Unit ID" value={viewListing.unit_id} />
+            <InfoItem label="Cadastral Lot No." value={viewListing.cadastral_lot_no} />
+            <InfoItem label="Lot Type" value={viewListing.lot_type} />
+            <InfoItem
+              label="Lot Area"
+              value={`${formatNumber(viewListing.lot_area_sqm)} sqm`}
+            />
+            <InfoItem label="Price / sqm" value={formatMoney(viewListing.price_per_sqm)} />
+            <InfoItem
+              label="Gross Selling Price"
+              value={formatMoney(
+                Number(viewListing.price_per_sqm || 0) *
+                  Number(viewListing.lot_area_sqm || 0)
               )}
-              variant="error"
             />
-          ) : null}
-
-          {isDocumentsLoading ? (
-            <LoadingState label="Loading documents..." />
-          ) : (
-            <TableContainer>
-              <table className="min-w-full divide-y divide-slate-200 text-sm">
-                <thead className="bg-slate-50">
-                  <tr>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-600">
-                      No.
-                    </th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-600">
-                      Document
-                    </th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-600">
-                      Required
-                    </th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-600">
-                      Reusable
-                    </th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-600">
-                      Status
-                    </th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-600">
-                      Reviewed By
-                    </th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-600">
-                      Reviewed At
-                    </th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-600">
-                      Action
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 bg-white">
-                  {selectedDocuments.map((doc, index) => {
-                    const isSubmitted =
-                      doc.status === "submitted" || doc.status === "approved"
-
-                    return (
-                      <tr key={doc.id} className="hover:bg-slate-50">
-                        <td className="px-4 py-3 text-slate-600">{index + 1}</td>
-                        <td className="px-4 py-3 font-semibold text-slate-900">
-                          {doc.name}
-                        </td>
-                        <td className="px-4 py-3 text-slate-600">
-                          {Boolean(doc.is_required) ? "Yes" : "No"}
-                        </td>
-                        <td className="px-4 py-3 text-slate-600">
-                          {Boolean(doc.can_reuse) ? "Yes" : "No"}
-                        </td>
-                        <td className="px-4 py-3">
-                          <StatusBadge status={doc.status} />
-                        </td>
-                        <td className="px-4 py-3 text-slate-600">
-                          {doc.reviewed_by_name || "-"}
-                        </td>
-                        <td className="px-4 py-3 text-slate-600">
-                          {formatDate(doc.reviewed_at)}
-                        </td>
-                        <td className="px-4 py-3">
-                          <Button
-                            disabled={updateDocumentStatusMutation.isPending}
-                            onClick={() =>
-                              updateDocumentStatusMutation.mutate({
-                                documentChecklistId: doc.id,
-                                status: isSubmitted
-                                  ? "not_submitted"
-                                  : "submitted",
-                              })
-                            }
-                          >
-                            {isSubmitted ? "Mark Pending" : "Mark Submitted"}
-                          </Button>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-              {selectedDocuments.length === 0 ? (
-                <EmptyState title="No documents found" />
-              ) : null}
-            </TableContainer>
-          )}
+            <InfoItem
+              label="Promo Discount"
+              value={formatMoney(viewListing.promo_discount)}
+            />
+            <InfoItem
+              label="Net Selling Price"
+              value={formatMoney(viewListing.net_selling_price)}
+            />
+            <InfoItem
+              label="Legal/Misc Rate"
+              value={`${formatNumber(viewListing.legal_misc_rate)}%`}
+            />
+            <InfoItem
+              label="Legal/Misc Fee"
+              value={formatMoney(viewListing.legal_misc_fee)}
+            />
+            <InfoItem
+              label="Reservation Fee"
+              value={formatMoney(viewListing.reservation_fee)}
+            />
+            <InfoItem
+              label="Downpayment"
+              value={formatMoney(viewListing.downpayment)}
+            />
+            <InfoItem
+              label="Total Contract Price"
+              value={formatMoney(viewListing.total_contract_price)}
+            />
+            <InfoItem label="Created At" value={formatDate(viewListing.created_at)} />
+            <InfoItem label="Updated At" value={formatDate(viewListing.updated_at)} />
+          </div>
         </Modal>
       ) : null}
+    </div>
+  )
+}
+
+type ListingFormProps = {
+  listingData: ListingFormData
+  setListingData: (listingData: ListingFormData) => void
+  projects: Project[]
+  onSubmit: (e: { preventDefault: () => void }) => void
+  onCancel: () => void
+  isPending: boolean
+  submitLabel: string
+  error?: string
+}
+
+const ListingForm = ({
+  listingData,
+  setListingData,
+  projects,
+  onSubmit,
+  onCancel,
+  isPending,
+  submitLabel,
+  error,
+}: ListingFormProps) => {
+  const grossSellingPrice = computeGrossSellingPrice(listingData)
+  const netSellingPrice = computeNetSellingPrice(listingData)
+  const legalMiscFee = computeLegalMiscFee(listingData)
+  const totalContractPrice = computeTotalContractPrice(listingData)
+
+  return (
+    <form className="space-y-4" onSubmit={onSubmit}>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <Select
+          label="Project"
+          value={listingData.project_id}
+          onChange={(e) =>
+            setListingData({
+              ...listingData,
+              project_id: e.target.value ? Number(e.target.value) : "",
+            })
+          }
+          required
+        >
+          <option value="">Select project</option>
+          {projects.map((project) => (
+            <option key={project.id} value={project.id}>
+              {project.name}
+            </option>
+          ))}
+        </Select>
+
+        <Input
+          label="Unit ID"
+          value={listingData.unit_id}
+          onChange={(e) =>
+            setListingData({
+              ...listingData,
+              unit_id: e.target.value,
+            })
+          }
+          required
+        />
+
+        <Input
+          label="Cadastral Lot No."
+          value={listingData.cadastral_lot_no}
+          onChange={(e) =>
+            setListingData({
+              ...listingData,
+              cadastral_lot_no: e.target.value,
+            })
+          }
+        />
+
+        <Input
+          label="Lot Type"
+          value={listingData.lot_type}
+          onChange={(e) =>
+            setListingData({
+              ...listingData,
+              lot_type: e.target.value,
+            })
+          }
+        />
+
+        <Input
+          label="Lot Area sqm"
+          type="number"
+          min={0}
+          step="0.01"
+          value={listingData.lot_area_sqm}
+          onChange={(e) =>
+            setListingData({
+              ...listingData,
+              lot_area_sqm: Number(e.target.value),
+            })
+          }
+        />
+
+        <Input
+          label="Price per sqm"
+          type="number"
+          min={0}
+          step="0.01"
+          value={listingData.price_per_sqm}
+          onChange={(e) =>
+            setListingData({
+              ...listingData,
+              price_per_sqm: Number(e.target.value),
+            })
+          }
+        />
+
+        <Input
+          label="Promo Discount"
+          type="number"
+          min={0}
+          step="0.01"
+          value={listingData.promo_discount}
+          onChange={(e) =>
+            setListingData({
+              ...listingData,
+              promo_discount: Number(e.target.value),
+            })
+          }
+        />
+
+        <Input
+          label="Reservation Fee"
+          type="number"
+          min={0}
+          step="0.01"
+          value={listingData.reservation_fee}
+          onChange={(e) =>
+            setListingData({
+              ...listingData,
+              reservation_fee: Number(e.target.value),
+            })
+          }
+        />
+
+        <Input
+          label="Downpayment"
+          type="number"
+          min={0}
+          step="0.01"
+          value={listingData.downpayment}
+          onChange={(e) =>
+            setListingData({
+              ...listingData,
+              downpayment: Number(e.target.value),
+            })
+          }
+        />
+
+        <Input
+          label="Legal/Misc Rate %"
+          type="number"
+          min={0}
+          step="0.01"
+          value={listingData.legal_misc_rate}
+          onChange={(e) =>
+            setListingData({
+              ...listingData,
+              legal_misc_rate: Number(e.target.value),
+            })
+          }
+        />
+
+        <div>
+          <Select
+            label="Status"
+            value={listingData.status}
+            onChange={(e) =>
+              setListingData({
+                ...listingData,
+                status: e.target.value,
+              })
+            }
+          >
+            {listingStatuses.map((status) => (
+              <option key={status} value={status}>
+                {formatText(status)}
+              </option>
+            ))}
+          </Select>
+
+          <p className="mt-2 text-xs text-slate-500">
+            Use Hold only when admin manually blocks a unit. Reserved and Sold
+            should normally come from client reservation or sale confirmation.
+          </p>
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+        <h3 className="mb-3 font-semibold text-slate-900">Computed Amounts</h3>
+
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+          <ComputedAmount label="Gross Selling Price" value={grossSellingPrice} />
+          <ComputedAmount label="Net Selling Price" value={netSellingPrice} />
+          <ComputedAmount label="Legal/Misc Fee" value={legalMiscFee} />
+          <ComputedAmount label="Total Contract Price" value={totalContractPrice} />
+        </div>
+      </div>
+
+      <Alert variant="info">
+        Status meaning: Available means open for reservation. Reserved means
+        reservation made. Sold means sale confirmed. Hold means admin blocked
+        the unit. Inactive means hidden or no longer used.
+      </Alert>
+
+      {error ? <Alert title={error} variant="error" /> : null}
+
+      <div className="flex justify-end gap-2">
+        <Button onClick={onCancel}>Cancel</Button>
+        <Button disabled={isPending} type="submit" variant="primary">
+          {isPending ? "Saving..." : submitLabel}
+        </Button>
+      </div>
+    </form>
+  )
+}
+
+const ComputedAmount = ({
+  label,
+  value,
+}: {
+  label: string
+  value: number
+}) => {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-3">
+      <p className="text-xs font-semibold uppercase text-slate-400">{label}</p>
+      <p className="mt-1 font-semibold text-slate-900">
+        {formatMoney(value)}
+      </p>
     </div>
   )
 }
@@ -771,13 +937,26 @@ const InfoItem = ({
   value: string | null | undefined
 }) => {
   return (
-    <div>
-      <p className="text-xs font-semibold uppercase text-slate-400">
-        {label}
-      </p>
-      <p className="mt-1 font-medium text-slate-800">{value || "-"}</p>
+    <div className="rounded-lg border border-slate-200 p-4">
+      <p className="text-xs font-semibold uppercase text-slate-400">{label}</p>
+      <p className="mt-1 font-medium text-slate-900">{value || "-"}</p>
     </div>
   )
 }
 
-export default ClientListings
+const StatusMeaning = ({
+  status,
+  meaning,
+}: {
+  status: string
+  meaning: string
+}) => {
+  return (
+    <div className="rounded-lg border border-slate-200 p-4">
+      <StatusBadge status={status} />
+      <p className="mt-2 text-sm text-slate-600">{meaning}</p>
+    </div>
+  )
+}
+
+export default Listings

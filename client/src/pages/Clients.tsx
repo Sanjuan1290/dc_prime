@@ -1,7 +1,13 @@
 import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "react-router-dom"
-import { FiEdit2, FiPlus, FiSearch, FiUsers } from "react-icons/fi"
+import {
+  FiEdit2,
+  FiEye,
+  FiPlus,
+  FiSearch,
+  FiUsers,
+} from "react-icons/fi"
 import Alert from "../components/ui/Alert"
 import Button from "../components/ui/Button"
 import EmptyState from "../components/ui/EmptyState"
@@ -10,10 +16,11 @@ import LoadingState from "../components/ui/LoadingState"
 import Modal from "../components/ui/Modal"
 import PageHeader from "../components/ui/PageHeader"
 import Pagination from "../components/ui/Pagination"
+import Select from "../components/ui/Select"
 import StatCard from "../components/ui/StatCard"
 import TableContainer from "../components/ui/TableContainer"
 import { API_URL, getErrorMessage } from "../utils/api"
-import { formatMoney } from "../utils/formatters"
+import { formatMoney, formatText } from "../utils/formatters"
 import { paginateRows } from "../utils/pagination"
 
 type Client = {
@@ -24,6 +31,9 @@ type Client = {
   contact_no: string | null
   address: string | null
   region: string | null
+  default_seller_id: number | null
+  default_seller_name: string | null
+  default_seller_role: string | null
   units_count: number | string
   balance: number | string
   created_at: string
@@ -37,10 +47,22 @@ type ClientFormData = {
   contact_no: string
   address: string
   region: string
+  default_seller_id: number | null
+}
+
+type AccreditedSeller = {
+  id: number
+  full_name: string
+  seller_role: string
+  status: string
 }
 
 type ClientsResponse = {
   clients: Client[]
+}
+
+type AccreditedSellersResponse = {
+  accreditedSellers: AccreditedSeller[]
 }
 
 const emptyFormData: ClientFormData = {
@@ -50,6 +72,7 @@ const emptyFormData: ClientFormData = {
   contact_no: "",
   address: "",
   region: "",
+  default_seller_id: null,
 }
 
 const fetchClients = async () => {
@@ -63,6 +86,19 @@ const fetchClients = async () => {
 
   const data = (await response.json()) as ClientsResponse
   return data.clients
+}
+
+const fetchAccreditedSellers = async () => {
+  const response = await fetch(`${API_URL}/accredited-sellers`, {
+    credentials: "include",
+  })
+
+  if (!response.ok) {
+    throw new Error(await getErrorMessage(response))
+  }
+
+  const data = (await response.json()) as AccreditedSellersResponse
+  return data.accreditedSellers
 }
 
 const createClient = async (clientData: ClientFormData) => {
@@ -112,6 +148,7 @@ const clientToFormData = (client: Client): ClientFormData => ({
   contact_no: client.contact_no || "",
   address: client.address || "",
   region: client.region || "",
+  default_seller_id: client.default_seller_id,
 })
 
 const Clients = () => {
@@ -137,13 +174,20 @@ const Clients = () => {
     queryFn: fetchClients,
   })
 
+  const { data: sellers = [] } = useQuery({
+    queryKey: ["accredited-sellers"],
+    queryFn: fetchAccreditedSellers,
+  })
+
+  const activeSellers = sellers.filter((seller) => seller.status === "active")
+
   const createClientMutation = useMutation({
     mutationFn: createClient,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["clients"] })
       setIsAddOpen(false)
       setFormData(emptyFormData)
-      setSuccessMessage("Client created successfully")
+      setSuccessMessage("Client added successfully")
     },
   })
 
@@ -160,27 +204,46 @@ const Clients = () => {
   const filteredClients = clients.filter((client) => {
     const search = searchInput.toLowerCase().trim()
 
+    if (!search) return true
+
     return (
-      search === "" ||
       client.full_name.toLowerCase().includes(search) ||
       (client.spouse_co_owner_name || "").toLowerCase().includes(search) ||
       (client.email || "").toLowerCase().includes(search) ||
       (client.contact_no || "").toLowerCase().includes(search) ||
       (client.address || "").toLowerCase().includes(search) ||
-      (client.region || "").toLowerCase().includes(search)
+      (client.region || "").toLowerCase().includes(search) ||
+      (client.default_seller_name || "").toLowerCase().includes(search) ||
+      (client.default_seller_role || "").toLowerCase().includes(search)
     )
   })
 
   const paginatedClients = paginateRows(filteredClients, page, rowsPerPage)
 
   const totalClients = clients.length
-  const clientsWithUnits = clients.filter(
-    (client) => Number(client.units_count || 0) > 0
-  ).length
+  const totalUnits = clients.reduce(
+    (sum, client) => sum + Number(client.units_count || 0),
+    0
+  )
   const totalBalance = clients.reduce(
     (sum, client) => sum + Number(client.balance || 0),
     0
   )
+  const clientsWithSeller = clients.filter(
+    (client) => client.default_seller_id
+  ).length
+
+  const openAddModal = () => {
+    setFormData(emptyFormData)
+    setSuccessMessage("")
+    setIsAddOpen(true)
+  }
+
+  const openEditModal = (client: Client) => {
+    setEditClient(client)
+    setEditFormData(clientToFormData(client))
+    setSuccessMessage("")
+  }
 
   const handleAddClient = (e: { preventDefault: () => void }) => {
     e.preventDefault()
@@ -196,11 +259,6 @@ const Clients = () => {
       id: editClient.id,
       clientData: editFormData,
     })
-  }
-
-  const openEditModal = (client: Client) => {
-    setEditClient(client)
-    setEditFormData(clientToFormData(client))
   }
 
   const mutationError =
@@ -219,17 +277,9 @@ const Clients = () => {
       <PageHeader
         icon={<FiUsers />}
         title="Clients"
-        subtitle="Manage buyer records, contact details, address, region, and assigned units."
+        subtitle="Manage buyer profiles, default sellers, units, and balances."
         actions={
-          <Button
-            icon={<FiPlus />}
-            onClick={() => {
-              setFormData(emptyFormData)
-              setIsAddOpen(true)
-              setSuccessMessage("")
-            }}
-            variant="primary"
-          >
+          <Button icon={<FiPlus />} onClick={openAddModal} variant="primary">
             Add Client
           </Button>
         }
@@ -238,32 +288,23 @@ const Clients = () => {
       {successMessage ? <Alert variant="success" title={successMessage} /> : null}
       {mutationError ? <Alert variant="error" title={mutationError} /> : null}
 
-      <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3">
+      <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-4">
         <StatCard label="Total Clients" value={totalClients} />
-        <StatCard label="Clients With Units" value={clientsWithUnits} />
+        <StatCard label="Total Units" value={totalUnits} />
+        <StatCard label="Clients With Seller" value={clientsWithSeller} />
         <StatCard label="Total Balance" value={formatMoney(totalBalance)} />
       </div>
 
-      <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+      <div className="mb-4">
         <Input
           icon={<FiSearch />}
-          placeholder="Search name, email, contact, address, or region..."
+          placeholder="Search client, contact, region, default seller..."
           value={searchInput}
           onChange={(e) => {
             setSearchInput(e.target.value)
             setPage(1)
           }}
-          className="md:w-96"
         />
-
-        <Button
-          onClick={() => {
-            setSearchInput("")
-            setPage(1)
-          }}
-        >
-          Reset
-        </Button>
       </div>
 
       <TableContainer>
@@ -271,12 +312,11 @@ const Clients = () => {
           <thead className="bg-slate-50">
             <tr className="border-b border-slate-200">
               <th className="px-4 py-3 text-left">Client Name</th>
-              <th className="px-4 py-3 text-left">Email</th>
               <th className="px-4 py-3 text-left">Contact</th>
+              <th className="px-4 py-3 text-left">Region</th>
+              <th className="px-4 py-3 text-left">Default Seller</th>
               <th className="px-4 py-3 text-left">Units</th>
               <th className="px-4 py-3 text-left">Balance</th>
-              <th className="px-4 py-3 text-left">Address</th>
-              <th className="px-4 py-3 text-left">Region</th>
               <th className="px-4 py-3 text-left">Actions</th>
             </tr>
           </thead>
@@ -284,41 +324,65 @@ const Clients = () => {
           <tbody>
             {paginatedClients.map((client) => (
               <tr key={client.id} className="border-b border-slate-100">
-                <td className="px-4 py-3 font-semibold text-slate-900">
-                  {client.full_name}
+                <td className="px-4 py-3">
+                  <p className="font-semibold text-slate-900">
+                    {client.full_name}
+                  </p>
+                  {client.spouse_co_owner_name ? (
+                    <p className="text-xs text-slate-500">
+                      Co-owner: {client.spouse_co_owner_name}
+                    </p>
+                  ) : null}
                 </td>
+
                 <td className="px-4 py-3 text-slate-600">
-                  {client.email || "-"}
+                  <p>{client.contact_no || "-"}</p>
+                  <p className="text-xs text-slate-500">
+                    {client.email || "-"}
+                  </p>
                 </td>
-                <td className="px-4 py-3 text-slate-600">
-                  {client.contact_no || "-"}
-                </td>
-                <td className="px-4 py-3 text-slate-600">
-                  {client.units_count}
-                </td>
-                <td className="px-4 py-3 text-slate-600">
-                  {formatMoney(client.balance)}
-                </td>
-                <td className="px-4 py-3 text-slate-600">
-                  {client.address || "-"}
-                </td>
+
                 <td className="px-4 py-3 text-slate-600">
                   {client.region || "-"}
                 </td>
+
+                <td className="px-4 py-3 text-slate-600">
+                  {client.default_seller_name ? (
+                    <div>
+                      <p className="font-semibold text-slate-900">
+                        {client.default_seller_name}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        {formatText(client.default_seller_role)}
+                      </p>
+                    </div>
+                  ) : (
+                    "-"
+                  )}
+                </td>
+
+                <td className="px-4 py-3 text-slate-600">
+                  {client.units_count}
+                </td>
+
+                <td className="px-4 py-3 font-semibold text-slate-900">
+                  {formatMoney(client.balance)}
+                </td>
+
                 <td className="px-4 py-3">
                   <div className="flex flex-wrap gap-2">
+                    <Button
+                      icon={<FiEye />}
+                      onClick={() => navigate(`/client/${client.id}`)}
+                    >
+                      View
+                    </Button>
+
                     <Button
                       icon={<FiEdit2 />}
                       onClick={() => openEditModal(client)}
                     >
                       Edit
-                    </Button>
-
-                    <Button
-                      onClick={() => navigate(`/client/${client.id}`)}
-                      variant="primary"
-                    >
-                      Unit List
                     </Button>
                   </div>
                 </td>
@@ -327,8 +391,11 @@ const Clients = () => {
 
             {paginatedClients.length === 0 ? (
               <tr>
-                <td colSpan={8}>
-                  <EmptyState title="No clients found" />
+                <td colSpan={7}>
+                  <EmptyState
+                    title="No clients found"
+                    description="Try another search or add a new client."
+                  />
                 </td>
               </tr>
             ) : null}
@@ -345,184 +412,167 @@ const Clients = () => {
       />
 
       {isAddOpen ? (
-        <Modal
-          title="Add Client"
-          onClose={() => setIsAddOpen(false)}
-          footer={
-            <div className="flex justify-end gap-2">
-              <Button onClick={() => setIsAddOpen(false)}>Cancel</Button>
-              <Button
-                disabled={createClientMutation.isPending}
-                form="add-client-form"
-                type="submit"
-                variant="primary"
-              >
-                {createClientMutation.isPending ? "Adding..." : "Add Client"}
-              </Button>
-            </div>
-          }
-        >
-          <form
-            id="add-client-form"
+        <Modal title="Add Client" onClose={() => setIsAddOpen(false)} size="lg">
+          <ClientForm
+            clientData={formData}
+            setClientData={setFormData}
+            sellers={activeSellers}
             onSubmit={handleAddClient}
-            className="grid grid-cols-1 gap-4 md:grid-cols-2"
-          >
-            <Input
-              label="Full Name"
-              value={formData.full_name}
-              onChange={(e) =>
-                setFormData({ ...formData, full_name: e.target.value })
-              }
-              required
-            />
-
-            <Input
-              label="Spouse / Co-owner Name"
-              value={formData.spouse_co_owner_name}
-              onChange={(e) =>
-                setFormData({
-                  ...formData,
-                  spouse_co_owner_name: e.target.value,
-                })
-              }
-            />
-
-            <Input
-              label="Email"
-              type="email"
-              value={formData.email}
-              onChange={(e) =>
-                setFormData({ ...formData, email: e.target.value })
-              }
-            />
-
-            <Input
-              label="Contact No."
-              value={formData.contact_no}
-              onChange={(e) =>
-                setFormData({ ...formData, contact_no: e.target.value })
-              }
-            />
-
-            <Input
-              label="Address"
-              value={formData.address}
-              onChange={(e) =>
-                setFormData({ ...formData, address: e.target.value })
-              }
-              className="md:col-span-2"
-            />
-
-            <Input
-              label="Region"
-              placeholder="Example: Region IV-A / CALABARZON"
-              value={formData.region}
-              onChange={(e) =>
-                setFormData({ ...formData, region: e.target.value })
-              }
-              className="md:col-span-2"
-            />
-          </form>
+            onCancel={() => setIsAddOpen(false)}
+            isPending={createClientMutation.isPending}
+            submitLabel="Add Client"
+            error={createClientMutation.error?.message}
+          />
         </Modal>
       ) : null}
 
       {editClient ? (
-        <Modal
-          title="Edit Client"
-          onClose={() => setEditClient(null)}
-          footer={
-            <div className="flex justify-end gap-2">
-              <Button onClick={() => setEditClient(null)}>Cancel</Button>
-              <Button
-                disabled={updateClientMutation.isPending}
-                form="edit-client-form"
-                type="submit"
-                variant="primary"
-              >
-                {updateClientMutation.isPending ? "Saving..." : "Save Changes"}
-              </Button>
-            </div>
-          }
-        >
-          <form
-            id="edit-client-form"
+        <Modal title="Edit Client" onClose={() => setEditClient(null)} size="lg">
+          <ClientForm
+            clientData={editFormData}
+            setClientData={setEditFormData}
+            sellers={activeSellers}
             onSubmit={handleUpdateClient}
-            className="grid grid-cols-1 gap-4 md:grid-cols-2"
-          >
-            <Input
-              label="Full Name"
-              value={editFormData.full_name}
-              onChange={(e) =>
-                setEditFormData({
-                  ...editFormData,
-                  full_name: e.target.value,
-                })
-              }
-              required
-            />
-
-            <Input
-              label="Spouse / Co-owner Name"
-              value={editFormData.spouse_co_owner_name}
-              onChange={(e) =>
-                setEditFormData({
-                  ...editFormData,
-                  spouse_co_owner_name: e.target.value,
-                })
-              }
-            />
-
-            <Input
-              label="Email"
-              type="email"
-              value={editFormData.email}
-              onChange={(e) =>
-                setEditFormData({
-                  ...editFormData,
-                  email: e.target.value,
-                })
-              }
-            />
-
-            <Input
-              label="Contact No."
-              value={editFormData.contact_no}
-              onChange={(e) =>
-                setEditFormData({
-                  ...editFormData,
-                  contact_no: e.target.value,
-                })
-              }
-            />
-
-            <Input
-              label="Address"
-              value={editFormData.address}
-              onChange={(e) =>
-                setEditFormData({
-                  ...editFormData,
-                  address: e.target.value,
-                })
-              }
-              className="md:col-span-2"
-            />
-
-            <Input
-              label="Region"
-              placeholder="Example: Region IV-A / CALABARZON"
-              value={editFormData.region}
-              onChange={(e) =>
-                setEditFormData({
-                  ...editFormData,
-                  region: e.target.value,
-                })
-              }
-              className="md:col-span-2"
-            />
-          </form>
+            onCancel={() => setEditClient(null)}
+            isPending={updateClientMutation.isPending}
+            submitLabel="Save Changes"
+            error={updateClientMutation.error?.message}
+          />
         </Modal>
       ) : null}
     </div>
+  )
+}
+
+type ClientFormProps = {
+  clientData: ClientFormData
+  setClientData: (clientData: ClientFormData) => void
+  sellers: AccreditedSeller[]
+  onSubmit: (e: { preventDefault: () => void }) => void
+  onCancel: () => void
+  isPending: boolean
+  submitLabel: string
+  error?: string
+}
+
+const ClientForm = ({
+  clientData,
+  setClientData,
+  sellers,
+  onSubmit,
+  onCancel,
+  isPending,
+  submitLabel,
+  error,
+}: ClientFormProps) => {
+  return (
+    <form className="space-y-4" onSubmit={onSubmit}>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <Input
+          label="Client Name"
+          value={clientData.full_name}
+          onChange={(e) =>
+            setClientData({
+              ...clientData,
+              full_name: e.target.value,
+            })
+          }
+          required
+        />
+
+        <Input
+          label="Spouse / Co-owner Name"
+          value={clientData.spouse_co_owner_name}
+          onChange={(e) =>
+            setClientData({
+              ...clientData,
+              spouse_co_owner_name: e.target.value,
+            })
+          }
+        />
+
+        <Input
+          label="Email"
+          type="email"
+          value={clientData.email}
+          onChange={(e) =>
+            setClientData({
+              ...clientData,
+              email: e.target.value,
+            })
+          }
+        />
+
+        <Input
+          label="Contact No."
+          value={clientData.contact_no}
+          onChange={(e) =>
+            setClientData({
+              ...clientData,
+              contact_no: e.target.value,
+            })
+          }
+        />
+
+        <Input
+          label="Region"
+          value={clientData.region}
+          onChange={(e) =>
+            setClientData({
+              ...clientData,
+              region: e.target.value,
+            })
+          }
+        />
+
+        <Select
+          label="Default Seller"
+          value={clientData.default_seller_id || ""}
+          onChange={(e) =>
+            setClientData({
+              ...clientData,
+              default_seller_id: e.target.value
+                ? Number(e.target.value)
+                : null,
+            })
+          }
+        >
+          <option value="">No default seller</option>
+          {sellers.map((seller) => (
+            <option key={seller.id} value={seller.id}>
+              {seller.full_name} - {formatText(seller.seller_role)}
+            </option>
+          ))}
+        </Select>
+
+        <div className="md:col-span-2">
+          <Input
+            label="Address"
+            value={clientData.address}
+            onChange={(e) =>
+              setClientData({
+                ...clientData,
+                address: e.target.value,
+              })
+            }
+          />
+        </div>
+      </div>
+
+      <Alert variant="info">
+        The default seller will auto-fill later when reserving a listing for
+        this client, but you can still change the seller per unit.
+      </Alert>
+
+      {error ? <Alert title={error} variant="error" /> : null}
+
+      <div className="flex justify-end gap-2">
+        <Button onClick={onCancel}>Cancel</Button>
+        <Button disabled={isPending} type="submit" variant="primary">
+          {isPending ? "Saving..." : submitLabel}
+        </Button>
+      </div>
+    </form>
   )
 }
 

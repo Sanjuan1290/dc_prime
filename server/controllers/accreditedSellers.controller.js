@@ -35,6 +35,7 @@ const sellerFields = `
   seller.custom_reports_under,
   COALESCE(parent.full_name, seller.custom_reports_under, 'None') AS reports_under_display,
   seller.status,
+  seller.accreditation_date,
   seller.created_at,
   seller.updated_at
 `
@@ -208,6 +209,7 @@ export const createAccreditedSeller = async (req, res) => {
     parent_seller_id,
     custom_reports_under,
     status = 'active',
+    accreditation_date,
   } = req.body
 
   if (isMissing(full_name)) {
@@ -249,8 +251,9 @@ export const createAccreditedSeller = async (req, res) => {
       seller_role,
       parent_seller_id,
       custom_reports_under,
-      status
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      status,
+      accreditation_date
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     [
       nullableValue(user_id),
@@ -261,6 +264,7 @@ export const createAccreditedSeller = async (req, res) => {
       parentSellerId,
       customReportsUnder,
       status,
+      nullableValue(accreditation_date),
     ]
   )
 
@@ -290,6 +294,7 @@ export const updateAccreditedSeller = async (req, res) => {
     parent_seller_id,
     custom_reports_under,
     status = 'active',
+    accreditation_date,
   } = req.body
 
   if (isMissing(full_name)) {
@@ -341,7 +346,8 @@ export const updateAccreditedSeller = async (req, res) => {
       seller_role = ?,
       parent_seller_id = ?,
       custom_reports_under = ?,
-      status = ?
+      status = ?,
+      accreditation_date = ?
     WHERE id = ?
     `,
     [
@@ -353,6 +359,7 @@ export const updateAccreditedSeller = async (req, res) => {
       parentSellerId,
       customReportsUnder,
       status,
+      nullableValue(accreditation_date),
       id,
     ]
   )
@@ -396,6 +403,7 @@ export const getPossibleParentSellers = async (req, res) => {
       seller.custom_reports_under,
       COALESCE(parent.full_name, seller.custom_reports_under, 'None') AS reports_under_display,
       seller.status,
+      seller.accreditation_date,
       seller.created_at,
       seller.updated_at
     FROM accredited_sellers seller

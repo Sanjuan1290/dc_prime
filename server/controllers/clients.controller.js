@@ -1,13 +1,14 @@
 import { db } from '../db/connect.js'
 import { createAuditLog } from '../utils/createAuditLog.js'
-
-const nullableValue = (value) => {
-  if (value === undefined || value === null || value === '') return null
-  return value
-}
+import { getClientIp } from '../utils/getClientIp.js'
 
 const isMissing = (value) => {
   return value === undefined || value === null || value === ''
+}
+
+const nullableValue = (value) => {
+  if (isMissing(value)) return null
+  return value
 }
 
 const clientFields = `
@@ -18,44 +19,108 @@ const clientFields = `
   c.contact_no,
   c.address,
   c.region,
-  c.created_at,
-  c.updated_at,
-  COUNT(cu.id) AS units_count,
-  COALESCE(SUM(cu.balance), 0) AS balance
-`
-
-const clientGroupBy = `
-  c.id,
-  c.full_name,
-  c.spouse_co_owner_name,
-  c.email,
-  c.contact_no,
-  c.address,
-  c.region,
+  c.default_seller_id,
+  seller.full_name AS default_seller_name,
+  seller.seller_role AS default_seller_role,
+  COALESCE(COUNT(DISTINCT cu.id), 0) AS units_count,
+  COALESCE(SUM(cu.balance), 0) AS balance,
   c.created_at,
   c.updated_at
 `
 
-export const getClients = async (req, res) => {
-  const { search } = req.query
+const clientJoins = `
+  FROM clients c
+  LEFT JOIN accredited_sellers seller
+    ON seller.id = c.default_seller_id
+  LEFT JOIN client_units cu
+    ON cu.client_id = c.id
+`
 
+const getClientById = async (id) => {
+  const [rows] = await db.query(
+    `
+    SELECT
+      ${clientFields}
+    ${clientJoins}
+    WHERE c.id = ?
+    GROUP BY
+      c.id,
+      c.full_name,
+      c.spouse_co_owner_name,
+      c.email,
+      c.contact_no,
+      c.address,
+      c.region,
+      c.default_seller_id,
+      seller.full_name,
+      seller.seller_role,
+      c.created_at,
+      c.updated_at
+    LIMIT 1
+    `,
+    [id]
+  )
+
+  return rows[0] || null
+}
+
+const validateDefaultSeller = async (defaultSellerId) => {
+  if (isMissing(defaultSellerId)) {
+    return {
+      isValid: true,
+      message: null,
+    }
+  }
+
+  const [rows] = await db.query(
+    `
+    SELECT id
+    FROM accredited_sellers
+    WHERE id = ?
+      AND status = 'active'
+    LIMIT 1
+    `,
+    [defaultSellerId]
+  )
+
+  if (rows.length === 0) {
+    return {
+      isValid: false,
+      message: 'Default seller not found or inactive',
+    }
+  }
+
+  return {
+    isValid: true,
+    message: null,
+  }
+}
+
+export const getClients = async (req, res) => {
+  const { search, region, default_seller_id } = req.query
+
+  const conditions = []
   const params = []
-  let whereClause = ''
 
   if (!isMissing(search)) {
     const searchTerm = `%${search}%`
 
-    whereClause = `
-      WHERE
+    conditions.push(`
+      (
         c.full_name LIKE ?
         OR c.spouse_co_owner_name LIKE ?
         OR c.email LIKE ?
         OR c.contact_no LIKE ?
         OR c.address LIKE ?
         OR c.region LIKE ?
-    `
+        OR seller.full_name LIKE ?
+        OR seller.seller_role LIKE ?
+      )
+    `)
 
     params.push(
+      searchTerm,
+      searchTerm,
       searchTerm,
       searchTerm,
       searchTerm,
@@ -65,47 +130,52 @@ export const getClients = async (req, res) => {
     )
   }
 
+  if (!isMissing(region) && region !== 'all') {
+    conditions.push('c.region = ?')
+    params.push(region)
+  }
+
+  if (!isMissing(default_seller_id) && default_seller_id !== 'all') {
+    conditions.push('c.default_seller_id = ?')
+    params.push(default_seller_id)
+  }
+
+  const whereClause =
+    conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
+
   const [clients] = await db.query(
     `
     SELECT
       ${clientFields}
-    FROM clients c
-    LEFT JOIN client_units cu ON cu.client_id = c.id
+    ${clientJoins}
     ${whereClause}
     GROUP BY
-      ${clientGroupBy}
+      c.id,
+      c.full_name,
+      c.spouse_co_owner_name,
+      c.email,
+      c.contact_no,
+      c.address,
+      c.region,
+      c.default_seller_id,
+      seller.full_name,
+      seller.seller_role,
+      c.created_at,
+      c.updated_at
     ORDER BY c.id DESC
     `,
     params
   )
 
   res.status(200).json({
-    clients: clients.map((client) => ({
-      ...client,
-      units_count: Number(client.units_count || 0),
-      balance: Number(client.balance || 0),
-    })),
+    clients,
   })
 }
 
 export const getClient = async (req, res) => {
   const { id } = req.params
 
-  const [clients] = await db.query(
-    `
-    SELECT
-      ${clientFields}
-    FROM clients c
-    LEFT JOIN client_units cu ON cu.client_id = c.id
-    WHERE c.id = ?
-    GROUP BY
-      ${clientGroupBy}
-    LIMIT 1
-    `,
-    [id]
-  )
-
-  const client = clients[0]
+  const client = await getClientById(id)
 
   if (!client) {
     return res.status(404).json({
@@ -114,11 +184,7 @@ export const getClient = async (req, res) => {
   }
 
   res.status(200).json({
-    client: {
-      ...client,
-      units_count: Number(client.units_count || 0),
-      balance: Number(client.balance || 0),
-    },
+    client,
   })
 }
 
@@ -130,11 +196,20 @@ export const createClient = async (req, res) => {
     contact_no,
     address,
     region,
+    default_seller_id,
   } = req.body
 
   if (isMissing(full_name)) {
     return res.status(400).json({
-      message: 'Client full name is required',
+      message: 'Client name is required',
+    })
+  }
+
+  const sellerValidation = await validateDefaultSeller(default_seller_id)
+
+  if (!sellerValidation.isValid) {
+    return res.status(400).json({
+      message: sellerValidation.message,
     })
   }
 
@@ -146,8 +221,9 @@ export const createClient = async (req, res) => {
       email,
       contact_no,
       address,
-      region
-    ) VALUES (?, ?, ?, ?, ?, ?)
+      region,
+      default_seller_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
     `,
     [
       full_name,
@@ -156,6 +232,7 @@ export const createClient = async (req, res) => {
       nullableValue(contact_no),
       nullableValue(address),
       nullableValue(region),
+      nullableValue(default_seller_id),
     ]
   )
 
@@ -164,7 +241,7 @@ export const createClient = async (req, res) => {
     action: 'create',
     module: 'Clients',
     description: `Created client ${full_name}`,
-    ipAddress: req.ip,
+    ipAddress: getClientIp(req),
   })
 
   res.status(201).json({
@@ -183,15 +260,32 @@ export const updateClient = async (req, res) => {
     contact_no,
     address,
     region,
+    default_seller_id,
   } = req.body
 
   if (isMissing(full_name)) {
     return res.status(400).json({
-      message: 'Client full name is required',
+      message: 'Client name is required',
     })
   }
 
-  const [result] = await db.query(
+  const existingClient = await getClientById(id)
+
+  if (!existingClient) {
+    return res.status(404).json({
+      message: 'Client not found',
+    })
+  }
+
+  const sellerValidation = await validateDefaultSeller(default_seller_id)
+
+  if (!sellerValidation.isValid) {
+    return res.status(400).json({
+      message: sellerValidation.message,
+    })
+  }
+
+  await db.query(
     `
     UPDATE clients
     SET
@@ -200,7 +294,8 @@ export const updateClient = async (req, res) => {
       email = ?,
       contact_no = ?,
       address = ?,
-      region = ?
+      region = ?,
+      default_seller_id = ?
     WHERE id = ?
     `,
     [
@@ -210,22 +305,17 @@ export const updateClient = async (req, res) => {
       nullableValue(contact_no),
       nullableValue(address),
       nullableValue(region),
+      nullableValue(default_seller_id),
       id,
     ]
   )
-
-  if (result.affectedRows === 0) {
-    return res.status(404).json({
-      message: 'Client not found',
-    })
-  }
 
   await createAuditLog({
     userId: req.user.id,
     action: 'update',
     module: 'Clients',
     description: `Updated client ${full_name}`,
-    ipAddress: req.ip,
+    ipAddress: getClientIp(req),
   })
 
   res.status(200).json({

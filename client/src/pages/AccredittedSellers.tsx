@@ -39,6 +39,7 @@ type AccreditedSeller = {
   custom_reports_under: string | null
   reports_under_display: string | null
   status: string
+  accreditation_date: string | null
   created_at: string
   updated_at: string
 }
@@ -53,6 +54,7 @@ type SellerFormData = {
   parent_seller_id: number | null
   custom_reports_under: string
   status: string
+  accreditation_date: string
 }
 
 type SellerPayload = {
@@ -64,6 +66,7 @@ type SellerPayload = {
   parent_seller_id: number | null
   custom_reports_under: string | null
   status: string
+  accreditation_date: string | null
 }
 
 type AccreditedSellersResponse = {
@@ -86,6 +89,7 @@ const emptyFormData: SellerFormData = {
   parent_seller_id: null,
   custom_reports_under: "",
   status: "active",
+  accreditation_date: "",
 }
 
 const fetchSellers = async (): Promise<AccreditedSeller[]> => {
@@ -170,6 +174,9 @@ const sellerToFormData = (seller: AccreditedSeller): SellerFormData => ({
   parent_seller_id: seller.parent_seller_id,
   custom_reports_under: seller.custom_reports_under || "",
   status: seller.status,
+  accreditation_date: seller.accreditation_date
+    ? seller.accreditation_date.slice(0, 10)
+    : "",
 })
 
 const buildSellerPayload = (data: SellerFormData): SellerPayload => {
@@ -186,6 +193,7 @@ const buildSellerPayload = (data: SellerFormData): SellerPayload => {
         ? data.custom_reports_under.trim()
         : null,
     status: data.status,
+    accreditation_date: data.accreditation_date || null,
   }
 }
 
@@ -482,7 +490,7 @@ const AccredittedSellers = () => {
                 </td>
 
                 <td className="px-4 py-3 text-slate-600">
-                  {formatDate(seller.created_at)}
+                  {formatDate(seller.accreditation_date)}
                 </td>
 
                 <td className="px-4 py-3">
@@ -682,6 +690,18 @@ const SellerForm = ({
             setSellerData({
               ...sellerData,
               email: e.target.value,
+            })
+          }
+        />
+
+        <Input
+          label="Accreditation Date"
+          type="date"
+          value={sellerData.accreditation_date}
+          onChange={(e) =>
+            setSellerData({
+              ...sellerData,
+              accreditation_date: e.target.value,
             })
           }
         />
