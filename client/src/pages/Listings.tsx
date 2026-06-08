@@ -40,16 +40,21 @@ type Listing = {
   cadastral_lot_no: string | null
   unit_id: string
   lot_type: string | null
-  promo_discount: number | string
-  downpayment: number | string
   reservation_fee: number | string
   price_per_sqm: number | string
   lot_area_sqm: number | string
-  gross_selling_price?: number | string
-  net_selling_price: number | string
   legal_misc_rate: number | string
+  net_selling_price: number | string
   legal_misc_fee: number | string
   total_contract_price: number | string
+  thirty_percent?: number | string
+  spot_dp_discount?: number | string
+  spot_dp?: number | string
+  three_months?: number | string
+  seventy_five_percent?: number | string
+  twelve_months?: number | string
+  eighteen_months?: number | string
+  twenty_months?: number | string
   status: ListingStatus
   created_at: string
   updated_at: string
@@ -121,8 +126,6 @@ type ListingFormData = {
   cadastral_lot_no: string
   unit_id: string
   lot_type: string
-  promo_discount: number
-  downpayment: number
   reservation_fee: number
   price_per_sqm: number
   lot_area_sqm: number
@@ -143,9 +146,7 @@ const defaultListingFormData: ListingFormData = {
   cadastral_lot_no: "",
   unit_id: "",
   lot_type: "inner",
-  promo_discount: 0,
-  downpayment: 0,
-  reservation_fee: 0,
+  reservation_fee: 50000,
   price_per_sqm: 0,
   lot_area_sqm: 0,
   legal_misc_rate: 10,
@@ -269,9 +270,7 @@ const listingToFormData = (listing: Listing): ListingFormData => ({
   cadastral_lot_no: listing.cadastral_lot_no || "",
   unit_id: listing.unit_id,
   lot_type: listing.lot_type || "inner",
-  promo_discount: Number(listing.promo_discount || 0),
-  downpayment: Number(listing.downpayment || 0),
-  reservation_fee: Number(listing.reservation_fee || 0),
+  reservation_fee: Number(listing.reservation_fee || 50000),
   price_per_sqm: Number(listing.price_per_sqm || 0),
   lot_area_sqm: Number(listing.lot_area_sqm || 0),
   legal_misc_rate: Number(listing.legal_misc_rate || 10),
@@ -606,14 +605,23 @@ const Listings = () => {
         <table className="w-full text-sm">
           <thead className="bg-slate-50">
             <tr className="border-b border-slate-200">
+              <th className="px-4 py-3 text-left">Installment</th>
               <th className="px-4 py-3 text-left">Unit ID</th>
-              <th className="px-4 py-3 text-left">Project</th>
-              <th className="px-4 py-3 text-left">Cadastral Lot No.</th>
-              <th className="px-4 py-3 text-left">Lot Type</th>
               <th className="px-4 py-3 text-left">Area</th>
-              <th className="px-4 py-3 text-left">Net Price</th>
-              <th className="px-4 py-3 text-left">Legal / Misc</th>
-              <th className="px-4 py-3 text-left">Total Contract</th>
+              <th className="px-4 py-3 text-left">Price per SQM</th>
+              <th className="px-4 py-3 text-left">Net Selling Price</th>
+              <th className="px-4 py-3 text-left">LMF</th>
+              <th className="px-4 py-3 text-left">TCP</th>
+              <th className="px-4 py-3 text-left">RS</th>
+              <th className="px-4 py-3 text-left">30%</th>
+              <th className="px-4 py-3 text-left">7.5%</th>
+              <th className="px-4 py-3 text-left">SPOT DP</th>
+              <th className="px-4 py-3 text-left">3 Months</th>
+              <th className="px-4 py-3 text-left">75%</th>
+              <th className="px-4 py-3 text-left">12 Months</th>
+              <th className="px-4 py-3 text-left">18 Months</th>
+              <th className="px-4 py-3 text-left">20 Months</th>
+              <th className="px-4 py-3 text-left">Project</th>
               <th className="px-4 py-3 text-left">Status</th>
               <th className="px-4 py-3 text-left">Actions</th>
             </tr>
@@ -622,22 +630,18 @@ const Listings = () => {
           <tbody>
             {paginatedListings.map((listing) => (
               <tr key={listing.id} className="border-b border-slate-100">
-                <td className="px-4 py-3 font-semibold">{listing.unit_id}</td>
-
-                <td className="px-4 py-3 text-slate-600">
-                  {listing.project_name}
-                </td>
-
-                <td className="px-4 py-3 text-slate-600">
-                  {listing.cadastral_lot_no || "-"}
-                </td>
-
-                <td className="px-4 py-3 text-slate-600">
+                <td className="px-4 py-3 font-semibold">
                   {formatText(listing.lot_type)}
                 </td>
 
+                <td className="px-4 py-3 font-semibold">{listing.unit_id}</td>
+
                 <td className="px-4 py-3 text-slate-600">
-                  {formatNumber(listing.lot_area_sqm)} sqm
+                  {formatNumber(listing.lot_area_sqm)}
+                </td>
+
+                <td className="px-4 py-3 text-slate-600">
+                  {formatMoney(listing.price_per_sqm)}
                 </td>
 
                 <td className="px-4 py-3 text-slate-600">
@@ -645,14 +649,51 @@ const Listings = () => {
                 </td>
 
                 <td className="px-4 py-3 text-slate-600">
-                  <div>{formatNumber(listing.legal_misc_rate)}%</div>
-                  <div className="text-xs text-slate-500">
-                    {formatMoney(listing.legal_misc_fee)}
-                  </div>
+                  {formatNumber(listing.legal_misc_rate)}%
                 </td>
 
                 <td className="px-4 py-3 text-slate-600">
                   {formatMoney(listing.total_contract_price)}
+                </td>
+
+                <td className="px-4 py-3 text-slate-600">
+                  {formatMoney(listing.reservation_fee)}
+                </td>
+
+                <td className="px-4 py-3 text-slate-600">
+                  {formatMoney(listing.thirty_percent)}
+                </td>
+
+                <td className="px-4 py-3 text-slate-600">
+                  {formatMoney(listing.spot_dp_discount)}
+                </td>
+
+                <td className="px-4 py-3 text-slate-600">
+                  {formatMoney(listing.spot_dp)}
+                </td>
+
+                <td className="px-4 py-3 text-slate-600">
+                  {formatMoney(listing.three_months)}
+                </td>
+
+                <td className="px-4 py-3 text-slate-600">
+                  {formatMoney(listing.seventy_five_percent)}
+                </td>
+
+                <td className="px-4 py-3 text-slate-600">
+                  {formatMoney(listing.twelve_months)}
+                </td>
+
+                <td className="px-4 py-3 text-slate-600">
+                  {formatMoney(listing.eighteen_months)}
+                </td>
+
+                <td className="px-4 py-3 text-slate-600">
+                  {formatMoney(listing.twenty_months)}
+                </td>
+
+                <td className="px-4 py-3 text-slate-600">
+                  {listing.project_name}
                 </td>
 
                 <td className="px-4 py-3">
@@ -681,7 +722,7 @@ const Listings = () => {
 
             {paginatedListings.length === 0 ? (
               <tr>
-                <td colSpan={10}>
+                <td colSpan={19}>
                   <EmptyState title="No listings found" />
                 </td>
               </tr>
@@ -872,34 +913,6 @@ const ListingFormModal = ({
         ) : null}
 
         <Input
-          label="Promo Discount"
-          type="number"
-          min={0}
-          step="0.01"
-          value={formData.promo_discount}
-          onChange={(e) =>
-            setFormData({
-              ...formData,
-              promo_discount: Number(e.target.value),
-            })
-          }
-        />
-
-        <Input
-          label="Downpayment"
-          type="number"
-          min={0}
-          step="0.01"
-          value={formData.downpayment}
-          onChange={(e) =>
-            setFormData({
-              ...formData,
-              downpayment: Number(e.target.value),
-            })
-          }
-        />
-
-        <Input
           label="Reservation Fee"
           type="number"
           min={0}
@@ -1046,6 +1059,72 @@ const ListingDetailsModal = ({
             />
           </DetailsSection>
 
+          <DetailsSection title="Lot Pricing">
+            <Detail
+              label="Lot Area SQM"
+              value={`${formatNumber(details.listing.lot_area_sqm)} sqm`}
+            />
+            <Detail
+              label="Price / SQM"
+              value={formatMoney(details.listing.price_per_sqm)}
+            />
+            <Detail
+              label="Net Selling Price"
+              value={formatMoney(details.listing.net_selling_price)}
+            />
+            <Detail
+              label="LMF Rate"
+              value={`${formatNumber(details.listing.legal_misc_rate)}%`}
+            />
+            <Detail
+              label="LMF Amount"
+              value={formatMoney(details.listing.legal_misc_fee)}
+            />
+            <Detail
+              label="TCP"
+              value={formatMoney(details.listing.total_contract_price)}
+            />
+          </DetailsSection>
+
+          <DetailsSection title="Sample Computation">
+            <Detail
+              label="RS"
+              value={formatMoney(details.listing.reservation_fee)}
+            />
+            <Detail
+              label="30%"
+              value={formatMoney(details.listing.thirty_percent)}
+            />
+            <Detail
+              label="7.5%"
+              value={formatMoney(details.listing.spot_dp_discount)}
+            />
+            <Detail
+              label="SPOT DP"
+              value={formatMoney(details.listing.spot_dp)}
+            />
+            <Detail
+              label="3 Months"
+              value={formatMoney(details.listing.three_months)}
+            />
+            <Detail
+              label="75%"
+              value={formatMoney(details.listing.seventy_five_percent)}
+            />
+            <Detail
+              label="12 Months"
+              value={formatMoney(details.listing.twelve_months)}
+            />
+            <Detail
+              label="18 Months"
+              value={formatMoney(details.listing.eighteen_months)}
+            />
+            <Detail
+              label="20 Months"
+              value={formatMoney(details.listing.twenty_months)}
+            />
+          </DetailsSection>
+
           <DetailsSection title="Buyer Information">
             <Detail
               label="Buyer Name"
@@ -1085,50 +1164,7 @@ const ListingDetailsModal = ({
             />
           </DetailsSection>
 
-          <DetailsSection title="Lot Pricing">
-            <Detail
-              label="Lot Area SQM"
-              value={`${formatNumber(details.listing.lot_area_sqm)} sqm`}
-            />
-            <Detail
-              label="Price / SQM"
-              value={formatMoney(details.listing.price_per_sqm)}
-            />
-            <Detail
-              label="Gross Selling Price"
-              value={formatMoney(details.listing.gross_selling_price)}
-            />
-            <Detail
-              label="Promo Discount"
-              value={formatMoney(details.listing.promo_discount)}
-            />
-            <Detail
-              label="Net Selling Price"
-              value={formatMoney(details.listing.net_selling_price)}
-            />
-            <Detail
-              label="Legal / Misc Rate"
-              value={`${formatNumber(details.listing.legal_misc_rate)}%`}
-            />
-            <Detail
-              label="Legal / Misc Fee"
-              value={formatMoney(details.listing.legal_misc_fee)}
-            />
-            <Detail
-              label="Total Contract Price"
-              value={formatMoney(details.listing.total_contract_price)}
-            />
-          </DetailsSection>
-
           <DetailsSection title="Payment Information">
-            <Detail
-              label="Reservation Fee"
-              value={formatMoney(details.listing.reservation_fee)}
-            />
-            <Detail
-              label="Downpayment"
-              value={formatMoney(details.listing.downpayment)}
-            />
             <Detail
               label="Total Paid"
               value={formatMoney(details.paymentSummary.total_paid)}

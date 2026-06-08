@@ -19,37 +19,38 @@ const formatDecimal = (value) => {
   return Number(Number(value || 0).toFixed(2))
 }
 
-const getLegalMiscRateFromBody = (body) => {
-  if (!isMissing(body.legal_misc_rate)) {
-    return numberValue(body.legal_misc_rate)
-  }
-
-  /*
-    Backward compatibility:
-    Your current frontend still sends legal_misc_fee as the percentage input.
-    Example: legal_misc_fee: 10 means 10%.
-  */
-  return numberValue(body.legal_misc_fee)
-}
-
 const computeListingAmounts = ({
   lot_area_sqm,
   price_per_sqm,
-  promo_discount,
-  legal_misc_rate
+  legal_misc_rate,
+  reservation_fee
 }) => {
-  const grossPrice = numberValue(lot_area_sqm) * numberValue(price_per_sqm)
-  const netSellingPrice = Math.max(grossPrice - numberValue(promo_discount), 0)
+  const netSellingPrice = numberValue(lot_area_sqm) * numberValue(price_per_sqm)
   const legalMiscRate = numberValue(legal_misc_rate)
   const legalMiscFee = netSellingPrice * (legalMiscRate / 100)
   const totalContractPrice = netSellingPrice + legalMiscFee
+  const reservationFee = numberValue(reservation_fee)
+
+  const thirtyPercent = Math.max(totalContractPrice * 0.3 - reservationFee, 0)
+  const spotDpDiscount = thirtyPercent * 0.075
+  const spotDp = thirtyPercent - spotDpDiscount
+  const seventyFivePercent = totalContractPrice * 0.75
 
   return {
-    grossPrice: formatDecimal(grossPrice),
     netSellingPrice: formatDecimal(netSellingPrice),
     legalMiscRate: formatDecimal(legalMiscRate),
     legalMiscFee: formatDecimal(legalMiscFee),
-    totalContractPrice: formatDecimal(totalContractPrice)
+    totalContractPrice: formatDecimal(totalContractPrice),
+
+    thirtyPercent: formatDecimal(thirtyPercent),
+    spotDpDiscount: formatDecimal(spotDpDiscount),
+    spotDp: formatDecimal(spotDp),
+    threeMonths: formatDecimal(thirtyPercent / 3),
+
+    seventyFivePercent: formatDecimal(seventyFivePercent),
+    twelveMonths: formatDecimal(seventyFivePercent / 12),
+    eighteenMonths: formatDecimal(seventyFivePercent / 18),
+    twentyMonths: formatDecimal(seventyFivePercent / 20)
   }
 }
 
@@ -62,13 +63,11 @@ const listingFields = `
   l.cadastral_lot_no,
   l.unit_id,
   l.lot_type,
-  l.promo_discount,
-  l.downpayment,
   l.reservation_fee,
   l.price_per_sqm,
   l.lot_area_sqm,
-  l.net_selling_price,
   l.legal_misc_rate,
+  l.net_selling_price,
   l.legal_misc_fee,
   l.total_contract_price,
   l.status,
@@ -77,29 +76,29 @@ const listingFields = `
 `
 
 const mapListing = (listing) => {
-  const grossSellingPrice =
-    numberValue(listing.lot_area_sqm) * numberValue(listing.price_per_sqm)
-
-  const legalMiscRate =
-    !isMissing(listing.legal_misc_rate)
-      ? numberValue(listing.legal_misc_rate)
-      : numberValue(listing.net_selling_price) > 0
-        ? (numberValue(listing.legal_misc_fee) /
-            numberValue(listing.net_selling_price)) *
-          100
-        : 0
-
-  const totalContractPrice =
-    !isMissing(listing.total_contract_price)
-      ? numberValue(listing.total_contract_price)
-      : numberValue(listing.net_selling_price) +
-        numberValue(listing.legal_misc_fee)
+  const computed = computeListingAmounts({
+    lot_area_sqm: listing.lot_area_sqm,
+    price_per_sqm: listing.price_per_sqm,
+    legal_misc_rate: listing.legal_misc_rate,
+    reservation_fee: listing.reservation_fee
+  })
 
   return {
     ...listing,
-    gross_selling_price: formatDecimal(grossSellingPrice),
-    legal_misc_rate: formatDecimal(legalMiscRate),
-    total_contract_price: formatDecimal(totalContractPrice)
+
+    net_selling_price: computed.netSellingPrice,
+    legal_misc_rate: computed.legalMiscRate,
+    legal_misc_fee: computed.legalMiscFee,
+    total_contract_price: computed.totalContractPrice,
+
+    thirty_percent: computed.thirtyPercent,
+    spot_dp_discount: computed.spotDpDiscount,
+    spot_dp: computed.spotDp,
+    three_months: computed.threeMonths,
+    seventy_five_percent: computed.seventyFivePercent,
+    twelve_months: computed.twelveMonths,
+    eighteen_months: computed.eighteenMonths,
+    twenty_months: computed.twentyMonths
   }
 }
 
@@ -155,7 +154,7 @@ export const getListings = async (req, res) => {
     params
   )
 
-  res.status(200).json({
+  return res.status(200).json({
     listings: listings.map(mapListing)
   })
 }
@@ -183,7 +182,7 @@ export const getListing = async (req, res) => {
     })
   }
 
-  res.status(200).json({
+  return res.status(200).json({
     listing: mapListing(listing)
   })
 }
@@ -283,6 +282,7 @@ export const getListingFullDetails = async (req, res) => {
         MAX(payment_date) AS latest_payment_date
       FROM payments
       WHERE client_unit_id = ?
+        AND status = 'verified'
       `,
       [clientUnit.id]
     )
@@ -292,6 +292,7 @@ export const getListingFullDetails = async (req, res) => {
       SELECT amount
       FROM payments
       WHERE client_unit_id = ?
+        AND status = 'verified'
       ORDER BY payment_date DESC, id DESC
       LIMIT 1
       `,
@@ -363,7 +364,7 @@ export const getListingFullDetails = async (req, res) => {
         SUM(
           CASE
             WHEN d.is_required = TRUE
-             AND cdl.status NOT IN ('submitted', 'approved')
+              AND cdl.status NOT IN ('submitted', 'approved')
             THEN 1
             ELSE 0
           END
@@ -376,7 +377,6 @@ export const getListingFullDetails = async (req, res) => {
     )
 
     const docs = documentRows[0] || {}
-
     const missingRequired = Number(docs.missing_required_documents || 0)
     const requiredDocuments = Number(docs.required_documents || 0)
 
@@ -393,7 +393,7 @@ export const getListingFullDetails = async (req, res) => {
     }
   }
 
-  res.status(200).json({
+  return res.status(200).json({
     listing: mappedListing,
     clientUnit,
     paymentSummary,
@@ -408,11 +408,10 @@ export const createListing = async (req, res) => {
     cadastral_lot_no,
     unit_id,
     lot_type,
-    promo_discount = 0,
-    downpayment = 0,
-    reservation_fee = 0,
+    reservation_fee = 50000,
     price_per_sqm = 0,
     lot_area_sqm = 0,
+    legal_misc_rate = 10,
     status = 'available'
   } = req.body
 
@@ -444,20 +443,6 @@ export const createListing = async (req, res) => {
     })
   }
 
-  const legal_misc_rate = getLegalMiscRateFromBody(req.body)
-
-  const {
-    netSellingPrice,
-    legalMiscRate,
-    legalMiscFee,
-    totalContractPrice
-  } = computeListingAmounts({
-    lot_area_sqm,
-    price_per_sqm,
-    promo_discount,
-    legal_misc_rate
-  })
-
   const [result] = await db.query(
     `
     INSERT INTO listings (
@@ -465,32 +450,22 @@ export const createListing = async (req, res) => {
       cadastral_lot_no,
       unit_id,
       lot_type,
-      promo_discount,
-      downpayment,
       reservation_fee,
       price_per_sqm,
       lot_area_sqm,
-      net_selling_price,
       legal_misc_rate,
-      legal_misc_fee,
-      total_contract_price,
       status
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     [
       project_id,
       nullableValue(cadastral_lot_no),
       unit_id,
       nullableValue(lot_type),
-      numberValue(promo_discount),
-      numberValue(downpayment),
       numberValue(reservation_fee),
       numberValue(price_per_sqm),
       numberValue(lot_area_sqm),
-      netSellingPrice,
-      legalMiscRate,
-      legalMiscFee,
-      totalContractPrice,
+      numberValue(legal_misc_rate),
       status
     ]
   )
@@ -503,7 +478,7 @@ export const createListing = async (req, res) => {
     ipAddress: getClientIp(req)
   })
 
-  res.status(201).json({
+  return res.status(201).json({
     message: 'Listing created successfully',
     listingId: result.insertId
   })
@@ -517,11 +492,10 @@ export const updateListing = async (req, res) => {
     cadastral_lot_no,
     unit_id,
     lot_type,
-    promo_discount = 0,
-    downpayment = 0,
-    reservation_fee = 0,
+    reservation_fee = 50000,
     price_per_sqm = 0,
     lot_area_sqm = 0,
+    legal_misc_rate = 10,
     status = 'available'
   } = req.body
 
@@ -537,20 +511,6 @@ export const updateListing = async (req, res) => {
     })
   }
 
-  const legal_misc_rate = getLegalMiscRateFromBody(req.body)
-
-  const {
-    netSellingPrice,
-    legalMiscRate,
-    legalMiscFee,
-    totalContractPrice
-  } = computeListingAmounts({
-    lot_area_sqm,
-    price_per_sqm,
-    promo_discount,
-    legal_misc_rate
-  })
-
   const [result] = await db.query(
     `
     UPDATE listings
@@ -559,15 +519,10 @@ export const updateListing = async (req, res) => {
       cadastral_lot_no = ?,
       unit_id = ?,
       lot_type = ?,
-      promo_discount = ?,
-      downpayment = ?,
       reservation_fee = ?,
       price_per_sqm = ?,
       lot_area_sqm = ?,
-      net_selling_price = ?,
       legal_misc_rate = ?,
-      legal_misc_fee = ?,
-      total_contract_price = ?,
       status = ?
     WHERE id = ?
     `,
@@ -576,15 +531,10 @@ export const updateListing = async (req, res) => {
       nullableValue(cadastral_lot_no),
       unit_id,
       nullableValue(lot_type),
-      numberValue(promo_discount),
-      numberValue(downpayment),
       numberValue(reservation_fee),
       numberValue(price_per_sqm),
       numberValue(lot_area_sqm),
-      netSellingPrice,
-      legalMiscRate,
-      legalMiscFee,
-      totalContractPrice,
+      numberValue(legal_misc_rate),
       status,
       id
     ]
@@ -604,7 +554,7 @@ export const updateListing = async (req, res) => {
     ipAddress: getClientIp(req)
   })
 
-  res.status(200).json({
+  return res.status(200).json({
     message: 'Listing updated successfully'
   })
 }
