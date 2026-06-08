@@ -1,11 +1,12 @@
-import { useMemo, useState } from "react"
+import { useMemo, useState, type ReactNode } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
+  FiDollarSign,
   FiEdit2,
-  FiPlus,
-  FiRefreshCw,
+  FiEye,
+  FiPause,
+  FiPlay,
   FiSearch,
-  FiTrendingUp,
 } from "react-icons/fi"
 import Alert from "../components/ui/Alert"
 import Button from "../components/ui/Button"
@@ -20,123 +21,224 @@ import StatCard from "../components/ui/StatCard"
 import StatusBadge from "../components/ui/StatusBadge"
 import TableContainer from "../components/ui/TableContainer"
 import { API_URL, getErrorMessage } from "../utils/api"
-import { formatMoney, formatText } from "../utils/formatters"
+import {
+  formatDate,
+  formatMoney,
+  formatNumber,
+  formatText,
+} from "../utils/formatters"
 import { paginateRows } from "../utils/pagination"
 
-type CommissionStatus = "pending" | "payable" | "released" | "cancelled" | string
+type CommissionStatus =
+  | "active"
+  | "partially_released"
+  | "released"
+  | "cancelled"
+  | "on_hold"
+  | string
 
-type CommissionRole =
-  | "agent"
-  | "unit_manager"
-  | "broker"
-  | "broker_network_manager"
+type ReleaseStatus =
+  | "pending"
+  | "eligible"
+  | "released"
+  | "cancelled"
+  | "on_hold"
   | string
 
 type Commission = {
   id: number
   client_unit_id: number
   seller_id: number
-  commission_role: CommissionRole
+  commission_role: string | null
+  source_type: "main" | "override" | string
+  parent_commission_id: number | null
+  sale_type: "distributed" | "direct" | string
+  cash_kaliwaan_amount: number | string
+  cash_kaliwaan_date: string | null
+  cash_kaliwaan_notes: string | null
+  override_notes: string | null
   seller_name: string
   seller_role: string
   reports_under: string | null
   client_name: string
   unit_id: string
   project_name: string
+  mode_of_payment?: string | null
+  lot_area_sqm: number | string
+  price_per_sqm: number | string
   net_selling_price: number | string
   legal_misc_fee: number | string
   total_contract_price: number | string
   commission_base: number | string
+  gross_commission: number | string
   rate: number | string
-  amount: number | string
+  eligible_amount: number | string
   released_amount: number | string
+  cash_advance_deduction: number | string
   remaining_amount: number | string
+  total_released_percent: number | string
+  first_release_amount: number | string
+  second_release_amount: number | string
+  third_release_amount: number | string
+  fourth_release_amount: number | string
+  retention_amount: number | string
+  first_release_status: ReleaseStatus | null
+  second_release_status: ReleaseStatus | null
+  third_release_status: ReleaseStatus | null
+  fourth_release_status: ReleaseStatus | null
+  retention_status: ReleaseStatus | null
+  total_paid: number | string
+  payment_percentage: number | string
   status: CommissionStatus
+  notes?: string | null
   created_at: string
   updated_at: string
+}
+
+type CommissionRelease = {
+  id: number
+  commission_id: number
+  release_stage: string
+  trigger_payment_percent: number | string | null
+  release_percent: number | string
+  cumulative_release_percent: number | string | null
+  gross_release_amount: number | string
+  cash_advance_deduction: number | string
+  net_release_amount: number | string
+  status: ReleaseStatus
+  released_at: string | null
+  released_by: number | null
+  released_by_name?: string | null
+  notes: string | null
+  created_at: string
+  updated_at: string
+}
+
+type CashAdvanceDeduction = {
+  id: number
+  cash_advance_id: number
+  commission_release_id: number
+  amount: number | string
+  notes: string | null
+  created_at: string
+  seller_id: number
+  client_unit_id: number | null
+  commission_id: number | null
+  cash_advance_status: string
+  remaining_balance: number | string
+  seller_name: string
+  release_stage: string
+  created_by_name: string | null
+}
+
+type CashAdvance = {
+  id: number
+  seller_id: number
+  client_unit_id: number | null
+  commission_id: number | null
+  amount: number | string
+  remaining_balance: number | string
+  status: string
+  requested_at: string | null
+  approved_at: string | null
+  approved_by: number | null
+  notes: string | null
+  created_at: string
+  updated_at: string
+}
+
+type CommissionDetails = Commission & {
+  releases: CommissionRelease[]
+  cashAdvanceDeductions: CashAdvanceDeduction[]
 }
 
 type Seller = {
   id: number
   full_name: string
   seller_role: string
-  status: string
-}
-
-type ClientUnit = {
-  id: number
-  client_id: number
-  client_name: string
-  listing_id: number
-  unit_id: string
-  project_name: string
-  seller_id: number | null
-  seller_name: string | null
-  seller_role: string | null
-  net_selling_price: number | string
-  legal_misc_fee: number | string
-  total_contract_price: number | string
-  status: string
+  commission_rate?: number | string | null
+  reports_under_display?: string | null
 }
 
 type CommissionSummary = {
   total_commissions: number | string
   total_amount: number | string
+  total_eligible: number | string
   total_released: number | string
   total_remaining: number | string
-  pending_count: number | string
-  payable_count: number | string
+  total_cash_advance_deduction: number | string
+  active_count: number | string
+  partially_released_count: number | string
   released_count: number | string
   cancelled_count: number | string
+  main_count: number | string
+  override_count: number | string
 }
 
-type CommissionFormData = {
-  client_unit_id: number | ""
+type CommissionEditData = {
   seller_id: number | ""
-  commission_role: CommissionRole
-  rate: number
-  released_amount: number
+  rate: string
+  commission_role: string
+  source_type: "main" | "override"
+  sale_type: "distributed" | "direct"
+  cash_kaliwaan_amount: string
+  cash_kaliwaan_date: string
+  cash_kaliwaan_notes: string
+  override_notes: string
   status: CommissionStatus
+  notes: string
+}
+
+type DeductAdvanceData = {
+  cash_advance_id: number | ""
+  amount: string
+  notes: string
 }
 
 type CommissionsResponse = {
-  commissions: Commission[]
+  commissions?: Commission[]
+  data?: Commission[]
+}
+
+type CommissionResponse = {
+  commission?: CommissionDetails
+  data?: CommissionDetails
 }
 
 type CommissionSummaryResponse = {
-  summary: CommissionSummary
+  summary?: CommissionSummary
+  data?: CommissionSummary
 }
 
 type SellersResponse = {
   accreditedSellers?: Seller[]
   sellers?: Seller[]
+  data?: Seller[]
 }
 
-type ClientUnitsResponse = {
-  clientUnits: ClientUnit[]
+type CashAdvancesResponse = {
+  cashAdvances?: CashAdvance[]
+  data?: CashAdvance[]
 }
 
-const commissionRoles = [
-  "agent",
-  "unit_manager",
-  "broker",
-  "broker_network_manager",
-]
-
-const commissionStatuses = [
-  "pending",
-  "payable",
-  "released",
-  "cancelled",
-]
-
-const emptyFormData: CommissionFormData = {
-  client_unit_id: "",
+const defaultCommissionEditData: CommissionEditData = {
   seller_id: "",
-  commission_role: "agent",
-  rate: 7,
-  released_amount: 0,
-  status: "pending",
+  rate: "",
+  commission_role: "",
+  source_type: "main",
+  sale_type: "distributed",
+  cash_kaliwaan_amount: "",
+  cash_kaliwaan_date: "",
+  cash_kaliwaan_notes: "",
+  override_notes: "",
+  status: "active",
+  notes: "",
+}
+
+const defaultDeductAdvanceData: DeductAdvanceData = {
+  cash_advance_id: "",
+  amount: "",
+  notes: "",
 }
 
 const fetchCommissions = async (): Promise<Commission[]> => {
@@ -144,12 +246,10 @@ const fetchCommissions = async (): Promise<Commission[]> => {
     credentials: "include",
   })
 
-  if (!res.ok) {
-    throw new Error(await getErrorMessage(res))
-  }
+  if (!res.ok) throw new Error(await getErrorMessage(res))
 
   const data = (await res.json()) as CommissionsResponse
-  return data.commissions
+  return data.commissions || data.data || []
 }
 
 const fetchCommissionSummary = async (): Promise<CommissionSummary> => {
@@ -157,12 +257,27 @@ const fetchCommissionSummary = async (): Promise<CommissionSummary> => {
     credentials: "include",
   })
 
-  if (!res.ok) {
-    throw new Error(await getErrorMessage(res))
-  }
+  if (!res.ok) throw new Error(await getErrorMessage(res))
 
   const data = (await res.json()) as CommissionSummaryResponse
-  return data.summary
+
+  return (
+    data.summary ||
+    data.data || {
+      total_commissions: 0,
+      total_amount: 0,
+      total_eligible: 0,
+      total_released: 0,
+      total_remaining: 0,
+      total_cash_advance_deduction: 0,
+      active_count: 0,
+      partially_released_count: 0,
+      released_count: 0,
+      cancelled_count: 0,
+      main_count: 0,
+      override_count: 0,
+    }
+  )
 }
 
 const fetchSellers = async (): Promise<Seller[]> => {
@@ -170,42 +285,34 @@ const fetchSellers = async (): Promise<Seller[]> => {
     credentials: "include",
   })
 
-  if (!res.ok) {
-    throw new Error(await getErrorMessage(res))
-  }
+  if (!res.ok) throw new Error(await getErrorMessage(res))
 
   const data = (await res.json()) as SellersResponse
-  return data.accreditedSellers || data.sellers || []
+  return data.accreditedSellers || data.sellers || data.data || []
 }
 
-const fetchClientUnits = async (): Promise<ClientUnit[]> => {
-  const res = await fetch(`${API_URL}/client-units`, {
+const fetchCommissionDetails = async (commissionId: number) => {
+  const res = await fetch(`${API_URL}/commissions/${commissionId}`, {
     credentials: "include",
   })
 
-  if (!res.ok) {
-    throw new Error(await getErrorMessage(res))
-  }
+  if (!res.ok) throw new Error(await getErrorMessage(res))
 
-  const data = (await res.json()) as ClientUnitsResponse
-  return data.clientUnits
+  const data = (await res.json()) as CommissionResponse
+  return data.commission || data.data
 }
 
-const createCommission = async (commissionData: CommissionFormData) => {
-  const res = await fetch(`${API_URL}/commissions`, {
-    method: "POST",
+const fetchApprovedCashAdvances = async (sellerId: number | null) => {
+  if (!sellerId) return []
+
+  const res = await fetch(`${API_URL}/sellers/${sellerId}/approved-cash-advances`, {
     credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(commissionData),
   })
 
-  if (!res.ok) {
-    throw new Error(await getErrorMessage(res))
-  }
+  if (!res.ok) throw new Error(await getErrorMessage(res))
 
-  return res.json()
+  const data = (await res.json()) as CashAdvancesResponse
+  return data.cashAdvances || data.data || []
 }
 
 const updateCommission = async ({
@@ -213,7 +320,7 @@ const updateCommission = async ({
   commissionData,
 }: {
   id: number
-  commissionData: CommissionFormData
+  commissionData: CommissionEditData
 }) => {
   const res = await fetch(`${API_URL}/commissions/${id}`, {
     method: "PATCH",
@@ -221,257 +328,385 @@ const updateCommission = async ({
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(commissionData),
+    body: JSON.stringify({
+      seller_id: commissionData.seller_id || null,
+      rate: commissionData.rate === "" ? null : Number(commissionData.rate),
+      commission_role: commissionData.commission_role || null,
+      source_type: commissionData.source_type,
+      sale_type: commissionData.sale_type,
+      cash_kaliwaan_amount:
+        commissionData.cash_kaliwaan_amount === ""
+          ? 0
+          : Number(commissionData.cash_kaliwaan_amount),
+      cash_kaliwaan_date: commissionData.cash_kaliwaan_date || null,
+      cash_kaliwaan_notes: commissionData.cash_kaliwaan_notes || null,
+      override_notes: commissionData.override_notes || null,
+      status: commissionData.status,
+      notes: commissionData.notes || null,
+    }),
   })
 
-  if (!res.ok) {
-    throw new Error(await getErrorMessage(res))
-  }
+  if (!res.ok) throw new Error(await getErrorMessage(res))
 
   return res.json()
 }
 
-const generateHierarchyCommissions = async (clientUnitId: number) => {
-  const res = await fetch(
-    `${API_URL}/client-units/${clientUnitId}/commissions/generate-hierarchy`,
-    {
-      method: "POST",
-      credentials: "include",
-    }
-  )
+const generateMilestones = async (commissionId: number) => {
+  const res = await fetch(`${API_URL}/commissions/${commissionId}/releases/generate`, {
+    method: "POST",
+    credentials: "include",
+  })
 
-  if (!res.ok) {
-    throw new Error(await getErrorMessage(res))
-  }
+  if (!res.ok) throw new Error(await getErrorMessage(res))
 
   return res.json()
 }
 
-const getCommissionBase = (clientUnit: ClientUnit | null | undefined) => {
-  if (!clientUnit) return 0
+const markRelease = async (releaseId: number) => {
+  const res = await fetch(`${API_URL}/commission-releases/${releaseId}/mark-released`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({}),
+  })
 
-  const totalContractPrice = Number(clientUnit.total_contract_price || 0)
+  if (!res.ok) throw new Error(await getErrorMessage(res))
 
-  if (totalContractPrice > 0) {
-    return totalContractPrice
-  }
-
-  return (
-    Number(clientUnit.net_selling_price || 0) +
-    Number(clientUnit.legal_misc_fee || 0)
-  )
+  return res.json()
 }
 
-const computeCommissionAmount = (commissionBase: number, rate: number) => {
-  return commissionBase * (Number(rate || 0) / 100)
+const deductAdvance = async ({
+  releaseId,
+  deductData,
+}: {
+  releaseId: number
+  deductData: DeductAdvanceData
+}) => {
+  const res = await fetch(`${API_URL}/commission-releases/${releaseId}/deduct-advance`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      cash_advance_id: deductData.cash_advance_id || null,
+      amount: Number(deductData.amount || 0),
+      notes: deductData.notes || null,
+    }),
+  })
+
+  if (!res.ok) throw new Error(await getErrorMessage(res))
+
+  return res.json()
 }
 
-const commissionToFormData = (commission: Commission): CommissionFormData => ({
-  client_unit_id: commission.client_unit_id,
+const cancelRelease = async (releaseId: number) => {
+  const res = await fetch(`${API_URL}/commission-releases/${releaseId}/cancel`, {
+    method: "PATCH",
+    credentials: "include",
+  })
+
+  if (!res.ok) throw new Error(await getErrorMessage(res))
+
+  return res.json()
+}
+
+const holdRelease = async (releaseId: number) => {
+  const res = await fetch(`${API_URL}/commission-releases/${releaseId}/hold`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({}),
+  })
+
+  if (!res.ok) throw new Error(await getErrorMessage(res))
+
+  return res.json()
+}
+
+const unholdRelease = async (releaseId: number) => {
+  const res = await fetch(`${API_URL}/commission-releases/${releaseId}/unhold`, {
+    method: "PATCH",
+    credentials: "include",
+  })
+
+  if (!res.ok) throw new Error(await getErrorMessage(res))
+
+  return res.json()
+}
+
+const commissionToEditData = (commission: Commission): CommissionEditData => ({
   seller_id: commission.seller_id,
-  commission_role: commission.commission_role || "agent",
-  rate: Number(commission.rate || 0),
-  released_amount: Number(commission.released_amount || 0),
-  status: commission.status,
+  rate:
+    commission.rate === null || commission.rate === undefined
+      ? ""
+      : String(commission.rate),
+  commission_role: commission.commission_role || "",
+  source_type: commission.source_type === "override" ? "override" : "main",
+  sale_type: commission.sale_type === "direct" ? "direct" : "distributed",
+  cash_kaliwaan_amount:
+    Number(commission.cash_kaliwaan_amount || 0) > 0
+      ? String(commission.cash_kaliwaan_amount)
+      : "",
+  cash_kaliwaan_date: commission.cash_kaliwaan_date
+    ? commission.cash_kaliwaan_date.slice(0, 10)
+    : "",
+  cash_kaliwaan_notes: commission.cash_kaliwaan_notes || "",
+  override_notes: commission.override_notes || "",
+  status: commission.status || "active",
+  notes: commission.notes || "",
 })
+
+const formatReleaseCell = (
+  amount: number | string | null | undefined,
+  status: ReleaseStatus | null | undefined
+) => {
+  const formattedAmount = formatMoney(amount || 0)
+  const formattedStatus = status ? formatText(status) : "No milestone"
+
+  return `${formattedAmount} / ${formattedStatus}`
+}
+
+const getReleaseStageLabel = (stage: string) => {
+  switch (stage) {
+    case "1st_release":
+      return "1st Release 20%"
+    case "2nd_release":
+      return "2nd Release 40%"
+    case "3rd_release":
+      return "3rd Release 60%"
+    case "4th_release":
+      return "4th Release 75%"
+    case "retention":
+      return "Retention 25%"
+    default:
+      return formatText(stage)
+  }
+}
+
+const groupCommissionsByClientUnit = (commissions: Commission[]) => {
+  const groups = new Map<number, Commission[]>()
+
+  commissions.forEach((commission) => {
+    const existing = groups.get(commission.client_unit_id) || []
+    existing.push(commission)
+    groups.set(commission.client_unit_id, existing)
+  })
+
+  return Array.from(groups.entries()).map(([client_unit_id, group]) => {
+    const main =
+      group.find((commission) => commission.source_type === "main") || group[0]
+    const override =
+      group.find((commission) => commission.source_type === "override") || null
+
+    return {
+      client_unit_id,
+      main,
+      override,
+      all: group,
+    }
+  })
+}
 
 const Commissions = () => {
   const queryClient = useQueryClient()
 
   const [searchInput, setSearchInput] = useState("")
   const [statusFilter, setStatusFilter] = useState("all")
-  const [sellerRoleFilter, setSellerRoleFilter] = useState("all")
-  const [commissionRoleFilter, setCommissionRoleFilter] = useState("all")
-
-  const [isAddOpen, setIsAddOpen] = useState(false)
-  const [editCommission, setEditCommission] = useState<Commission | null>(null)
-
-  const [formData, setFormData] = useState<CommissionFormData>(emptyFormData)
-  const [editFormData, setEditFormData] =
-    useState<CommissionFormData>(emptyFormData)
-
-  const [generateClientUnitId, setGenerateClientUnitId] = useState<number | "">("")
-
+  const [sourceTypeFilter, setSourceTypeFilter] = useState("all")
+  const [saleTypeFilter, setSaleTypeFilter] = useState("all")
   const [page, setPage] = useState(1)
   const [rowsPerPage, setRowsPerPage] = useState(10)
+  const [viewCommissionId, setViewCommissionId] = useState<number | null>(null)
+  const [editCommission, setEditCommission] = useState<Commission | null>(null)
+  const [editData, setEditData] =
+    useState<CommissionEditData>(defaultCommissionEditData)
+  const [deductReleaseId, setDeductReleaseId] = useState<number | null>(null)
+  const [deductData, setDeductData] =
+    useState<DeductAdvanceData>(defaultDeductAdvanceData)
   const [successMessage, setSuccessMessage] = useState("")
 
   const {
     data: commissions = [],
     isLoading,
     error,
-  } = useQuery<Commission[]>({
+  } = useQuery({
     queryKey: ["commissions"],
     queryFn: fetchCommissions,
   })
 
-  const { data: summary } = useQuery<CommissionSummary>({
-    queryKey: ["commissions-summary"],
+  const { data: summary } = useQuery({
+    queryKey: ["commission-summary"],
     queryFn: fetchCommissionSummary,
   })
 
-  const { data: sellers = [] } = useQuery<Seller[]>({
-    queryKey: ["accredited-sellers"],
+  const { data: sellers = [] } = useQuery({
+    queryKey: ["accredited-sellers", "active"],
     queryFn: fetchSellers,
   })
 
-  const { data: clientUnits = [] } = useQuery<ClientUnit[]>({
-    queryKey: ["client-units"],
-    queryFn: fetchClientUnits,
+  const {
+    data: commissionDetails,
+    isLoading: isDetailsLoading,
+    error: detailsError,
+  } = useQuery({
+    queryKey: ["commission-details", viewCommissionId],
+    queryFn: () => fetchCommissionDetails(viewCommissionId || 0),
+    enabled: Boolean(viewCommissionId),
   })
 
-  const createCommissionMutation = useMutation({
-    mutationFn: createCommission,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["commissions"] })
-      queryClient.invalidateQueries({ queryKey: ["commissions-summary"] })
-      setIsAddOpen(false)
-      setFormData(emptyFormData)
-      setSuccessMessage("Commission added successfully")
-    },
+  const { data: approvedCashAdvances = [] } = useQuery({
+    queryKey: [
+      "approved-cash-advances",
+      commissionDetails?.seller_id || null,
+    ],
+    queryFn: () => fetchApprovedCashAdvances(commissionDetails?.seller_id || null),
+    enabled: Boolean(commissionDetails?.seller_id && deductReleaseId),
   })
 
-  const updateCommissionMutation = useMutation({
+  const invalidateCommissionQueries = () => {
+    queryClient.invalidateQueries({ queryKey: ["commissions"] })
+    queryClient.invalidateQueries({ queryKey: ["commission-summary"] })
+
+    if (viewCommissionId) {
+      queryClient.invalidateQueries({
+        queryKey: ["commission-details", viewCommissionId],
+      })
+    }
+
+    if (commissionDetails?.seller_id) {
+      queryClient.invalidateQueries({
+        queryKey: ["approved-cash-advances", commissionDetails.seller_id],
+      })
+    }
+  }
+
+  const updateMutation = useMutation({
     mutationFn: updateCommission,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["commissions"] })
-      queryClient.invalidateQueries({ queryKey: ["commissions-summary"] })
+      invalidateCommissionQueries()
       setEditCommission(null)
-      setEditFormData(emptyFormData)
       setSuccessMessage("Commission updated successfully")
     },
   })
 
-  const generateHierarchyMutation = useMutation({
-    mutationFn: generateHierarchyCommissions,
+  const generateMutation = useMutation({
+    mutationFn: generateMilestones,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["commissions"] })
-      queryClient.invalidateQueries({ queryKey: ["commissions-summary"] })
-      setGenerateClientUnitId("")
-      setSuccessMessage("Hierarchy commissions generated successfully")
+      invalidateCommissionQueries()
+      setSuccessMessage("Milestones generated successfully")
+    },
+  })
+
+  const markReleaseMutation = useMutation({
+    mutationFn: markRelease,
+    onSuccess: () => {
+      invalidateCommissionQueries()
+      setSuccessMessage("Release marked as released")
+    },
+  })
+
+  const deductMutation = useMutation({
+    mutationFn: deductAdvance,
+    onSuccess: () => {
+      invalidateCommissionQueries()
+      setDeductReleaseId(null)
+      setDeductData(defaultDeductAdvanceData)
+      setSuccessMessage("Cash advance deducted successfully")
+    },
+  })
+
+  const cancelReleaseMutation = useMutation({
+    mutationFn: cancelRelease,
+    onSuccess: () => {
+      invalidateCommissionQueries()
+      setSuccessMessage("Release cancelled successfully")
+    },
+  })
+
+  const holdReleaseMutation = useMutation({
+    mutationFn: holdRelease,
+    onSuccess: () => {
+      invalidateCommissionQueries()
+      setSuccessMessage("Release put on hold")
+    },
+  })
+
+  const unholdReleaseMutation = useMutation({
+    mutationFn: unholdRelease,
+    onSuccess: () => {
+      invalidateCommissionQueries()
+      setSuccessMessage("Release restored")
     },
   })
 
   const filteredCommissions = commissions.filter((commission) => {
-    const search = searchInput.trim().toLowerCase()
+    const search = searchInput.toLowerCase().trim()
 
     const matchesSearch =
-      !search ||
-      [
-        commission.seller_name,
-        commission.seller_role,
-        commission.commission_role,
-        commission.reports_under,
-        commission.client_name,
-        commission.unit_id,
-        commission.project_name,
-        commission.status,
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase()
-        .includes(search)
+      search === "" ||
+      commission.client_name.toLowerCase().includes(search) ||
+      commission.unit_id.toLowerCase().includes(search) ||
+      commission.project_name.toLowerCase().includes(search) ||
+      commission.seller_name.toLowerCase().includes(search) ||
+      (commission.commission_role || "").toLowerCase().includes(search) ||
+      (commission.reports_under || "").toLowerCase().includes(search) ||
+      commission.sale_type.toLowerCase().includes(search) ||
+      commission.source_type.toLowerCase().includes(search)
 
     const matchesStatus =
       statusFilter === "all" || commission.status === statusFilter
 
-    const matchesSellerRole =
-      sellerRoleFilter === "all" ||
-      commission.seller_role === sellerRoleFilter
+    const matchesSourceType =
+      sourceTypeFilter === "all" || commission.source_type === sourceTypeFilter
 
-    const matchesCommissionRole =
-      commissionRoleFilter === "all" ||
-      commission.commission_role === commissionRoleFilter
+    const matchesSaleType =
+      saleTypeFilter === "all" || commission.sale_type === saleTypeFilter
 
-    return (
-      matchesSearch &&
-      matchesStatus &&
-      matchesSellerRole &&
-      matchesCommissionRole
-    )
+    return matchesSearch && matchesStatus && matchesSourceType && matchesSaleType
   })
 
-  const paginatedCommissions = paginateRows(
-    filteredCommissions,
-    page,
-    rowsPerPage
-  )
-
-  const sellerRoles = useMemo(() => {
-    const roles = sellers
-      .map((seller) => seller.seller_role)
-      .filter(Boolean)
-
-    return Array.from(new Set(roles))
-  }, [sellers])
-
-  const selectedAddClientUnit =
-    clientUnits.find((unit) => unit.id === formData.client_unit_id) || null
-
-  const selectedEditClientUnit =
-    clientUnits.find((unit) => unit.id === editFormData.client_unit_id) || null
-
-  const selectedGenerateClientUnit =
-    clientUnits.find((unit) => unit.id === generateClientUnitId) || null
-
-  const addCommissionBase = getCommissionBase(selectedAddClientUnit)
-  const editCommissionBase = getCommissionBase(selectedEditClientUnit)
-
-  const addComputedAmount = computeCommissionAmount(
-    addCommissionBase,
-    formData.rate
-  )
-
-  const editComputedAmount = computeCommissionAmount(
-    editCommissionBase,
-    editFormData.rate
-  )
-
-  const openAddModal = () => {
-    setFormData(emptyFormData)
-    setSuccessMessage("")
-    setIsAddOpen(true)
-  }
+  const groupedRows = groupCommissionsByClientUnit(filteredCommissions)
+  const paginatedGroups = paginateRows(groupedRows, page, rowsPerPage)
 
   const openEditModal = (commission: Commission) => {
     setEditCommission(commission)
-    setEditFormData(commissionToFormData(commission))
+    setEditData(commissionToEditData(commission))
     setSuccessMessage("")
   }
 
-  const resetFilters = () => {
-    setSearchInput("")
-    setStatusFilter("all")
-    setSellerRoleFilter("all")
-    setCommissionRoleFilter("all")
-    setPage(1)
-  }
-
-  const handleAddCommission = (e: { preventDefault: () => void }) => {
-    e.preventDefault()
-    createCommissionMutation.mutate(formData)
-  }
-
-  const handleUpdateCommission = (e: { preventDefault: () => void }) => {
-    e.preventDefault()
-
+  const handleUpdateCommission = () => {
     if (!editCommission) return
 
-    updateCommissionMutation.mutate({
+    updateMutation.mutate({
       id: editCommission.id,
-      commissionData: editFormData,
+      commissionData: editData,
     })
   }
 
-  const handleGenerateHierarchy = () => {
-    if (!generateClientUnitId) return
-    generateHierarchyMutation.mutate(generateClientUnitId)
+  const handleDeduct = () => {
+    if (!deductReleaseId) return
+
+    deductMutation.mutate({
+      releaseId: deductReleaseId,
+      deductData,
+    })
   }
 
   const mutationError =
-    createCommissionMutation.error?.message ||
-    updateCommissionMutation.error?.message ||
-    generateHierarchyMutation.error?.message
+    updateMutation.error?.message ||
+    generateMutation.error?.message ||
+    markReleaseMutation.error?.message ||
+    deductMutation.error?.message ||
+    cancelReleaseMutation.error?.message ||
+    holdReleaseMutation.error?.message ||
+    unholdReleaseMutation.error?.message
+
+  const totalRows = groupedRows.length
 
   if (isLoading) {
     return <LoadingState label="Loading commissions..." />
@@ -484,23 +719,26 @@ const Commissions = () => {
   return (
     <div>
       <PageHeader
-        icon={<FiTrendingUp />}
+        icon={<FiDollarSign />}
         title="Commissions"
-        subtitle="Track commission base, seller role, commission role, released amount, and remaining balance."
-        actions={
-          <Button icon={<FiPlus />} onClick={openAddModal} variant="primary">
-            Add Commission
-          </Button>
-        }
+        subtitle="Track auto-generated commissions, release milestones, cash advances, retention, and optional cash kaliwaan."
       />
 
       {successMessage ? <Alert variant="success" title={successMessage} /> : null}
       {mutationError ? <Alert variant="error" title={mutationError} /> : null}
 
-      <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-4">
+      <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-4 xl:grid-cols-6">
         <StatCard
-          label="Total Commission"
+          label="Total Commissions"
+          value={formatNumber(summary?.total_commissions || 0)}
+        />
+        <StatCard
+          label="Gross Commission"
           value={formatMoney(summary?.total_amount || 0)}
+        />
+        <StatCard
+          label="Eligible"
+          value={formatMoney(summary?.total_eligible || 0)}
         />
         <StatCard
           label="Released"
@@ -511,454 +749,994 @@ const Commissions = () => {
           value={formatMoney(summary?.total_remaining || 0)}
         />
         <StatCard
-          label="Payable"
-          value={summary?.payable_count || 0}
+          label="Cash Advance Deductions"
+          value={formatMoney(summary?.total_cash_advance_deduction || 0)}
         />
       </div>
 
-      <div className="mb-6 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <h2 className="mb-3 text-lg font-bold text-slate-900">
-          Generate From Client Unit Seller
-        </h2>
+      <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-5">
+        <Input
+          icon={<FiSearch />}
+          placeholder="Search buyer, unit, project, seller..."
+          value={searchInput}
+          onChange={(e) => {
+            setSearchInput(e.target.value)
+            setPage(1)
+          }}
+        />
 
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_auto]">
-          <Select
-            value={generateClientUnitId}
-            onChange={(e) =>
-              setGenerateClientUnitId(
-                e.target.value ? Number(e.target.value) : ""
-              )
-            }
-          >
-            <option value="">Select client unit</option>
-            {clientUnits.map((unit) => (
-              <option key={unit.id} value={unit.id}>
-                {unit.client_name} - {unit.unit_id} - {unit.project_name}
-                {unit.seller_name ? ` - ${unit.seller_name}` : ""}
-              </option>
-            ))}
-          </Select>
+        <Select
+          value={statusFilter}
+          onChange={(e) => {
+            setStatusFilter(e.target.value)
+            setPage(1)
+          }}
+        >
+          <option value="all">All Statuses</option>
+          <option value="active">Active</option>
+          <option value="partially_released">Partially Released</option>
+          <option value="released">Released</option>
+          <option value="cancelled">Cancelled</option>
+          <option value="on_hold">On Hold</option>
+        </Select>
 
-          <Button
-            icon={<FiRefreshCw />}
-            disabled={!generateClientUnitId || generateHierarchyMutation.isPending}
-            onClick={handleGenerateHierarchy}
-            variant="primary"
-          >
-            {generateHierarchyMutation.isPending
-              ? "Generating..."
-              : "Generate"}
-          </Button>
-        </div>
+        <Select
+          value={sourceTypeFilter}
+          onChange={(e) => {
+            setSourceTypeFilter(e.target.value)
+            setPage(1)
+          }}
+        >
+          <option value="all">All Types</option>
+          <option value="main">Main</option>
+          <option value="override">Override / Agent</option>
+        </Select>
 
-        {selectedGenerateClientUnit ? (
-          <p className="mt-2 text-sm text-slate-500">
-            Commission base:{" "}
-            <span className="font-semibold text-slate-900">
-              {formatMoney(getCommissionBase(selectedGenerateClientUnit))}
-            </span>
-            {selectedGenerateClientUnit.seller_name
-              ? ` | Seller: ${selectedGenerateClientUnit.seller_name}`
-              : " | No seller assigned"}
-          </p>
-        ) : null}
-      </div>
+        <Select
+          value={saleTypeFilter}
+          onChange={(e) => {
+            setSaleTypeFilter(e.target.value)
+            setPage(1)
+          }}
+        >
+          <option value="all">Distributed / Direct</option>
+          <option value="distributed">Distributed</option>
+          <option value="direct">Direct</option>
+        </Select>
 
-      <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_150px_180px_210px_auto]">
-          <Input
-            icon={<FiSearch />}
-            placeholder="Search seller, role, client, unit, project..."
-            value={searchInput}
-            onChange={(e) => {
-              setSearchInput(e.target.value)
-              setPage(1)
-            }}
-          />
-
-          <Select
-            value={statusFilter}
-            onChange={(e) => {
-              setStatusFilter(e.target.value)
-              setPage(1)
-            }}
-          >
-            <option value="all">All Status</option>
-            {commissionStatuses.map((status) => (
-              <option key={status} value={status}>
-                {formatText(status)}
-              </option>
-            ))}
-          </Select>
-
-          <Select
-            value={sellerRoleFilter}
-            onChange={(e) => {
-              setSellerRoleFilter(e.target.value)
-              setPage(1)
-            }}
-          >
-            <option value="all">All Seller Roles</option>
-            {sellerRoles.map((role) => (
-              <option key={role} value={role}>
-                {formatText(role)}
-              </option>
-            ))}
-          </Select>
-
-          <Select
-            value={commissionRoleFilter}
-            onChange={(e) => {
-              setCommissionRoleFilter(e.target.value)
-              setPage(1)
-            }}
-          >
-            <option value="all">All Commission Roles</option>
-            {commissionRoles.map((role) => (
-              <option key={role} value={role}>
-                {formatText(role)}
-              </option>
-            ))}
-          </Select>
-
-          <Button onClick={resetFilters}>Reset</Button>
-        </div>
+        <Button
+          onClick={() => {
+            setSearchInput("")
+            setStatusFilter("all")
+            setSourceTypeFilter("all")
+            setSaleTypeFilter("all")
+            setPage(1)
+          }}
+        >
+          Reset
+        </Button>
       </div>
 
       <TableContainer>
-        <table className="w-full text-sm">
-          <thead className="bg-slate-50">
-            <tr className="border-b border-slate-200">
-              <th className="px-4 py-3 text-left">Status</th>
-              <th className="px-4 py-3 text-left">Client / Unit</th>
-              <th className="px-4 py-3 text-left">Seller</th>
-              <th className="px-4 py-3 text-left">Reports Under</th>
-              <th className="px-4 py-3 text-left">Commission Role</th>
-              <th className="px-4 py-3 text-left">TCP</th>
-              <th className="px-4 py-3 text-left">Base</th>
-              <th className="px-4 py-3 text-left">Rate</th>
-              <th className="px-4 py-3 text-left">Amount</th>
-              <th className="px-4 py-3 text-left">Released</th>
-              <th className="px-4 py-3 text-left">Remaining</th>
-              <th className="px-4 py-3 text-left">Actions</th>
-            </tr>
-          </thead>
+        <div className="overflow-x-auto">
+          <table className="min-w-[3200px] text-sm">
+            <thead className="bg-slate-50">
+              <tr className="border-b border-slate-200">
+                <th
+                  colSpan={8}
+                  className="border-r border-slate-200 px-4 py-3 text-left text-slate-900"
+                >
+                  Sale Details
+                </th>
+                <th
+                  colSpan={11}
+                  className="border-r border-slate-200 px-4 py-3 text-left text-slate-900"
+                >
+                  Unit Manager / Main Seller Commission
+                </th>
+                <th
+                  colSpan={13}
+                  className="px-4 py-3 text-left text-slate-900"
+                >
+                  Agent / Optional Override Commission
+                </th>
+              </tr>
 
-          <tbody>
-            {paginatedCommissions.map((commission) => (
-              <tr key={commission.id} className="border-b border-slate-100">
-                <td className="px-4 py-3">
-                  <StatusBadge status={commission.status} />
-                </td>
+              <tr className="border-b border-slate-200">
+                <th className="px-4 py-3 text-left">Buyer’s Name</th>
+                <th className="px-4 py-3 text-left">Unit ID</th>
+                <th className="px-4 py-3 text-left">Mode of Payment</th>
+                <th className="px-4 py-3 text-left">Area</th>
+                <th className="px-4 py-3 text-left">Price per SQM</th>
+                <th className="px-4 py-3 text-left">Net Selling Price</th>
+                <th className="px-4 py-3 text-left">Distributed / Direct</th>
+                <th className="border-r border-slate-200 px-4 py-3 text-left">
+                  Project
+                </th>
 
-                <td className="px-4 py-3">
-                  <p className="font-semibold text-slate-900">
-                    {commission.client_name}
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    {commission.unit_id} - {commission.project_name}
-                  </p>
-                </td>
+                <th className="px-4 py-3 text-left">Unit Manager</th>
+                <th className="px-4 py-3 text-left">Rate</th>
+                <th className="px-4 py-3 text-left">Commission</th>
+                <th className="px-4 py-3 text-left">Payment Percentage</th>
+                <th className="px-4 py-3 text-left">1st Release 20%</th>
+                <th className="px-4 py-3 text-left">2nd Release 40%</th>
+                <th className="px-4 py-3 text-left">3rd Release 60%</th>
+                <th className="px-4 py-3 text-left">4th Release 75%</th>
+                <th className="px-4 py-3 text-left">Retention 25%</th>
+                <th className="px-4 py-3 text-left">Received %</th>
+                <th className="border-r border-slate-200 px-4 py-3 text-left">
+                  Total Remaining
+                </th>
 
-                <td className="px-4 py-3">
-                  <p className="font-semibold text-slate-900">
-                    {commission.seller_name}
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    {formatText(commission.seller_role)}
-                  </p>
-                </td>
+                <th className="px-4 py-3 text-left">Agent’s Name</th>
+                <th className="px-4 py-3 text-left">Rate</th>
+                <th className="px-4 py-3 text-left">Commission</th>
+                <th className="px-4 py-3 text-left">Payment Percentage</th>
+                <th className="px-4 py-3 text-left">1st Release 20%</th>
+                <th className="px-4 py-3 text-left">2nd Release 40%</th>
+                <th className="px-4 py-3 text-left">3rd Release 60%</th>
+                <th className="px-4 py-3 text-left">4th Release 75%</th>
+                <th className="px-4 py-3 text-left">Retention 25%</th>
+                <th className="px-4 py-3 text-left">Received %</th>
+                <th className="px-4 py-3 text-left">Total Remaining</th>
+                <th className="px-4 py-3 text-left">Cash Advance</th>
+                <th className="px-4 py-3 text-left">Cash Kaliwaan / Date</th>
+                <th className="px-4 py-3 text-left">Actions</th>
+              </tr>
+            </thead>
 
-                <td className="px-4 py-3 text-slate-600">
-                  {commission.reports_under || "-"}
-                </td>
+            <tbody>
+              {paginatedGroups.map((group) => {
+                const main = group.main
+                const override = group.override
 
-                <td className="px-4 py-3 text-slate-600">
-                  {formatText(commission.commission_role)}
-                </td>
-
-                <td className="px-4 py-3 text-slate-600">
-                  {formatMoney(commission.total_contract_price)}
-                </td>
-
-                <td className="px-4 py-3 text-slate-600">
-                  {formatMoney(commission.commission_base)}
-                </td>
-
-                <td className="px-4 py-3 text-slate-600">
-                  {commission.rate}%
-                </td>
-
-                <td className="px-4 py-3 font-semibold text-slate-900">
-                  {formatMoney(commission.amount)}
-                </td>
-
-                <td className="px-4 py-3 text-slate-600">
-                  {formatMoney(commission.released_amount)}
-                </td>
-
-                <td className="px-4 py-3 font-semibold text-slate-900">
-                  {formatMoney(commission.remaining_amount)}
-                </td>
-
-                <td className="px-4 py-3">
-                  <Button
-                    icon={<FiEdit2 />}
-                    onClick={() => openEditModal(commission)}
+                return (
+                  <tr
+                    key={group.client_unit_id}
+                    className="border-b border-slate-100 align-top"
                   >
-                    Edit
-                  </Button>
-                </td>
-              </tr>
-            ))}
+                    <td className="px-4 py-3 font-semibold text-slate-900">
+                      {main.client_name}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {main.unit_id}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {main.mode_of_payment || "-"}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {formatNumber(main.lot_area_sqm)}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {formatMoney(main.price_per_sqm)}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {formatMoney(main.net_selling_price)}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {formatText(main.sale_type)}
+                    </td>
+                    <td className="border-r border-slate-200 px-4 py-3 text-slate-600">
+                      {main.project_name}
+                    </td>
 
-            {paginatedCommissions.length === 0 ? (
-              <tr>
-                <td colSpan={12}>
-                  <EmptyState
-                    title="No commissions found"
-                    description="Add a commission or generate one from a client unit seller."
-                  />
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
+                    <td className="px-4 py-3 text-slate-600">
+                      <p className="font-semibold text-slate-900">
+                        {main.seller_name}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        {formatText(main.commission_role || main.seller_role)}
+                      </p>
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {formatNumber(main.rate)}%
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {formatMoney(main.gross_commission)}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {formatNumber(main.payment_percentage || 0)}%
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {formatReleaseCell(
+                        main.first_release_amount,
+                        main.first_release_status
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {formatReleaseCell(
+                        main.second_release_amount,
+                        main.second_release_status
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {formatReleaseCell(
+                        main.third_release_amount,
+                        main.third_release_status
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {formatReleaseCell(
+                        main.fourth_release_amount,
+                        main.fourth_release_status
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {formatReleaseCell(
+                        main.retention_amount,
+                        main.retention_status
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {formatNumber(main.total_released_percent || 0)}%
+                    </td>
+                    <td className="border-r border-slate-200 px-4 py-3 text-slate-600">
+                      {formatMoney(main.remaining_amount)}
+                    </td>
+
+                    <td className="px-4 py-3 text-slate-600">
+                      {override ? (
+                        <>
+                          <p className="font-semibold text-slate-900">
+                            {override.seller_name}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            {formatText(
+                              override.commission_role || override.seller_role
+                            )}
+                          </p>
+                        </>
+                      ) : (
+                        "-"
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {override ? `${formatNumber(override.rate)}%` : "-"}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {override ? formatMoney(override.gross_commission) : "-"}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {override
+                        ? `${formatNumber(override.payment_percentage || 0)}%`
+                        : "-"}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {override
+                        ? formatReleaseCell(
+                            override.first_release_amount,
+                            override.first_release_status
+                          )
+                        : "-"}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {override
+                        ? formatReleaseCell(
+                            override.second_release_amount,
+                            override.second_release_status
+                          )
+                        : "-"}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {override
+                        ? formatReleaseCell(
+                            override.third_release_amount,
+                            override.third_release_status
+                          )
+                        : "-"}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {override
+                        ? formatReleaseCell(
+                            override.fourth_release_amount,
+                            override.fourth_release_status
+                          )
+                        : "-"}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {override
+                        ? formatReleaseCell(
+                            override.retention_amount,
+                            override.retention_status
+                          )
+                        : "-"}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {override
+                        ? `${formatNumber(override.total_released_percent || 0)}%`
+                        : "-"}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {override ? formatMoney(override.remaining_amount) : "-"}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {override
+                        ? formatMoney(override.cash_advance_deduction || 0)
+                        : "-"}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {override &&
+                      Number(override.cash_kaliwaan_amount || 0) > 0 ? (
+                        <>
+                          <p>{formatMoney(override.cash_kaliwaan_amount)}</p>
+                          <p className="text-xs text-slate-500">
+                            {formatDate(override.cash_kaliwaan_date)}
+                          </p>
+                        </>
+                      ) : (
+                        "-"
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          icon={<FiEye />}
+                          onClick={() => setViewCommissionId(main.id)}
+                        >
+                          Main
+                        </Button>
+
+                        <Button
+                          icon={<FiEdit2 />}
+                          onClick={() => openEditModal(main)}
+                        >
+                          Edit Main
+                        </Button>
+
+                        {override ? (
+                          <>
+                            <Button
+                              icon={<FiEye />}
+                              onClick={() => setViewCommissionId(override.id)}
+                            >
+                              Agent
+                            </Button>
+                            <Button
+                              icon={<FiEdit2 />}
+                              onClick={() => openEditModal(override)}
+                            >
+                              Edit Agent
+                            </Button>
+                          </>
+                        ) : null}
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+
+              {paginatedGroups.length === 0 ? (
+                <tr>
+                  <td colSpan={33}>
+                    <EmptyState
+                      title="No commissions found"
+                      description="Commissions are generated automatically when a listing is reserved."
+                    />
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
       </TableContainer>
 
       <Pagination
         page={page}
         rowsPerPage={rowsPerPage}
-        totalRows={filteredCommissions.length}
+        totalRows={totalRows}
         onPageChange={setPage}
         onRowsPerPageChange={setRowsPerPage}
       />
 
-      {isAddOpen ? (
-        <Modal title="Add Commission" onClose={() => setIsAddOpen(false)} size="lg">
-          <CommissionForm
-            formData={formData}
-            setFormData={setFormData}
-            clientUnits={clientUnits}
-            sellers={sellers}
-            commissionBase={addCommissionBase}
-            computedAmount={addComputedAmount}
-            onSubmit={handleAddCommission}
-            onCancel={() => setIsAddOpen(false)}
-            isPending={createCommissionMutation.isPending}
-            submitLabel="Add Commission"
-            error={createCommissionMutation.error?.message}
-          />
+      {editCommission ? (
+        <Modal
+          title={`Edit Commission - ${editCommission.seller_name}`}
+          onClose={() => setEditCommission(null)}
+          size="lg"
+          footer={
+            <div className="flex justify-end gap-2">
+              <Button onClick={() => setEditCommission(null)}>Cancel</Button>
+              <Button
+                disabled={updateMutation.isPending}
+                onClick={handleUpdateCommission}
+                variant="primary"
+              >
+                {updateMutation.isPending ? "Saving..." : "Save Changes"}
+              </Button>
+            </div>
+          }
+        >
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <Select
+              label="Seller"
+              value={editData.seller_id}
+              onChange={(e) =>
+                setEditData({
+                  ...editData,
+                  seller_id: e.target.value ? Number(e.target.value) : "",
+                })
+              }
+            >
+              <option value="">Select seller</option>
+              {sellers.map((seller) => (
+                <option key={seller.id} value={seller.id}>
+                  {seller.full_name} - {formatText(seller.seller_role)}
+                </option>
+              ))}
+            </Select>
+
+            <Input
+              label="Rate (%)"
+              type="number"
+              min={0}
+              max={100}
+              step="0.01"
+              value={editData.rate}
+              onChange={(e) =>
+                setEditData({
+                  ...editData,
+                  rate: e.target.value,
+                })
+              }
+            />
+
+            <Input
+              label="Commission Role"
+              value={editData.commission_role}
+              onChange={(e) =>
+                setEditData({
+                  ...editData,
+                  commission_role: e.target.value,
+                })
+              }
+            />
+
+            <Select
+              label="Source Type"
+              value={editData.source_type}
+              onChange={(e) =>
+                setEditData({
+                  ...editData,
+                  source_type: e.target.value as "main" | "override",
+                })
+              }
+            >
+              <option value="main">Main</option>
+              <option value="override">Override / Agent</option>
+            </Select>
+
+            <Select
+              label="Distributed / Direct"
+              value={editData.sale_type}
+              onChange={(e) =>
+                setEditData({
+                  ...editData,
+                  sale_type: e.target.value as "distributed" | "direct",
+                })
+              }
+            >
+              <option value="distributed">Distributed</option>
+              <option value="direct">Direct</option>
+            </Select>
+
+            <Select
+              label="Status"
+              value={editData.status}
+              onChange={(e) =>
+                setEditData({
+                  ...editData,
+                  status: e.target.value,
+                })
+              }
+            >
+              <option value="active">Active</option>
+              <option value="partially_released">Partially Released</option>
+              <option value="released">Released</option>
+              <option value="cancelled">Cancelled</option>
+              <option value="on_hold">On Hold</option>
+            </Select>
+
+            <Input
+              label="Cash Kaliwaan Amount"
+              type="number"
+              min={0}
+              step="0.01"
+              value={editData.cash_kaliwaan_amount}
+              onChange={(e) =>
+                setEditData({
+                  ...editData,
+                  cash_kaliwaan_amount: e.target.value,
+                })
+              }
+              placeholder="Optional"
+            />
+
+            <Input
+              label="Cash Kaliwaan Date"
+              type="date"
+              value={editData.cash_kaliwaan_date}
+              onChange={(e) =>
+                setEditData({
+                  ...editData,
+                  cash_kaliwaan_date: e.target.value,
+                })
+              }
+            />
+
+            <Input
+              label="Cash Kaliwaan Notes"
+              value={editData.cash_kaliwaan_notes}
+              onChange={(e) =>
+                setEditData({
+                  ...editData,
+                  cash_kaliwaan_notes: e.target.value,
+                })
+              }
+              placeholder="Optional"
+            />
+
+            <Input
+              label="Override Notes"
+              value={editData.override_notes}
+              onChange={(e) =>
+                setEditData({
+                  ...editData,
+                  override_notes: e.target.value,
+                })
+              }
+              placeholder="Optional"
+            />
+
+            <Input
+              label="Notes"
+              value={editData.notes}
+              onChange={(e) =>
+                setEditData({
+                  ...editData,
+                  notes: e.target.value,
+                })
+              }
+              placeholder="Optional"
+            />
+          </div>
+
+          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+            <ComputedBox
+              label="TCP Base"
+              value={formatMoney(editCommission.commission_base)}
+            />
+            <ComputedBox
+              label="Current Gross"
+              value={formatMoney(editCommission.gross_commission)}
+            />
+            <ComputedBox
+              label="Released"
+              value={formatMoney(editCommission.released_amount)}
+            />
+          </div>
+
+          <p className="mt-3 text-sm text-slate-500">
+            Seller and rate cannot be changed after a release has been paid.
+          </p>
         </Modal>
       ) : null}
 
-      {editCommission ? (
+      {viewCommissionId ? (
         <Modal
-          title="Edit Commission"
-          onClose={() => setEditCommission(null)}
-          size="lg"
+          title="Commission Details"
+          onClose={() => setViewCommissionId(null)}
+          size="xl"
+          footer={
+            <div className="flex justify-end">
+              <Button onClick={() => setViewCommissionId(null)}>Close</Button>
+            </div>
+          }
         >
-          <CommissionForm
-            formData={editFormData}
-            setFormData={setEditFormData}
-            clientUnits={clientUnits}
-            sellers={sellers}
-            commissionBase={editCommissionBase}
-            computedAmount={editComputedAmount}
-            onSubmit={handleUpdateCommission}
-            onCancel={() => setEditCommission(null)}
-            isPending={updateCommissionMutation.isPending}
-            submitLabel="Save Changes"
-            error={updateCommissionMutation.error?.message}
-          />
+          {isDetailsLoading ? <LoadingState label="Loading commission details..." /> : null}
+
+          {detailsError ? (
+            <Alert variant="error" title="Failed to load commission details" />
+          ) : null}
+
+          {commissionDetails ? (
+            <div className="space-y-6">
+              <DetailsSection title="Commission Info">
+                <Detail label="Client" value={commissionDetails.client_name} />
+                <Detail label="Unit" value={commissionDetails.unit_id} />
+                <Detail label="Project" value={commissionDetails.project_name} />
+                <Detail label="Seller" value={commissionDetails.seller_name} />
+                <Detail
+                  label="Type"
+                  value={formatText(commissionDetails.source_type)}
+                />
+                <Detail
+                  label="Distributed / Direct"
+                  value={formatText(commissionDetails.sale_type)}
+                />
+                <Detail
+                  label="TCP"
+                  value={formatMoney(commissionDetails.commission_base)}
+                />
+                <Detail
+                  label="Rate"
+                  value={`${formatNumber(commissionDetails.rate)}%`}
+                />
+                <Detail
+                  label="Gross Commission"
+                  value={formatMoney(commissionDetails.gross_commission)}
+                />
+                <Detail
+                  label="Eligible"
+                  value={formatMoney(commissionDetails.eligible_amount)}
+                />
+                <Detail
+                  label="Released"
+                  value={formatMoney(commissionDetails.released_amount)}
+                />
+                <Detail
+                  label="Remaining"
+                  value={formatMoney(commissionDetails.remaining_amount)}
+                />
+                <Detail
+                  label="Payment Percentage"
+                  value={`${formatNumber(
+                    commissionDetails.payment_percentage || 0
+                  )}%`}
+                />
+                <Detail
+                  label="Status"
+                  value={formatText(commissionDetails.status)}
+                />
+              </DetailsSection>
+
+              <DetailsSection title="Optional Cash Kaliwaan">
+                <Detail
+                  label="Amount"
+                  value={formatMoney(commissionDetails.cash_kaliwaan_amount)}
+                />
+                <Detail
+                  label="Date"
+                  value={formatDate(commissionDetails.cash_kaliwaan_date)}
+                />
+                <Detail
+                  label="Notes"
+                  value={commissionDetails.cash_kaliwaan_notes || "-"}
+                />
+              </DetailsSection>
+
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-base font-bold text-slate-900">
+                  Release Milestones
+                </h3>
+
+                {(commissionDetails.releases || []).length === 0 ? (
+                  <Button
+                    disabled={generateMutation.isPending}
+                    onClick={() => generateMutation.mutate(commissionDetails.id)}
+                    variant="primary"
+                  >
+                    Generate Milestones
+                  </Button>
+                ) : null}
+              </div>
+
+              <TableContainer>
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50">
+                    <tr className="border-b border-slate-200">
+                      <th className="px-4 py-3 text-left">Stage</th>
+                      <th className="px-4 py-3 text-left">Trigger</th>
+                      <th className="px-4 py-3 text-left">Release %</th>
+                      <th className="px-4 py-3 text-left">Gross Amount</th>
+                      <th className="px-4 py-3 text-left">Cash Advance Deduction</th>
+                      <th className="px-4 py-3 text-left">Net Amount</th>
+                      <th className="px-4 py-3 text-left">Status</th>
+                      <th className="px-4 py-3 text-left">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(commissionDetails.releases || []).map((release) => (
+                      <tr key={release.id} className="border-b border-slate-100">
+                        <td className="px-4 py-3 font-semibold">
+                          {getReleaseStageLabel(release.release_stage)}
+                        </td>
+                        <td className="px-4 py-3 text-slate-600">
+                          {release.release_stage === "retention"
+                            ? "Final condition"
+                            : `${formatNumber(
+                                release.trigger_payment_percent || 0
+                              )}% paid`}
+                        </td>
+                        <td className="px-4 py-3 text-slate-600">
+                          {formatNumber(release.release_percent)}%
+                        </td>
+                        <td className="px-4 py-3 text-slate-600">
+                          {formatMoney(release.gross_release_amount)}
+                        </td>
+                        <td className="px-4 py-3 text-slate-600">
+                          {formatMoney(release.cash_advance_deduction)}
+                        </td>
+                        <td className="px-4 py-3 text-slate-600">
+                          {formatMoney(release.net_release_amount)}
+                        </td>
+                        <td className="px-4 py-3">
+                          <StatusBadge status={release.status} />
+                        </td>
+                        <td className="px-4 py-3">
+                          {release.status === "eligible" ? (
+                            <div className="flex flex-wrap gap-2">
+                              <Button
+                                disabled={markReleaseMutation.isPending}
+                                onClick={() => markReleaseMutation.mutate(release.id)}
+                                variant="primary"
+                              >
+                                Mark Released
+                              </Button>
+                              <Button onClick={() => setDeductReleaseId(release.id)}>
+                                Deduct Advance
+                              </Button>
+                              <Button
+                                icon={<FiPause />}
+                                disabled={holdReleaseMutation.isPending}
+                                onClick={() => holdReleaseMutation.mutate(release.id)}
+                              >
+                                Hold
+                              </Button>
+                              <Button
+                                disabled={cancelReleaseMutation.isPending}
+                                onClick={() => cancelReleaseMutation.mutate(release.id)}
+                                variant="danger"
+                              >
+                                Cancel
+                              </Button>
+                            </div>
+                          ) : null}
+
+                          {release.status === "pending" ? (
+                            <div className="flex flex-wrap gap-2">
+                              <Button onClick={() => setDeductReleaseId(release.id)}>
+                                Deduct Advance
+                              </Button>
+                              <Button
+                                icon={<FiPause />}
+                                disabled={holdReleaseMutation.isPending}
+                                onClick={() => holdReleaseMutation.mutate(release.id)}
+                              >
+                                Hold
+                              </Button>
+                              <Button
+                                disabled={cancelReleaseMutation.isPending}
+                                onClick={() => cancelReleaseMutation.mutate(release.id)}
+                                variant="danger"
+                              >
+                                Cancel
+                              </Button>
+                            </div>
+                          ) : null}
+
+                          {release.status === "on_hold" ? (
+                            <Button
+                              icon={<FiPlay />}
+                              disabled={unholdReleaseMutation.isPending}
+                              onClick={() => unholdReleaseMutation.mutate(release.id)}
+                            >
+                              Restore
+                            </Button>
+                          ) : null}
+
+                          {release.status === "released" ? (
+                            <span className="text-slate-600">
+                              Released {formatDate(release.released_at)} by{" "}
+                              {release.released_by_name || "-"}
+                            </span>
+                          ) : null}
+
+                          {release.status === "cancelled" ? (
+                            <span className="text-slate-500">Cancelled</span>
+                          ) : null}
+                        </td>
+                      </tr>
+                    ))}
+
+                    {(commissionDetails.releases || []).length === 0 ? (
+                      <tr>
+                        <td colSpan={8}>
+                          <EmptyState title="No milestones generated" />
+                        </td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </TableContainer>
+
+              <section>
+                <h3 className="mb-3 text-base font-bold text-slate-900">
+                  Cash Advance Deductions
+                </h3>
+
+                <TableContainer>
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-50">
+                      <tr className="border-b border-slate-200">
+                        <th className="px-4 py-3 text-left">Release Stage</th>
+                        <th className="px-4 py-3 text-left">Cash Advance</th>
+                        <th className="px-4 py-3 text-left">Amount</th>
+                        <th className="px-4 py-3 text-left">Remaining Balance</th>
+                        <th className="px-4 py-3 text-left">Created By</th>
+                        <th className="px-4 py-3 text-left">Date</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(commissionDetails.cashAdvanceDeductions || []).map(
+                        (deduction) => (
+                          <tr
+                            key={deduction.id}
+                            className="border-b border-slate-100"
+                          >
+                            <td className="px-4 py-3 text-slate-600">
+                              {getReleaseStageLabel(deduction.release_stage)}
+                            </td>
+                            <td className="px-4 py-3 text-slate-600">
+                              #{deduction.cash_advance_id}
+                            </td>
+                            <td className="px-4 py-3 text-slate-600">
+                              {formatMoney(deduction.amount)}
+                            </td>
+                            <td className="px-4 py-3 text-slate-600">
+                              {formatMoney(deduction.remaining_balance)}
+                            </td>
+                            <td className="px-4 py-3 text-slate-600">
+                              {deduction.created_by_name || "-"}
+                            </td>
+                            <td className="px-4 py-3 text-slate-600">
+                              {formatDate(deduction.created_at)}
+                            </td>
+                          </tr>
+                        )
+                      )}
+
+                      {(commissionDetails.cashAdvanceDeductions || []).length ===
+                      0 ? (
+                        <tr>
+                          <td colSpan={6}>
+                            <EmptyState title="No cash advance deductions yet" />
+                          </td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </TableContainer>
+              </section>
+            </div>
+          ) : null}
+        </Modal>
+      ) : null}
+
+      {deductReleaseId ? (
+        <Modal
+          title="Deduct Cash Advance"
+          onClose={() => {
+            setDeductReleaseId(null)
+            setDeductData(defaultDeductAdvanceData)
+          }}
+          footer={
+            <div className="flex justify-end gap-2">
+              <Button
+                onClick={() => {
+                  setDeductReleaseId(null)
+                  setDeductData(defaultDeductAdvanceData)
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                disabled={deductMutation.isPending}
+                onClick={handleDeduct}
+                variant="primary"
+              >
+                {deductMutation.isPending ? "Saving..." : "Deduct"}
+              </Button>
+            </div>
+          }
+        >
+          <div className="space-y-4">
+            <Select
+              label="Approved Cash Advance"
+              value={deductData.cash_advance_id}
+              onChange={(e) =>
+                setDeductData({
+                  ...deductData,
+                  cash_advance_id: e.target.value ? Number(e.target.value) : "",
+                })
+              }
+            >
+              <option value="">Manual deduction only / no linked advance</option>
+              {approvedCashAdvances.map((advance) => (
+                <option key={advance.id} value={advance.id}>
+                  #{advance.id} - Remaining{" "}
+                  {formatMoney(advance.remaining_balance)} -{" "}
+                  {advance.notes || "No notes"}
+                </option>
+              ))}
+            </Select>
+
+            <Input
+              label="Deduction Amount"
+              type="number"
+              min={0}
+              step="0.01"
+              value={deductData.amount}
+              onChange={(e) =>
+                setDeductData({
+                  ...deductData,
+                  amount: e.target.value,
+                })
+              }
+              placeholder="0.00"
+            />
+
+            <Input
+              label="Notes"
+              value={deductData.notes}
+              onChange={(e) =>
+                setDeductData({
+                  ...deductData,
+                  notes: e.target.value,
+                })
+              }
+              placeholder="Optional"
+            />
+
+            <p className="text-sm text-slate-500">
+              Linked cash advance deductions reduce the cash advance balance.
+              Manual deductions only reduce the release net amount.
+            </p>
+          </div>
         </Modal>
       ) : null}
     </div>
   )
 }
 
-type CommissionFormProps = {
-  formData: CommissionFormData
-  setFormData: (formData: CommissionFormData) => void
-  clientUnits: ClientUnit[]
-  sellers: Seller[]
-  commissionBase: number
-  computedAmount: number
-  onSubmit: (e: { preventDefault: () => void }) => void
-  onCancel: () => void
-  isPending: boolean
-  submitLabel: string
-  error?: string
-}
-
-const CommissionForm = ({
-  formData,
-  setFormData,
-  clientUnits,
-  sellers,
-  commissionBase,
-  computedAmount,
-  onSubmit,
-  onCancel,
-  isPending,
-  submitLabel,
-  error,
-}: CommissionFormProps) => {
-  const selectedClientUnit =
-    clientUnits.find((unit) => unit.id === formData.client_unit_id) || null
-
-  const setClientUnit = (clientUnitId: number | "") => {
-    const unit = clientUnits.find((clientUnit) => clientUnit.id === clientUnitId)
-
-    setFormData({
-      ...formData,
-      client_unit_id: clientUnitId,
-      seller_id: unit?.seller_id || formData.seller_id || "",
-    })
-  }
-
+const DetailsSection = ({
+  children,
+  title,
+}: {
+  children: ReactNode
+  title: string
+}) => {
   return (
-    <form className="space-y-4" onSubmit={onSubmit}>
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <Select
-          label="Client Unit"
-          value={formData.client_unit_id}
-          onChange={(e) =>
-            setClientUnit(e.target.value ? Number(e.target.value) : "")
-          }
-          required
-        >
-          <option value="">Select client unit</option>
-          {clientUnits.map((unit) => (
-            <option key={unit.id} value={unit.id}>
-              {unit.client_name} - {unit.unit_id} - {unit.project_name}
-            </option>
-          ))}
-        </Select>
-
-        <Select
-          label="Seller"
-          value={formData.seller_id}
-          onChange={(e) =>
-            setFormData({
-              ...formData,
-              seller_id: e.target.value ? Number(e.target.value) : "",
-            })
-          }
-          required
-        >
-          <option value="">Select seller</option>
-          {sellers.map((seller) => (
-            <option key={seller.id} value={seller.id}>
-              {seller.full_name} - {formatText(seller.seller_role)}
-            </option>
-          ))}
-        </Select>
-
-        <Select
-          label="Commission Role"
-          value={formData.commission_role}
-          onChange={(e) =>
-            setFormData({
-              ...formData,
-              commission_role: e.target.value,
-            })
-          }
-        >
-          {commissionRoles.map((role) => (
-            <option key={role} value={role}>
-              {formatText(role)}
-            </option>
-          ))}
-        </Select>
-
-        <Input
-          label="Rate %"
-          type="number"
-          min={0}
-          step="0.01"
-          value={formData.rate}
-          onChange={(e) =>
-            setFormData({
-              ...formData,
-              rate: Number(e.target.value),
-            })
-          }
-          required
-        />
-
-        <Input
-          label="Released Amount"
-          type="number"
-          min={0}
-          step="0.01"
-          value={formData.released_amount}
-          onChange={(e) =>
-            setFormData({
-              ...formData,
-              released_amount: Number(e.target.value),
-            })
-          }
-        />
-
-        <Select
-          label="Status"
-          value={formData.status}
-          onChange={(e) =>
-            setFormData({
-              ...formData,
-              status: e.target.value,
-            })
-          }
-        >
-          {commissionStatuses.map((status) => (
-            <option key={status} value={status}>
-              {formatText(status)}
-            </option>
-          ))}
-        </Select>
+    <section>
+      <h3 className="mb-3 text-base font-bold text-slate-900">{title}</h3>
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {children}
       </div>
-
-      <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-        <h3 className="mb-3 font-semibold text-slate-900">
-          Commission Computation
-        </h3>
-
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-          <ComputedBox label="Commission Base" value={formatMoney(commissionBase)} />
-          <ComputedBox label="Rate" value={`${formData.rate || 0}%`} />
-          <ComputedBox label="Amount" value={formatMoney(computedAmount)} />
-        </div>
-
-        {selectedClientUnit ? (
-          <p className="mt-3 text-sm text-slate-500">
-            Base uses Total Contract Price. If TCP is missing, it falls back to
-            Net Selling Price + Legal/Misc Fee.
-          </p>
-        ) : null}
-      </div>
-
-      {error ? <Alert title={error} variant="error" /> : null}
-
-      <div className="flex justify-end gap-2">
-        <Button onClick={onCancel}>Cancel</Button>
-        <Button disabled={isPending} type="submit" variant="primary">
-          {isPending ? "Saving..." : submitLabel}
-        </Button>
-      </div>
-    </form>
+    </section>
   )
 }
 
-const ComputedBox = ({
+const Detail = ({
   label,
   value,
 }: {
   label: string
-  value: string
+  value: string | number | null | undefined
 }) => {
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-3">
+    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+        {label}
+      </p>
+      <p className="mt-1 break-words text-sm font-semibold text-slate-900">
+        {value === null || value === undefined || value === "" ? "-" : value}
+      </p>
+    </div>
+  )
+}
+
+const ComputedBox = ({ label, value }: { label: string; value: string }) => {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
       <p className="text-xs font-semibold uppercase text-slate-400">{label}</p>
       <p className="mt-1 font-semibold text-slate-900">{value}</p>
     </div>

@@ -20,6 +20,7 @@ import reportsRouter from './routers/reports.router.js'
 import auditLogsRouter from './routers/auditLogs.router.js'
 import settingsRouter from './routers/settings.router.js'
 import useCurrentUser from './utils/useCurrentUser.js'
+import cashAdvancesRouter from './routers/cashAdvances.router.js'
 
 const app = express()
 
@@ -54,6 +55,7 @@ app.use('/api/v1', dashboardRouter)
 app.use('/api/v1', reportsRouter)
 app.use('/api/v1', auditLogsRouter)
 app.use('/api/v1', settingsRouter)
+app.use('/api/v1', cashAdvancesRouter)
 
 app.use((req, res) => {
   res.status(404).json({

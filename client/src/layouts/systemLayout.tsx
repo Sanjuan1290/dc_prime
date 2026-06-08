@@ -65,6 +65,7 @@ const navGroups: NavGroup[] = [
     items: [
       { label: "Payments", to: "/payments", icon: FiCreditCard },
       { label: "Commissions", to: "/commissions", icon: FiDollarSign },
+      { label: "Cash Advances", to: "/cash-advances", icon: FiDollarSign, },
     ],
   },
   {

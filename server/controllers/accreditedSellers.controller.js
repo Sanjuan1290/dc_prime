@@ -29,6 +29,7 @@ const sellerFields = `
   seller.email,
   seller.contact_no,
   seller.seller_role,
+  seller.commission_rate,
   seller.parent_seller_id,
   parent.full_name AS parent_seller_name,
   parent.seller_role AS parent_seller_role,
@@ -210,6 +211,7 @@ export const createAccreditedSeller = async (req, res) => {
     custom_reports_under,
     status = 'active',
     accreditation_date,
+    commission_rate,
   } = req.body
 
   if (isMissing(full_name)) {
@@ -252,8 +254,9 @@ export const createAccreditedSeller = async (req, res) => {
       parent_seller_id,
       custom_reports_under,
       status,
-      accreditation_date
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      accreditation_date,
+      commission_rate
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     [
       nullableValue(user_id),
@@ -265,6 +268,7 @@ export const createAccreditedSeller = async (req, res) => {
       customReportsUnder,
       status,
       nullableValue(accreditation_date),
+      nullableValue(commission_rate),
     ]
   )
 
@@ -295,6 +299,7 @@ export const updateAccreditedSeller = async (req, res) => {
     custom_reports_under,
     status = 'active',
     accreditation_date,
+    commission_rate,
   } = req.body
 
   if (isMissing(full_name)) {
@@ -347,7 +352,8 @@ export const updateAccreditedSeller = async (req, res) => {
       parent_seller_id = ?,
       custom_reports_under = ?,
       status = ?,
-      accreditation_date = ?
+      accreditation_date = ?,
+      commission_rate = ?
     WHERE id = ?
     `,
     [
@@ -360,6 +366,7 @@ export const updateAccreditedSeller = async (req, res) => {
       customReportsUnder,
       status,
       nullableValue(accreditation_date),
+      nullableValue(commission_rate),
       id,
     ]
   )
@@ -397,6 +404,7 @@ export const getPossibleParentSellers = async (req, res) => {
       seller.email,
       seller.contact_no,
       seller.seller_role,
+      seller.commission_rate,
       seller.parent_seller_id,
       parent.full_name AS parent_seller_name,
       parent.seller_role AS parent_seller_role,

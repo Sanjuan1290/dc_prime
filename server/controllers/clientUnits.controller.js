@@ -1,6 +1,10 @@
 import { db } from '../db/connect.js'
 import { createAuditLog } from '../utils/createAuditLog.js'
 import { getClientIp } from '../utils/getClientIp.js'
+import {
+  createAutoCommissionForClientUnit,
+  refreshCommissionEligibility,
+} from './commissions.controller.js'
 
 const allowedClientUnitStatuses = [
   'reserved',
@@ -10,6 +14,8 @@ const allowedClientUnitStatuses = [
   'closed',
 ]
 
+const allowedSaleTypes = ['distributed', 'direct']
+
 const isMissing = (value) => {
   return value === undefined || value === null || value === ''
 }
@@ -17,6 +23,14 @@ const isMissing = (value) => {
 const nullableValue = (value) => {
   if (isMissing(value)) return null
   return value
+}
+
+const numberValue = (value) => {
+  return Number(value || 0)
+}
+
+const normalizeMoney = (value) => {
+  return Number(Number(value || 0).toFixed(2))
 }
 
 const validateDueDay = (dueDay) => {
@@ -30,60 +44,27 @@ const validateDueDay = (dueDay) => {
   const parsedDueDay = Number(dueDay)
 
   return {
-    isValid:
-      Number.isInteger(parsedDueDay) &&
-      parsedDueDay >= 1 &&
-      parsedDueDay <= 31,
+    isValid: Number.isInteger(parsedDueDay) && parsedDueDay >= 1 && parsedDueDay <= 31,
     value: parsedDueDay,
   }
 }
 
 const listingStatusFromClientUnitStatus = (status) => {
-  if (status === 'cancelled') {
-    return 'available'
-  }
-
-  if (status === 'reserved') {
-    return 'reserved'
-  }
-
-  if (status === 'active' || status === 'fully_paid' || status === 'closed') {
-    return 'sold'
-  }
+  if (status === 'cancelled') return 'available'
+  if (status === 'reserved' || status === 'active') return 'reserved'
+  if (status === 'fully_paid' || status === 'closed') return 'sold'
 
   return null
 }
 
-const validateSeller = async (connection, sellerId) => {
-  if (isMissing(sellerId)) {
-    return {
-      isValid: true,
-      message: null,
-    }
-  }
+const validateClientUnitStatus = (status) => {
+  return allowedClientUnitStatuses.includes(status)
+}
 
-  const [sellerRows] = await connection.query(
-    `
-    SELECT id
-    FROM accredited_sellers
-    WHERE id = ?
-      AND status = 'active'
-    LIMIT 1
-    `,
-    [sellerId]
-  )
-
-  if (!sellerRows[0]) {
-    return {
-      isValid: false,
-      message: 'Seller not found or inactive',
-    }
-  }
-
-  return {
-    isValid: true,
-    message: null,
-  }
+const validateSaleType = (saleType) => {
+  if (isMissing(saleType)) return 'distributed'
+  if (!allowedSaleTypes.includes(saleType)) return 'distributed'
+  return saleType
 }
 
 const clientUnitFields = `
@@ -95,11 +76,21 @@ const clientUnitFields = `
   p.name AS project_name,
   l.lot_type,
   l.lot_area_sqm,
+  l.price_per_sqm,
   l.net_selling_price,
+  l.legal_misc_rate,
   l.legal_misc_fee,
   l.total_contract_price,
   COALESCE(payment_summary.paid_amount, 0) AS paid_amount,
-  cu.balance,
+  GREATEST(
+    COALESCE(l.total_contract_price, 0) - COALESCE(payment_summary.paid_amount, 0),
+    0
+  ) AS balance,
+  CASE
+    WHEN COALESCE(l.total_contract_price, 0) > 0
+    THEN ROUND((COALESCE(payment_summary.paid_amount, 0) / l.total_contract_price) * 100, 2)
+    ELSE 0
+  END AS payment_percentage,
   cu.due_day,
   cu.status,
   cu.assigned_user_id,
@@ -107,6 +98,7 @@ const clientUnitFields = `
   cu.seller_id,
   seller.full_name AS seller_name,
   seller.seller_role AS seller_role,
+  seller.commission_rate AS seller_commission_rate,
   COALESCE(parent_seller.full_name, seller.custom_reports_under, 'None') AS reports_under,
   CASE
     WHEN COALESCE(document_summary.required_count, 0) > 0
@@ -114,6 +106,9 @@ const clientUnitFields = `
     THEN 'complete'
     ELSE 'incomplete'
   END AS document_status,
+  COALESCE(commission_summary.commission_count, 0) AS commission_count,
+  COALESCE(commission_summary.gross_commission_total, 0) AS gross_commission_total,
+  COALESCE(commission_summary.released_commission_total, 0) AS released_commission_total,
   cu.created_at,
   cu.updated_at
 `
@@ -153,6 +148,25 @@ const clientUnitJoins = `
       AND cdl.document_id = d.id
     GROUP BY cu_docs.id
   ) document_summary ON document_summary.client_unit_id = cu.id
+  LEFT JOIN (
+    SELECT
+      cm.client_unit_id,
+      COUNT(cm.id) AS commission_count,
+      SUM(cm.gross_commission) AS gross_commission_total,
+      SUM(
+        COALESCE(release_summary.released_amount, 0)
+      ) AS released_commission_total
+    FROM commissions cm
+    LEFT JOIN (
+      SELECT
+        commission_id,
+        SUM(net_release_amount) AS released_amount
+      FROM commission_releases
+      WHERE status = 'released'
+      GROUP BY commission_id
+    ) release_summary ON release_summary.commission_id = cm.id
+    GROUP BY cm.client_unit_id
+  ) commission_summary ON commission_summary.client_unit_id = cu.id
 `
 
 const getClientUnitsForWhereClause = async (whereClause = '', params = []) => {
@@ -170,6 +184,173 @@ const getClientUnitsForWhereClause = async (whereClause = '', params = []) => {
   return clientUnits
 }
 
+const getClientUnitById = async (id) => {
+  const clientUnits = await getClientUnitsForWhereClause(
+    `
+    WHERE cu.id = ?
+    `,
+    [id]
+  )
+
+  return clientUnits[0] || null
+}
+
+const getClientById = async (connectionOrDb, clientId) => {
+  const [rows] = await connectionOrDb.query(
+    `
+    SELECT
+      c.*,
+      seller.full_name AS default_seller_name,
+      seller.seller_role AS default_seller_role,
+      seller.commission_rate AS default_seller_commission_rate
+    FROM clients c
+    LEFT JOIN accredited_sellers seller ON seller.id = c.default_seller_id
+    WHERE c.id = ?
+    LIMIT 1
+    `,
+    [clientId]
+  )
+
+  return rows[0]
+}
+
+const getListingById = async (connectionOrDb, listingId) => {
+  const [rows] = await connectionOrDb.query(
+    `
+    SELECT
+      l.*,
+      p.name AS project_name
+    FROM listings l
+    INNER JOIN projects p ON p.id = l.project_id
+    WHERE l.id = ?
+    LIMIT 1
+    `,
+    [listingId]
+  )
+
+  return rows[0]
+}
+
+const getSellerById = async (connectionOrDb, sellerId) => {
+  if (isMissing(sellerId)) return null
+
+  const [rows] = await connectionOrDb.query(
+    `
+    SELECT *
+    FROM accredited_sellers
+    WHERE id = ?
+      AND status = 'active'
+    LIMIT 1
+    `,
+    [sellerId]
+  )
+
+  return rows[0]
+}
+
+const createClientDocumentChecklist = async (connectionOrDb, clientUnitId) => {
+  const [documents] = await connectionOrDb.query(
+    `
+    SELECT id
+    FROM documents
+    WHERE status = 'active'
+      AND is_required = TRUE
+    ORDER BY id ASC
+    `
+  )
+
+  if (documents.length === 0) {
+    return {
+      insertedCount: 0,
+    }
+  }
+
+  const values = documents.map((document) => [
+    clientUnitId,
+    document.id,
+    'not_submitted',
+  ])
+
+  const [result] = await connectionOrDb.query(
+    `
+    INSERT IGNORE INTO client_document_list (
+      client_unit_id,
+      document_id,
+      status
+    ) VALUES ?
+    `,
+    [values]
+  )
+
+  return {
+    insertedCount: result.affectedRows,
+  }
+}
+
+const createReservationCommissions = async ({
+  connection,
+  clientUnitId,
+  listing,
+  sellerId,
+  mainRateOverride,
+  saleType,
+  overrideSellerId,
+  overrideRate,
+  overrideNotes,
+  cashKaliwaanAmount,
+  cashKaliwaanDate,
+  cashKaliwaanNotes,
+}) => {
+  const createdCommissions = []
+
+  if (isMissing(sellerId)) {
+    return createdCommissions
+  }
+
+  const mainCommission = await createAutoCommissionForClientUnit({
+    connection,
+    clientUnitId,
+    sellerId,
+    rateOverride: mainRateOverride,
+    commissionRole: null,
+    sourceType: 'main',
+    parentCommissionId: null,
+    saleType,
+    notes: `Auto-generated from reservation of ${listing.unit_id}`,
+  })
+
+  if (mainCommission) {
+    createdCommissions.push(mainCommission)
+  }
+
+  const hasOverrideSeller = !isMissing(overrideSellerId)
+  const hasOverrideRate = !isMissing(overrideRate)
+
+  if (hasOverrideSeller && hasOverrideRate) {
+    const overrideCommission = await createAutoCommissionForClientUnit({
+      connection,
+      clientUnitId,
+      sellerId: overrideSellerId,
+      rateOverride: overrideRate,
+      commissionRole: 'override',
+      sourceType: 'override',
+      parentCommissionId: mainCommission?.commissionId || null,
+      saleType,
+      cashKaliwaanAmount,
+      cashKaliwaanDate,
+      cashKaliwaanNotes,
+      overrideNotes,
+      notes: `Optional override commission from reservation of ${listing.unit_id}`,
+    })
+
+    if (overrideCommission) {
+      createdCommissions.push(overrideCommission)
+    }
+  }
+
+  return createdCommissions
+}
+
 export const getClientUnits = async (req, res) => {
   const { search, status, client_id } = req.query
 
@@ -184,11 +365,10 @@ export const getClientUnits = async (req, res) => {
         c.full_name LIKE ?
         OR l.unit_id LIKE ?
         OR p.name LIKE ?
+        OR l.lot_type LIKE ?
         OR cu.status LIKE ?
         OR seller.full_name LIKE ?
         OR seller.seller_role LIKE ?
-        OR parent_seller.full_name LIKE ?
-        OR seller.custom_reports_under LIKE ?
       )
     `)
 
@@ -199,12 +379,11 @@ export const getClientUnits = async (req, res) => {
       searchTerm,
       searchTerm,
       searchTerm,
-      searchTerm,
       searchTerm
     )
   }
 
-  if (!isMissing(status)) {
+  if (!isMissing(status) && status !== 'all') {
     conditions.push('cu.status = ?')
     params.push(status)
   }
@@ -220,35 +399,42 @@ export const getClientUnits = async (req, res) => {
   const clientUnits = await getClientUnitsForWhereClause(whereClause, params)
 
   res.status(200).json({
+    message: 'Client units fetched successfully',
     clientUnits,
+    data: clientUnits,
+  })
+}
+
+export const getClientUnit = async (req, res) => {
+  const { id } = req.params
+
+  const clientUnit = await getClientUnitById(id)
+
+  if (!clientUnit) {
+    return res.status(404).json({
+      message: 'Client unit not found',
+    })
+  }
+
+  res.status(200).json({
+    message: 'Client unit fetched successfully',
+    clientUnit,
+    data: clientUnit,
   })
 }
 
 export const getClientUnitsByClient = async (req, res) => {
   const { clientId } = req.params
 
-  if (isMissing(clientId)) {
-    return res.status(400).json({
-      message: 'Client ID is required',
-    })
-  }
-
   const [clientRows] = await db.query(
     `
     SELECT
-      c.id,
-      c.full_name,
-      c.spouse_co_owner_name,
-      c.email,
-      c.contact_no,
-      c.address,
-      c.region,
-      c.default_seller_id,
+      c.*,
       seller.full_name AS default_seller_name,
-      seller.seller_role AS default_seller_role
+      seller.seller_role AS default_seller_role,
+      seller.commission_rate AS default_seller_commission_rate
     FROM clients c
-    LEFT JOIN accredited_sellers seller
-      ON seller.id = c.default_seller_id
+    LEFT JOIN accredited_sellers seller ON seller.id = c.default_seller_id
     WHERE c.id = ?
     LIMIT 1
     `,
@@ -264,70 +450,48 @@ export const getClientUnitsByClient = async (req, res) => {
   }
 
   const units = await getClientUnitsForWhereClause(
-    'WHERE cu.client_id = ?',
+    `
+    WHERE cu.client_id = ?
+    `,
     [clientId]
   )
 
   res.status(200).json({
+    message: 'Client units fetched successfully',
     client,
     units,
-  })
-}
-
-export const getClientUnit = async (req, res) => {
-  const { id } = req.params
-
-  const [rows] = await db.query(
-    `
-    SELECT
-      ${clientUnitFields}
-    ${clientUnitJoins}
-    WHERE cu.id = ?
-    LIMIT 1
-    `,
-    [id]
-  )
-
-  const clientUnit = rows[0]
-
-  if (!clientUnit) {
-    return res.status(404).json({
-      message: 'Client unit not found',
-    })
-  }
-
-  res.status(200).json({
-    clientUnit,
+    clientUnits: units,
+    data: units,
   })
 }
 
 export const getAvailableListings = async (req, res) => {
   const { search, project_id, lot_type } = req.query
 
-  const conditions = ['l.status = ?']
-  const params = ['available']
+  const conditions = [`l.status = 'available'`]
+  const params = []
 
   if (!isMissing(search)) {
     const searchTerm = `%${search}%`
 
     conditions.push(`
       (
-        l.unit_id LIKE ?
+        p.name LIKE ?
+        OR l.unit_id LIKE ?
         OR l.cadastral_lot_no LIKE ?
         OR l.lot_type LIKE ?
-        OR p.name LIKE ?
       )
     `)
 
     params.push(searchTerm, searchTerm, searchTerm, searchTerm)
   }
 
-  if (!isMissing(project_id)) {
+  if (!isMissing(project_id) && project_id !== 'all') {
     conditions.push('l.project_id = ?')
     params.push(project_id)
   }
 
-  if (!isMissing(lot_type)) {
+  if (!isMissing(lot_type) && lot_type !== 'all') {
     conditions.push('l.lot_type = ?')
     params.push(lot_type)
   }
@@ -338,11 +502,14 @@ export const getAvailableListings = async (req, res) => {
       l.id,
       l.project_id,
       p.name AS project_name,
+      p.location AS project_location,
       l.cadastral_lot_no,
       l.unit_id,
       l.lot_type,
-      l.lot_area_sqm,
+      l.reservation_fee,
       l.price_per_sqm,
+      l.lot_area_sqm,
+      l.legal_misc_rate,
       l.net_selling_price,
       l.legal_misc_fee,
       l.total_contract_price,
@@ -352,13 +519,16 @@ export const getAvailableListings = async (req, res) => {
     FROM listings l
     INNER JOIN projects p ON p.id = l.project_id
     WHERE ${conditions.join(' AND ')}
-    ORDER BY l.id DESC
+    ORDER BY p.name ASC, l.unit_id ASC
     `,
     params
   )
 
   res.status(200).json({
+    message: 'Available listings fetched successfully',
     listings,
+    availableListings: listings,
+    data: listings,
   })
 }
 
@@ -367,20 +537,29 @@ export const reserveListing = async (req, res) => {
 
   const {
     listing_id,
-    assigned_user_id,
     seller_id,
     due_day,
+    status = 'reserved',
+    assigned_user_id,
+    main_commission_rate_override,
+    sale_type = 'distributed',
+    override_seller_id,
+    override_rate,
+    override_notes,
+    cash_kaliwaan_amount = 0,
+    cash_kaliwaan_date,
+    cash_kaliwaan_notes,
   } = req.body
-
-  if (isMissing(clientId)) {
-    return res.status(400).json({
-      message: 'Client ID is required',
-    })
-  }
 
   if (isMissing(listing_id)) {
     return res.status(400).json({
-      message: 'Listing ID is required',
+      message: 'Listing is required',
+    })
+  }
+
+  if (!validateClientUnitStatus(status)) {
+    return res.status(400).json({
+      message: 'Invalid client unit status',
     })
   }
 
@@ -392,31 +571,29 @@ export const reserveListing = async (req, res) => {
     })
   }
 
-  const assignedUserId = isMissing(assigned_user_id)
-    ? req.user.id
-    : assigned_user_id
+  const hasOverrideSeller = !isMissing(override_seller_id)
+  const hasOverrideRate = !isMissing(override_rate)
+
+  if (hasOverrideSeller && !hasOverrideRate) {
+    return res.status(400).json({
+      message: 'Override rate is required when override seller is selected',
+    })
+  }
+
+  if (!hasOverrideSeller && hasOverrideRate) {
+    return res.status(400).json({
+      message: 'Override seller is required when override rate is entered',
+    })
+  }
+
+  const finalSaleType = validateSaleType(sale_type)
 
   const connection = await db.getConnection()
-  let clientUnitId = null
-  let auditDescription = null
 
   try {
     await connection.beginTransaction()
 
-    const [clientRows] = await connection.query(
-      `
-      SELECT
-        id,
-        full_name,
-        default_seller_id
-      FROM clients
-      WHERE id = ?
-      LIMIT 1
-      `,
-      [clientId]
-    )
-
-    const client = clientRows[0]
+    const client = await getClientById(connection, clientId)
 
     if (!client) {
       await connection.rollback()
@@ -425,54 +602,7 @@ export const reserveListing = async (req, res) => {
       })
     }
 
-    const finalSellerId = isMissing(seller_id)
-      ? client.default_seller_id
-      : seller_id
-
-    const sellerValidation = await validateSeller(connection, finalSellerId)
-
-    if (!sellerValidation.isValid) {
-      await connection.rollback()
-      return res.status(400).json({
-        message: sellerValidation.message,
-      })
-    }
-
-    const [assignedUserRows] = await connection.query(
-      `
-      SELECT id
-      FROM users
-      WHERE id = ?
-      LIMIT 1
-      `,
-      [assignedUserId]
-    )
-
-    if (!assignedUserRows[0]) {
-      await connection.rollback()
-      return res.status(404).json({
-        message: 'Assigned user not found',
-      })
-    }
-
-    const [listingRows] = await connection.query(
-      `
-      SELECT
-        id,
-        unit_id,
-        net_selling_price,
-        legal_misc_fee,
-        total_contract_price,
-        status
-      FROM listings
-      WHERE id = ?
-      LIMIT 1
-      FOR UPDATE
-      `,
-      [listing_id]
-    )
-
-    const listing = listingRows[0]
+    const listing = await getListingById(connection, listing_id)
 
     if (!listing) {
       await connection.rollback()
@@ -483,16 +613,68 @@ export const reserveListing = async (req, res) => {
 
     if (listing.status !== 'available') {
       await connection.rollback()
-      return res.status(409).json({
-        message: 'Listing is no longer available',
+      return res.status(400).json({
+        message: 'Listing is not available',
       })
     }
 
-    const contractPrice =
-      Number(listing.total_contract_price || 0) > 0
-        ? listing.total_contract_price
-        : Number(listing.net_selling_price || 0) +
-          Number(listing.legal_misc_fee || 0)
+    const finalSellerId = !isMissing(seller_id)
+      ? seller_id
+      : client.default_seller_id
+
+    if (isMissing(finalSellerId)) {
+      await connection.rollback()
+      return res.status(400).json({
+        message: 'Seller is required to reserve a listing and generate commission',
+      })
+    }
+
+    const mainSeller = await getSellerById(connection, finalSellerId)
+
+    if (!mainSeller) {
+      await connection.rollback()
+      return res.status(404).json({
+        message: 'Seller not found or inactive',
+      })
+    }
+
+    if (hasOverrideSeller) {
+      const overrideSeller = await getSellerById(connection, override_seller_id)
+
+      if (!overrideSeller) {
+        await connection.rollback()
+        return res.status(404).json({
+          message: 'Override seller not found or inactive',
+        })
+      }
+
+      if (Number(override_seller_id) === Number(finalSellerId)) {
+        await connection.rollback()
+        return res.status(400).json({
+          message: 'Override seller must be different from main seller',
+        })
+      }
+    }
+
+    const [duplicateRows] = await connection.query(
+      `
+      SELECT id
+      FROM client_units
+      WHERE listing_id = ?
+        AND status IN ('reserved', 'active', 'fully_paid', 'closed')
+      LIMIT 1
+      `,
+      [listing_id]
+    )
+
+    if (duplicateRows.length > 0) {
+      await connection.rollback()
+      return res.status(400).json({
+        message: 'Listing is already reserved or sold',
+      })
+    }
+
+    const totalContractPrice = normalizeMoney(listing.total_contract_price)
 
     const [result] = await connection.query(
       `
@@ -509,67 +691,71 @@ export const reserveListing = async (req, res) => {
       [
         clientId,
         listing_id,
-        assignedUserId,
-        nullableValue(finalSellerId),
-        'reserved',
-        contractPrice,
+        nullableValue(assigned_user_id || req.user.id),
+        finalSellerId,
+        status,
+        totalContractPrice,
         dueDayValidation.value,
       ]
     )
 
-    clientUnitId = result.insertId
-    auditDescription = `Reserved ${listing.unit_id} for ${client.full_name}`
+    const clientUnitId = result.insertId
 
-    await connection.query(
-      `
-      UPDATE listings
-      SET status = ?
-      WHERE id = ?
-      `,
-      ['reserved', listing_id]
-    )
+    const nextListingStatus = listingStatusFromClientUnitStatus(status)
 
-    await connection.query(
-      `
-      INSERT INTO client_document_list (
-        client_unit_id,
-        document_id,
-        status,
-        reviewed_by,
-        reviewed_at
+    if (nextListingStatus) {
+      await connection.query(
+        `
+        UPDATE listings
+        SET status = ?
+        WHERE id = ?
+        `,
+        [nextListingStatus, listing_id]
       )
-      SELECT
-        ?,
-        id,
-        'not_submitted',
-        NULL,
-        NULL
-      FROM documents
-      WHERE status = ?
-      `,
-      [clientUnitId, 'active']
-    )
+    }
+
+    await createClientDocumentChecklist(connection, clientUnitId)
+
+    const createdCommissions = await createReservationCommissions({
+      connection,
+      clientUnitId,
+      listing,
+      sellerId: finalSellerId,
+      mainRateOverride: main_commission_rate_override,
+      saleType: finalSaleType,
+      overrideSellerId: override_seller_id,
+      overrideRate: override_rate,
+      overrideNotes: override_notes,
+      cashKaliwaanAmount: cash_kaliwaan_amount,
+      cashKaliwaanDate: cash_kaliwaan_date,
+      cashKaliwaanNotes: cash_kaliwaan_notes,
+    })
 
     await connection.commit()
+
+    await createAuditLog({
+      userId: req.user.id,
+      action: 'reserve',
+      module: 'Client Units',
+      description: `Reserved ${listing.unit_id} for ${client.full_name}`,
+      ipAddress: getClientIp(req),
+    })
+
+    res.status(201).json({
+      message: 'Listing reserved successfully',
+      clientUnitId,
+      commissions: createdCommissions,
+      data: {
+        clientUnitId,
+        commissions: createdCommissions,
+      },
+    })
   } catch (err) {
     await connection.rollback()
     throw err
   } finally {
     connection.release()
   }
-
-  await createAuditLog({
-    userId: req.user.id,
-    action: 'reserve',
-    module: 'Client Units',
-    description: auditDescription,
-    ipAddress: getClientIp(req),
-  })
-
-  return res.status(201).json({
-    message: 'Listing reserved successfully',
-    clientUnitId,
-  })
 }
 
 export const updateClientUnit = async (req, res) => {
@@ -578,10 +764,28 @@ export const updateClientUnit = async (req, res) => {
   const {
     assigned_user_id,
     seller_id,
-    status,
-    balance,
     due_day,
+    status,
+    regenerate_commission = false,
+    main_commission_rate_override,
+    sale_type,
   } = req.body
+
+  const existingClientUnit = await getClientUnitById(id)
+
+  if (!existingClientUnit) {
+    return res.status(404).json({
+      message: 'Client unit not found',
+    })
+  }
+
+  const finalStatus = status || existingClientUnit.status
+
+  if (!validateClientUnitStatus(finalStatus)) {
+    return res.status(400).json({
+      message: 'Invalid client unit status',
+    })
+  }
 
   const dueDayValidation = validateDueDay(due_day)
 
@@ -591,85 +795,56 @@ export const updateClientUnit = async (req, res) => {
     })
   }
 
-  if (!isMissing(status) && !allowedClientUnitStatuses.includes(status)) {
-    return res.status(400).json({
-      message: 'Invalid client unit status',
-    })
-  }
+  const finalSellerId = !isMissing(seller_id)
+    ? seller_id
+    : existingClientUnit.seller_id
 
   const connection = await db.getConnection()
 
   try {
     await connection.beginTransaction()
 
-    const [clientUnitRows] = await connection.query(
-      `
-      SELECT
-        id,
-        listing_id,
-        assigned_user_id,
-        seller_id,
-        status,
-        balance,
-        due_day
-      FROM client_units
-      WHERE id = ?
-      LIMIT 1
-      FOR UPDATE
-      `,
-      [id]
-    )
+    if (!isMissing(finalSellerId)) {
+      const seller = await getSellerById(connection, finalSellerId)
 
-    const clientUnit = clientUnitRows[0]
-
-    if (!clientUnit) {
-      await connection.rollback()
-      return res.status(404).json({
-        message: 'Client unit not found',
-      })
-    }
-
-    const nextAssignedUserId = isMissing(assigned_user_id)
-      ? clientUnit.assigned_user_id
-      : assigned_user_id
-
-    if (!isMissing(assigned_user_id)) {
-      const [assignedUserRows] = await connection.query(
-        `
-        SELECT id
-        FROM users
-        WHERE id = ?
-        LIMIT 1
-        `,
-        [assigned_user_id]
-      )
-
-      if (!assignedUserRows[0]) {
+      if (!seller) {
         await connection.rollback()
         return res.status(404).json({
-          message: 'Assigned user not found',
+          message: 'Seller not found or inactive',
         })
       }
     }
 
-    const nextSellerId = isMissing(seller_id)
-      ? clientUnit.seller_id
-      : seller_id
+    const [releasedRows] = await connection.query(
+      `
+      SELECT COUNT(cr.id) AS released_count
+      FROM commission_releases cr
+      INNER JOIN commissions cm ON cm.id = cr.commission_id
+      WHERE cm.client_unit_id = ?
+        AND cr.status = 'released'
+      `,
+      [id]
+    )
 
-    const sellerValidation = await validateSeller(connection, nextSellerId)
+    const releasedCount = Number(releasedRows[0]?.released_count || 0)
 
-    if (!sellerValidation.isValid) {
+    if (
+      releasedCount > 0 &&
+      Number(finalSellerId || 0) !== Number(existingClientUnit.seller_id || 0)
+    ) {
       await connection.rollback()
       return res.status(400).json({
-        message: sellerValidation.message,
+        message: 'Cannot change seller after commission release has been paid',
       })
     }
 
-    const nextStatus = isMissing(status) ? clientUnit.status : status
-    const nextBalance = isMissing(balance) ? clientUnit.balance : balance
     const nextDueDay = isMissing(due_day)
-      ? clientUnit.due_day
+      ? existingClientUnit.due_day
       : dueDayValidation.value
+
+    const nextAssignedUserId = isMissing(assigned_user_id)
+      ? existingClientUnit.assigned_user_id
+      : nullableValue(assigned_user_id)
 
     await connection.query(
       `
@@ -677,22 +852,20 @@ export const updateClientUnit = async (req, res) => {
       SET
         assigned_user_id = ?,
         seller_id = ?,
-        status = ?,
-        balance = ?,
-        due_day = ?
+        due_day = ?,
+        status = ?
       WHERE id = ?
       `,
       [
         nextAssignedUserId,
-        nullableValue(nextSellerId),
-        nextStatus,
-        nextBalance,
+        nullableValue(finalSellerId),
         nextDueDay,
+        finalStatus,
         id,
       ]
     )
 
-    const nextListingStatus = listingStatusFromClientUnitStatus(nextStatus)
+    const nextListingStatus = listingStatusFromClientUnitStatus(finalStatus)
 
     if (nextListingStatus) {
       await connection.query(
@@ -701,27 +874,75 @@ export const updateClientUnit = async (req, res) => {
         SET status = ?
         WHERE id = ?
         `,
-        [nextListingStatus, clientUnit.listing_id]
+        [nextListingStatus, existingClientUnit.listing_id]
       )
     }
 
+    let regeneratedCommission = null
+
+    const sellerChanged =
+      Number(finalSellerId || 0) !== Number(existingClientUnit.seller_id || 0)
+
+    if (regenerate_commission && sellerChanged && !isMissing(finalSellerId)) {
+      await connection.query(
+        `
+        DELETE cr
+        FROM commission_releases cr
+        INNER JOIN commissions cm ON cm.id = cr.commission_id
+        WHERE cm.client_unit_id = ?
+          AND cr.status <> 'released'
+      `,
+        [id]
+      )
+
+      await connection.query(
+        `
+        DELETE FROM commissions
+        WHERE client_unit_id = ?
+          AND status <> 'released'
+      `,
+        [id]
+      )
+
+      const listing = await getListingById(connection, existingClientUnit.listing_id)
+
+      regeneratedCommission = await createAutoCommissionForClientUnit({
+        connection,
+        clientUnitId: id,
+        sellerId: finalSellerId,
+        rateOverride: main_commission_rate_override,
+        commissionRole: null,
+        sourceType: 'main',
+        parentCommissionId: null,
+        saleType: validateSaleType(sale_type),
+        notes: `Regenerated after seller update for ${listing?.unit_id || 'client unit'}`,
+      })
+    }
+
+    await refreshCommissionEligibility(id, connection)
+
     await connection.commit()
+
+    await createAuditLog({
+      userId: req.user.id,
+      action: 'update',
+      module: 'Client Units',
+      description: `Updated client unit ${id}`,
+      ipAddress: getClientIp(req),
+    })
+
+    res.status(200).json({
+      message: 'Client unit updated successfully',
+      regeneratedCommission,
+      data: {
+        clientUnitId: Number(id),
+        regeneratedCommission,
+      },
+    })
   } catch (err) {
     await connection.rollback()
     throw err
   } finally {
     connection.release()
   }
-
-  await createAuditLog({
-    userId: req.user.id,
-    action: 'update',
-    module: 'Client Units',
-    description: `Updated client unit ${id}`,
-    ipAddress: getClientIp(req),
-  })
-
-  return res.status(200).json({
-    message: 'Client unit updated successfully',
-  })
 }

@@ -1,20 +1,21 @@
 import { db } from '../db/connect.js'
 import { createAuditLog } from '../utils/createAuditLog.js'
+import { getClientIp } from '../utils/getClientIp.js'
+import { refreshCommissionEligibility } from './commissions.controller.js'
+
+const allowedPaymentStatuses = ['pending', 'verified', 'rejected']
 
 const isMissing = (value) => {
   return value === undefined || value === null || value === ''
 }
 
 const nullableValue = (value) => {
-  if (isMissing(value)) {
-    return null
-  }
-
+  if (isMissing(value)) return null
   return value
 }
 
 const normalizeMoney = (value) => {
-  return Number(Number(value).toFixed(2))
+  return Number(Number(value || 0).toFixed(2))
 }
 
 const validateAmount = (amount) => {
@@ -22,8 +23,14 @@ const validateAmount = (amount) => {
 
   return {
     isValid: !Number.isNaN(parsedAmount) && parsedAmount > 0,
-    value: parsedAmount
+    value: normalizeMoney(parsedAmount),
   }
+}
+
+const validatePaymentStatus = (status) => {
+  if (isMissing(status)) return 'verified'
+  if (!allowedPaymentStatuses.includes(status)) return null
+  return status
 }
 
 const paymentFields = `
@@ -32,10 +39,17 @@ const paymentFields = `
   c.full_name AS client_name,
   l.unit_id,
   p.name AS project_name,
+  l.net_selling_price,
+  l.legal_misc_fee,
+  l.total_contract_price,
   py.amount,
   py.payment_type,
   py.payment_method,
   py.payment_date,
+  py.status,
+  py.verified_by,
+  verifier.full_name AS verified_by_name,
+  py.verified_at,
   py.created_at,
   py.updated_at
 `
@@ -46,10 +60,11 @@ const paymentJoins = `
   INNER JOIN clients c ON c.id = cu.client_id
   INNER JOIN listings l ON l.id = cu.listing_id
   INNER JOIN projects p ON p.id = l.project_id
+  LEFT JOIN users verifier ON verifier.id = py.verified_by
 `
 
-const clientUnitExists = async (connection, clientUnitId) => {
-  const [rows] = await connection.query(
+const clientUnitExists = async (connectionOrDb, clientUnitId) => {
+  const [rows] = await connectionOrDb.query(
     `
     SELECT id
     FROM client_units
@@ -62,19 +77,37 @@ const clientUnitExists = async (connection, clientUnitId) => {
   return rows.length > 0
 }
 
-const recomputeClientUnitBalance = async (connection, clientUnitId) => {
-  const [clientUnitRows] = await connection.query(
+const getPaymentById = async (id) => {
+  const [rows] = await db.query(
+    `
+    SELECT
+      ${paymentFields}
+    ${paymentJoins}
+    WHERE py.id = ?
+    LIMIT 1
+    `,
+    [id]
+  )
+
+  return rows[0] || null
+}
+
+const recomputeClientUnitBalance = async (connectionOrDb, clientUnitId) => {
+  const [clientUnitRows] = await connectionOrDb.query(
     `
     SELECT
       cu.id,
-      cu.listing_id,
       cu.status,
-      l.net_selling_price
+      COALESCE(
+        NULLIF(l.total_contract_price, 0),
+        l.net_selling_price + l.legal_misc_fee,
+        l.net_selling_price,
+        0
+      ) AS total_contract_price
     FROM client_units cu
     INNER JOIN listings l ON l.id = cu.listing_id
     WHERE cu.id = ?
     LIMIT 1
-    FOR UPDATE
     `,
     [clientUnitId]
   )
@@ -85,81 +118,51 @@ const recomputeClientUnitBalance = async (connection, clientUnitId) => {
     return null
   }
 
-  const [paymentRows] = await connection.query(
+  const [paymentRows] = await connectionOrDb.query(
     `
-    SELECT COALESCE(SUM(amount), 0) AS total_paid
+    SELECT COALESCE(SUM(amount), 0) AS paid_amount
     FROM payments
     WHERE client_unit_id = ?
+      AND status = 'verified'
     `,
     [clientUnitId]
   )
 
-  const totalPaid = normalizeMoney(paymentRows[0].total_paid)
-  const netSellingPrice = normalizeMoney(clientUnit.net_selling_price)
-  const balance = normalizeMoney(Math.max(netSellingPrice - totalPaid, 0))
+  const totalContractPrice = normalizeMoney(clientUnit.total_contract_price)
+  const paidAmount = normalizeMoney(paymentRows[0]?.paid_amount)
+  const balance = Math.max(normalizeMoney(totalContractPrice - paidAmount), 0)
 
-  await connection.query(
-    `
-    UPDATE client_units
-    SET balance = ?
-    WHERE id = ?
-    `,
-    [balance, clientUnitId]
-  )
+  let nextStatus = clientUnit.status
 
-  if (balance <= 0) {
-    await connection.query(
-      `
-      UPDATE client_units
-      SET status = ?
-      WHERE id = ?
-      `,
-      ['fully_paid', clientUnitId]
-    )
-
-    await connection.query(
-      `
-      UPDATE listings
-      SET status = ?
-      WHERE id = ?
-      `,
-      ['sold', clientUnit.listing_id]
-    )
-  } else if (clientUnit.status === 'fully_paid') {
-    await connection.query(
-      `
-      UPDATE client_units
-      SET status = ?
-      WHERE id = ?
-      `,
-      ['active', clientUnitId]
-    )
-
-    await connection.query(
-      `
-      UPDATE listings
-      SET status = ?
-      WHERE id = ?
-      `,
-      ['reserved', clientUnit.listing_id]
-    )
+  if (
+    totalContractPrice > 0 &&
+    paidAmount >= totalContractPrice &&
+    !['cancelled', 'closed'].includes(clientUnit.status)
+  ) {
+    nextStatus = 'fully_paid'
   }
 
+  await connectionOrDb.query(
+    `
+    UPDATE client_units
+    SET
+      balance = ?,
+      status = ?
+    WHERE id = ?
+    `,
+    [balance, nextStatus, clientUnitId]
+  )
+
   return {
+    totalContractPrice,
+    paidAmount,
     balance,
-    totalPaid
+    status: nextStatus,
   }
 }
 
 export const getPayments = async (req, res) => {
-  const {
-    search,
-    client_unit_id,
-    payment_type,
-    payment_method,
-    date_from,
-    date_to
-  } = req.query
+  const { search, status, client_unit_id, payment_type } = req.query
 
   const conditions = []
   const params = []
@@ -174,10 +177,23 @@ export const getPayments = async (req, res) => {
         OR p.name LIKE ?
         OR py.payment_type LIKE ?
         OR py.payment_method LIKE ?
+        OR py.status LIKE ?
       )
     `)
 
-    params.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm)
+    params.push(
+      searchTerm,
+      searchTerm,
+      searchTerm,
+      searchTerm,
+      searchTerm,
+      searchTerm
+    )
+  }
+
+  if (!isMissing(status) && status !== 'all') {
+    conditions.push('py.status = ?')
+    params.push(status)
   }
 
   if (!isMissing(client_unit_id)) {
@@ -185,29 +201,13 @@ export const getPayments = async (req, res) => {
     params.push(client_unit_id)
   }
 
-  if (!isMissing(payment_type)) {
+  if (!isMissing(payment_type) && payment_type !== 'all') {
     conditions.push('py.payment_type = ?')
     params.push(payment_type)
   }
 
-  if (!isMissing(payment_method)) {
-    conditions.push('py.payment_method = ?')
-    params.push(payment_method)
-  }
-
-  if (!isMissing(date_from)) {
-    conditions.push('py.payment_date >= ?')
-    params.push(date_from)
-  }
-
-  if (!isMissing(date_to)) {
-    conditions.push('py.payment_date <= ?')
-    params.push(date_to)
-  }
-
-  const whereClause = conditions.length > 0
-    ? `WHERE ${conditions.join(' AND ')}`
-    : ''
+  const whereClause =
+    conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
 
   const [payments] = await db.query(
     `
@@ -221,53 +221,38 @@ export const getPayments = async (req, res) => {
   )
 
   res.status(200).json({
-    payments
+    message: 'Payments fetched successfully',
+    payments,
+    data: payments,
   })
 }
 
 export const getPayment = async (req, res) => {
   const { id } = req.params
 
-  const [rows] = await db.query(
-    `
-    SELECT
-      ${paymentFields}
-    ${paymentJoins}
-    WHERE py.id = ?
-    LIMIT 1
-    `,
-    [id]
-  )
-
-  const payment = rows[0]
+  const payment = await getPaymentById(id)
 
   if (!payment) {
     return res.status(404).json({
-      message: 'Payment not found'
+      message: 'Payment not found',
     })
   }
 
   res.status(200).json({
-    payment
+    message: 'Payment fetched successfully',
+    payment,
+    data: payment,
   })
 }
 
 export const getPaymentsByClientUnit = async (req, res) => {
   const { clientUnitId } = req.params
 
-  const [clientUnitRows] = await db.query(
-    `
-    SELECT id
-    FROM client_units
-    WHERE id = ?
-    LIMIT 1
-    `,
-    [clientUnitId]
-  )
+  const exists = await clientUnitExists(db, clientUnitId)
 
-  if (!clientUnitRows[0]) {
+  if (!exists) {
     return res.status(404).json({
-      message: 'Client unit not found'
+      message: 'Client unit not found',
     })
   }
 
@@ -283,7 +268,9 @@ export const getPaymentsByClientUnit = async (req, res) => {
   )
 
   res.status(200).json({
-    payments
+    message: 'Client unit payments fetched successfully',
+    payments,
+    data: payments,
   })
 }
 
@@ -293,18 +280,13 @@ export const createPayment = async (req, res) => {
     amount,
     payment_type,
     payment_method,
-    payment_date
+    payment_date,
+    status = 'verified',
   } = req.body
 
   if (isMissing(client_unit_id)) {
     return res.status(400).json({
-      message: 'Client unit ID is required'
-    })
-  }
-
-  if (isMissing(amount)) {
-    return res.status(400).json({
-      message: 'Payment amount is required'
+      message: 'Client unit is required',
     })
   }
 
@@ -312,23 +294,34 @@ export const createPayment = async (req, res) => {
 
   if (!amountValidation.isValid) {
     return res.status(400).json({
-      message: 'Payment amount must be greater than 0'
+      message: 'Amount must be greater than 0',
+    })
+  }
+
+  const finalStatus = validatePaymentStatus(status)
+
+  if (!finalStatus) {
+    return res.status(400).json({
+      message: 'Invalid payment status',
     })
   }
 
   const connection = await db.getConnection()
-  let paymentId = null
-  let balanceResult = null
 
   try {
     await connection.beginTransaction()
 
-    if (!(await clientUnitExists(connection, client_unit_id))) {
+    const exists = await clientUnitExists(connection, client_unit_id)
+
+    if (!exists) {
       await connection.rollback()
       return res.status(404).json({
-        message: 'Client unit not found'
+        message: 'Client unit not found',
       })
     }
+
+    const verifiedBy = finalStatus === 'verified' ? req.user.id : null
+    const verifiedAt = finalStatus === 'verified' ? new Date() : null
 
     const [result] = await connection.query(
       `
@@ -337,109 +330,137 @@ export const createPayment = async (req, res) => {
         amount,
         payment_type,
         payment_method,
-        payment_date
-      ) VALUES (?, ?, ?, ?, COALESCE(?, CURDATE()))
+        payment_date,
+        status,
+        verified_by,
+        verified_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         client_unit_id,
         amountValidation.value,
-        payment_type || 'other',
+        nullableValue(payment_type),
         nullableValue(payment_method),
-        nullableValue(payment_date)
+        payment_date || new Date(),
+        finalStatus,
+        verifiedBy,
+        verifiedAt,
       ]
     )
 
-    paymentId = result.insertId
-    balanceResult = await recomputeClientUnitBalance(connection, client_unit_id)
+    const balanceSummary = await recomputeClientUnitBalance(
+      connection,
+      client_unit_id
+    )
+
+    const eligibilitySummary = await refreshCommissionEligibility(
+      client_unit_id,
+      connection
+    )
 
     await connection.commit()
+
+    await createAuditLog({
+      userId: req.user.id,
+      action: 'payment',
+      module: 'Payments',
+      description: `Added payment for client unit ${client_unit_id}`,
+      ipAddress: getClientIp(req),
+    })
+
+    res.status(201).json({
+      message: 'Payment created successfully',
+      paymentId: result.insertId,
+      balanceSummary,
+      eligibilitySummary,
+      data: {
+        paymentId: result.insertId,
+        balanceSummary,
+        eligibilitySummary,
+      },
+    })
   } catch (err) {
     await connection.rollback()
     throw err
   } finally {
     connection.release()
   }
-
-  await createAuditLog({
-    userId: req.user.id,
-    action: 'payment',
-    module: 'Payments',
-    description: `Added payment for client unit ${client_unit_id}`,
-    ipAddress: req.ip
-  })
-
-  res.status(201).json({
-    message: 'Payment created successfully',
-    paymentId,
-    balance: balanceResult.balance,
-    totalPaid: balanceResult.totalPaid
-  })
 }
 
 export const updatePayment = async (req, res) => {
   const { id } = req.params
+
   const {
     client_unit_id,
     amount,
     payment_type,
     payment_method,
-    payment_date
+    payment_date,
+    status,
   } = req.body
 
-  if (isMissing(client_unit_id)) {
-    return res.status(400).json({
-      message: 'Client unit ID is required'
+  const existingPayment = await getPaymentById(id)
+
+  if (!existingPayment) {
+    return res.status(404).json({
+      message: 'Payment not found',
     })
   }
 
-  if (isMissing(amount)) {
+  const nextClientUnitId = isMissing(client_unit_id)
+    ? existingPayment.client_unit_id
+    : client_unit_id
+
+  const nextAmount = isMissing(amount)
+    ? normalizeMoney(existingPayment.amount)
+    : validateAmount(amount).value
+
+  if (!isMissing(amount) && !validateAmount(amount).isValid) {
     return res.status(400).json({
-      message: 'Payment amount is required'
+      message: 'Amount must be greater than 0',
     })
   }
 
-  const amountValidation = validateAmount(amount)
+  const nextStatus = isMissing(status)
+    ? existingPayment.status
+    : validatePaymentStatus(status)
 
-  if (!amountValidation.isValid) {
+  if (!nextStatus) {
     return res.status(400).json({
-      message: 'Payment amount must be greater than 0'
+      message: 'Invalid payment status',
     })
   }
 
   const connection = await db.getConnection()
-  let balanceResult = null
 
   try {
     await connection.beginTransaction()
 
-    const [paymentRows] = await connection.query(
-      `
-      SELECT
-        id,
-        client_unit_id
-      FROM payments
-      WHERE id = ?
-      LIMIT 1
-      FOR UPDATE
-      `,
-      [id]
-    )
+    const exists = await clientUnitExists(connection, nextClientUnitId)
 
-    const oldPayment = paymentRows[0]
-
-    if (!oldPayment) {
+    if (!exists) {
       await connection.rollback()
       return res.status(404).json({
-        message: 'Payment not found'
+        message: 'Client unit not found',
       })
     }
 
-    if (!(await clientUnitExists(connection, client_unit_id))) {
-      await connection.rollback()
-      return res.status(404).json({
-        message: 'Client unit not found'
-      })
-    }
+    const becameVerified =
+      existingPayment.status !== 'verified' && nextStatus === 'verified'
+
+    const shouldClearVerification = nextStatus !== 'verified'
+
+    const verifiedBy = becameVerified
+      ? req.user.id
+      : shouldClearVerification
+        ? null
+        : existingPayment.verified_by
+
+    const verifiedAt = becameVerified
+      ? new Date()
+      : shouldClearVerification
+        ? null
+        : existingPayment.verified_at
 
     await connection.query(
       `
@@ -449,44 +470,83 @@ export const updatePayment = async (req, res) => {
         amount = ?,
         payment_type = ?,
         payment_method = ?,
-        payment_date = COALESCE(?, CURDATE())
+        payment_date = ?,
+        status = ?,
+        verified_by = ?,
+        verified_at = ?
       WHERE id = ?
       `,
       [
-        client_unit_id,
-        amountValidation.value,
-        payment_type || 'other',
-        nullableValue(payment_method),
-        nullableValue(payment_date),
-        id
+        nextClientUnitId,
+        nextAmount,
+        !isMissing(payment_type)
+          ? nullableValue(payment_type)
+          : existingPayment.payment_type,
+        !isMissing(payment_method)
+          ? nullableValue(payment_method)
+          : existingPayment.payment_method,
+        !isMissing(payment_date) ? payment_date : existingPayment.payment_date,
+        nextStatus,
+        verifiedBy,
+        verifiedAt,
+        id,
       ]
     )
 
-    balanceResult = await recomputeClientUnitBalance(connection, client_unit_id)
+    const affectedClientUnitIds = [
+      Number(existingPayment.client_unit_id),
+      Number(nextClientUnitId),
+    ].filter((value, index, arr) => arr.indexOf(value) === index)
 
-    if (String(oldPayment.client_unit_id) !== String(client_unit_id)) {
-      await recomputeClientUnitBalance(connection, oldPayment.client_unit_id)
+    const balanceSummaries = []
+    const eligibilitySummaries = []
+
+    for (const affectedClientUnitId of affectedClientUnitIds) {
+      const balanceSummary = await recomputeClientUnitBalance(
+        connection,
+        affectedClientUnitId
+      )
+
+      const eligibilitySummary = await refreshCommissionEligibility(
+        affectedClientUnitId,
+        connection
+      )
+
+      balanceSummaries.push({
+        client_unit_id: affectedClientUnitId,
+        balanceSummary,
+      })
+
+      eligibilitySummaries.push({
+        client_unit_id: affectedClientUnitId,
+        eligibilitySummary,
+      })
     }
 
     await connection.commit()
+
+    await createAuditLog({
+      userId: req.user.id,
+      action: 'update',
+      module: 'Payments',
+      description: `Updated payment ${id}`,
+      ipAddress: getClientIp(req),
+    })
+
+    res.status(200).json({
+      message: 'Payment updated successfully',
+      balanceSummaries,
+      eligibilitySummaries,
+      data: {
+        paymentId: Number(id),
+        balanceSummaries,
+        eligibilitySummaries,
+      },
+    })
   } catch (err) {
     await connection.rollback()
     throw err
   } finally {
     connection.release()
   }
-
-  await createAuditLog({
-    userId: req.user.id,
-    action: 'update',
-    module: 'Payments',
-    description: `Updated payment ${id}`,
-    ipAddress: req.ip
-  })
-
-  res.status(200).json({
-    message: 'Payment updated successfully',
-    balance: balanceResult.balance,
-    totalPaid: balanceResult.totalPaid
-  })
 }
