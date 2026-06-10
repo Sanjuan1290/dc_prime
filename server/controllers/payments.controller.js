@@ -28,7 +28,7 @@ const validateAmount = (amount) => {
 }
 
 const validatePaymentStatus = (status) => {
-  if (isMissing(status)) return 'verified'
+  if (isMissing(status)) return 'pending'
   if (!allowedPaymentStatuses.includes(status)) return null
   return status
 }
@@ -98,6 +98,7 @@ const recomputeClientUnitBalance = async (connectionOrDb, clientUnitId) => {
     SELECT
       cu.id,
       cu.status,
+      l.reservation_fee,
       COALESCE(
         NULLIF(l.total_contract_price, 0),
         l.net_selling_price + l.legal_misc_fee,
@@ -135,6 +136,15 @@ const recomputeClientUnitBalance = async (connectionOrDb, clientUnitId) => {
   let nextStatus = clientUnit.status
 
   if (
+    clientUnit.status === 'reserved' &&
+    totalContractPrice > 0 &&
+    paidAmount >= normalizeMoney(clientUnit.reservation_fee) &&
+    paidAmount < totalContractPrice
+  ) {
+    nextStatus = 'active'
+  }
+
+  if (
     totalContractPrice > 0 &&
     paidAmount >= totalContractPrice &&
     !['cancelled', 'closed'].includes(clientUnit.status)
@@ -152,6 +162,8 @@ const recomputeClientUnitBalance = async (connectionOrDb, clientUnitId) => {
     `,
     [balance, nextStatus, clientUnitId]
   )
+
+  await refreshCommissionEligibility(clientUnitId, connectionOrDb)
 
   return {
     totalContractPrice,
@@ -281,7 +293,7 @@ export const createPayment = async (req, res) => {
     payment_type,
     payment_method,
     payment_date,
-    status = 'verified',
+    status = 'pending',
   } = req.body
 
   if (isMissing(client_unit_id)) {

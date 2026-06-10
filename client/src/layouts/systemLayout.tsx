@@ -1,5 +1,5 @@
-import { useState } from "react"
-import { NavLink, Outlet, useNavigate } from "react-router-dom"
+import { useMemo, useState } from "react"
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom"
 import type { IconType } from "react-icons"
 import {
   FiActivity,
@@ -23,6 +23,17 @@ import Button from "../components/ui/Button"
 import { API_URL } from "../utils/api"
 import useCurrentUser from "../utils/useCurrentUser"
 
+const getRoleLabel = (role?: string) => {
+  if (!role) return "Authorized user"
+
+  return role
+    .replaceAll("_", " ")
+    .split(" ")
+    .filter(Boolean)
+    .map((word) => word[0]?.toUpperCase() + word.slice(1))
+    .join(" ")
+}
+
 type CurrentUserResponse = {
   user?: {
     email?: string
@@ -31,71 +42,143 @@ type CurrentUserResponse = {
   }
 }
 
+type NavTone = "blue" | "emerald" | "amber" | "purple" | "rose" | "slate"
+
 type NavItem = {
   label: string
   to: string
   icon: IconType
+  tone: NavTone
 }
 
 type NavGroup = {
   title: string
+  description: string
+  tone: NavTone
   items: NavItem[]
+}
+
+const toneClasses: Record<
+  NavTone,
+  {
+    active: string
+    icon: string
+    pill: string
+    strip: string
+  }
+> = {
+  blue: {
+    active: "border-blue-200 bg-blue-50 text-blue-700 shadow-blue-100",
+    icon: "bg-blue-100 text-blue-700",
+    pill: "bg-blue-100 text-blue-700",
+    strip: "bg-blue-500",
+  },
+  emerald: {
+    active: "border-emerald-200 bg-emerald-50 text-emerald-700 shadow-emerald-100",
+    icon: "bg-emerald-100 text-emerald-700",
+    pill: "bg-emerald-100 text-emerald-700",
+    strip: "bg-emerald-500",
+  },
+  amber: {
+    active: "border-amber-200 bg-amber-50 text-amber-700 shadow-amber-100",
+    icon: "bg-amber-100 text-amber-700",
+    pill: "bg-amber-100 text-amber-700",
+    strip: "bg-amber-500",
+  },
+  purple: {
+    active: "border-purple-200 bg-purple-50 text-purple-700 shadow-purple-100",
+    icon: "bg-purple-100 text-purple-700",
+    pill: "bg-purple-100 text-purple-700",
+    strip: "bg-purple-500",
+  },
+  rose: {
+    active: "border-rose-200 bg-rose-50 text-rose-700 shadow-rose-100",
+    icon: "bg-rose-100 text-rose-700",
+    pill: "bg-rose-100 text-rose-700",
+    strip: "bg-rose-500",
+  },
+  slate: {
+    active: "border-slate-200 bg-slate-100 text-slate-900 shadow-slate-100",
+    icon: "bg-slate-200 text-slate-700",
+    pill: "bg-slate-200 text-slate-700",
+    strip: "bg-slate-500",
+  },
 }
 
 const navGroups: NavGroup[] = [
   {
     title: "Overview",
-    items: [{ label: "Dashboard", to: "/dashboard", icon: FiHome }],
+    description: "Main summary",
+    tone: "blue",
+    items: [{ label: "Dashboard", to: "/dashboard", icon: FiHome, tone: "blue" }],
   },
   {
     title: "Management",
+    description: "Projects, units, and buyers",
+    tone: "emerald",
     items: [
-      { label: "Projects", to: "/projects", icon: FiMap },
-      { label: "Listings", to: "/listings", icon: FiGrid },
-      { label: "Clients", to: "/clients", icon: FiUsers },
+      { label: "Projects", to: "/projects", icon: FiMap, tone: "emerald" },
+      { label: "Listings", to: "/listings", icon: FiGrid, tone: "emerald" },
+      { label: "Clients", to: "/clients", icon: FiUsers, tone: "emerald" },
       {
-        label: "Accreditted Sellers",
+        label: "Accredited Sellers",
         to: "/accreditted_sellers",
         icon: FiUserCheck,
+        tone: "emerald",
       },
     ],
   },
   {
     title: "Finance",
+    description: "Payments and payouts",
+    tone: "amber",
     items: [
-      { label: "Payments", to: "/payments", icon: FiCreditCard },
-      { label: "Commissions", to: "/commissions", icon: FiDollarSign },
-      { label: "Cash Advances", to: "/cash-advances", icon: FiDollarSign, },
+      { label: "Payments", to: "/payments", icon: FiCreditCard, tone: "amber" },
+      { label: "Commissions", to: "/commissions", icon: FiDollarSign, tone: "amber" },
+      { label: "Cash Advances", to: "/cash-advances", icon: FiDollarSign, tone: "amber" },
     ],
   },
   {
     title: "Compliance",
+    description: "Documents and audit trail",
+    tone: "purple",
     items: [
-      { label: "Documents", to: "/documents", icon: FiFileText },
-      { label: "Audit Logs", to: "/audit-logs", icon: FiActivity },
+      { label: "Documents", to: "/documents", icon: FiFileText, tone: "purple" },
+      { label: "Audit Logs", to: "/audit-logs", icon: FiActivity, tone: "purple" },
     ],
   },
   {
     title: "Records",
+    description: "Reports and staff records",
+    tone: "rose",
     items: [
-      { label: "Reports", to: "/reports", icon: FiBarChart2 },
-      { label: "Employees", to: "/employees", icon: FiUsers },
-      { label: "Attendance", to: "/attendance", icon: FiClock },
+      { label: "Reports", to: "/reports", icon: FiBarChart2, tone: "rose" },
+      { label: "Employees", to: "/employees", icon: FiUsers, tone: "rose" },
+      { label: "Attendance", to: "/attendance", icon: FiClock, tone: "rose" },
     ],
   },
   {
     title: "Administration",
-    items: [{ label: "Settings", to: "/settings", icon: FiSettings }],
+    description: "System controls",
+    tone: "slate",
+    items: [{ label: "Settings", to: "/settings", icon: FiSettings, tone: "slate" }],
   },
 ]
 
 const SystemLayout = () => {
   const navigate = useNavigate()
+  const location = useLocation()
   const queryClient = useQueryClient()
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
 
   const { data } = useCurrentUser()
   const currentUser = (data as CurrentUserResponse | null)?.user
+
+  const activeItem = useMemo(() => {
+    return navGroups
+      .flatMap((group) => group.items.map((item) => ({ ...item, groupTitle: group.title })))
+      .find((item) => location.pathname === item.to || location.pathname.startsWith(`${item.to}/`))
+  }, [location.pathname])
 
   const handleLogout = async () => {
     await fetch(`${API_URL}/logout`, {
@@ -109,51 +192,92 @@ const SystemLayout = () => {
 
   const sidebar = (
     <aside className="flex h-full w-72 flex-col border-r border-slate-200 bg-white shadow-sm lg:w-64">
-      <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
-        <div className="flex items-center gap-3">
-            <img src="/logo2.png" alt="logo"  className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-sm font-bold text-white shadow-sm"/>
+      <div className="border-b border-slate-200 bg-gradient-to-br from-blue-50 via-white to-emerald-50 px-5 py-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <img
+              src="/logo2.png"
+              alt="D&C Prime logo"
+              className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white bg-white object-cover shadow-sm"
+            />
 
-          <div>
-            <p className="text-sm font-bold text-slate-900">D&C Prime</p>
-            <p className="text-xs text-slate-500">Realty admin</p>
+            <div>
+              <p className="text-sm font-bold text-slate-900">D&C Prime</p>
+              <p className="text-xs text-slate-500">Realty management</p>
+            </div>
           </div>
+
+          <Button
+            className="lg:hidden"
+            icon={<FiX />}
+            onClick={() => setIsSidebarOpen(false)}
+            variant="ghost"
+          />
         </div>
 
-        <Button
-          className="lg:hidden"
-          icon={<FiX />}
-          onClick={() => setIsSidebarOpen(false)}
-          variant="ghost"
-        />
+        <div className="mt-4 rounded-2xl border border-white/80 bg-white/80 p-3 shadow-sm">
+          <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+            Current section
+          </p>
+          <div className="mt-2 flex items-center gap-2">
+            {activeItem ? (
+              <span className={`h-2.5 w-2.5 rounded-full ${toneClasses[activeItem.tone].strip}`} />
+            ) : null}
+            <p className="truncate text-sm font-bold text-slate-900">
+              {activeItem?.label || "Dashboard"}
+            </p>
+          </div>
+        </div>
       </div>
 
       <nav className="flex-1 overflow-y-auto p-3">
         {navGroups.map((group) => (
           <div key={group.title} className="mb-4">
-            <p className="mb-2 px-3 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-              {group.title}
-            </p>
+            <div className="mb-2 flex items-center justify-between gap-2 px-3">
+              <div className="min-w-0">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                  {group.title}
+                </p>
+                <p className="truncate text-[11px] text-slate-400">{group.description}</p>
+              </div>
+              <span className={`h-2 w-2 shrink-0 rounded-full ${toneClasses[group.tone].strip}`} />
+            </div>
 
             <div className="space-y-1">
               {group.items.map((item) => {
                 const Icon = item.icon
+                const tone = toneClasses[item.tone]
 
                 return (
                   <NavLink
                     className={({ isActive }) =>
                       [
-                        "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition",
+                        "group relative flex items-center gap-3 rounded-xl border px-2.5 py-2.5 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-blue-100",
                         isActive
-                          ? "bg-blue-50 text-blue-700"
-                          : "text-slate-600 hover:bg-slate-50 hover:text-slate-900",
+                          ? `${tone.active} shadow-sm`
+                          : "border-transparent text-slate-600 hover:border-slate-200 hover:bg-slate-50 hover:text-slate-900",
                       ].join(" ")
                     }
                     key={item.to}
                     onClick={() => setIsSidebarOpen(false)}
                     to={item.to}
                   >
-                    <Icon className="h-4 w-4 shrink-0" />
-                    <span className="truncate">{item.label}</span>
+                    {({ isActive }) => (
+                      <>
+                        <span
+                          className={[
+                            "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition",
+                            isActive ? tone.icon : "bg-slate-100 text-slate-500 group-hover:bg-white",
+                          ].join(" ")}
+                        >
+                          <Icon className="h-4 w-4" />
+                        </span>
+                        <span className="truncate">{item.label}</span>
+                        {isActive ? (
+                          <span className={`ml-auto h-2 w-2 shrink-0 rounded-full ${tone.strip}`} />
+                        ) : null}
+                      </>
+                    )}
                   </NavLink>
                 )
               })}
@@ -162,15 +286,22 @@ const SystemLayout = () => {
         ))}
       </nav>
 
-      <div className="border-t border-slate-200 p-4">
-        <div className="mb-3 rounded-xl bg-slate-50 p-3">
-          <p className="truncate text-sm font-semibold text-slate-900">
-            {currentUser?.full_name || "Signed in user"}
-          </p>
+      <div className="border-t border-slate-200 bg-slate-50/70 p-4">
+        <div className="mb-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-slate-900">
+                {currentUser?.full_name || "Signed in user"}
+              </p>
 
-          <p className="truncate text-xs text-slate-500">
-            {currentUser?.email || currentUser?.role || "Secure session"}
-          </p>
+              <p className="truncate text-xs text-slate-500">
+                {currentUser?.email || "Secure session"}
+              </p>
+            </div>
+            <span className="shrink-0 rounded-full bg-blue-50 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-blue-700">
+              {getRoleLabel(currentUser?.role)}
+            </span>
+          </div>
         </div>
 
         <Button
@@ -216,12 +347,17 @@ const SystemLayout = () => {
               Menu
             </Button>
 
-            <div className="hidden lg:block">
-              <p className="text-sm font-semibold text-slate-900">
-                Internal admin system
-              </p>
-              <p className="text-xs text-slate-500">
-                Connected to live MySQL data
+            <div className="hidden min-w-0 lg:block">
+              <div className="flex items-center gap-2">
+                {activeItem ? (
+                  <span className={`h-2.5 w-2.5 rounded-full ${toneClasses[activeItem.tone].strip}`} />
+                ) : null}
+                <p className="truncate text-sm font-semibold text-slate-900">
+                  {activeItem?.label || "Internal admin system"}
+                </p>
+              </div>
+              <p className="mt-0.5 text-xs text-slate-500">
+                {activeItem?.groupTitle || "Connected to live MySQL data"}
               </p>
             </div>
 
@@ -231,7 +367,7 @@ const SystemLayout = () => {
               </p>
 
               <p className="truncate text-xs text-slate-500">
-                {currentUser?.role || "Authorized user"}
+                {getRoleLabel(currentUser?.role)}
               </p>
             </div>
           </div>

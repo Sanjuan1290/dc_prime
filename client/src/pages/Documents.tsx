@@ -464,6 +464,9 @@ const Documents = () => {
           onClose={() => setDocumentToDelete(null)}
           title="Delete Document"
         >
+          {deleteDocumentMutation.error ? (
+            <Alert variant="error" title={deleteDocumentMutation.error.message} />
+          ) : null}
           <ConfirmBox
             message={`Are you sure you want to delete ${documentToDelete.name}? This cannot be undone.`}
             onCancel={() => setDocumentToDelete(null)}

@@ -1294,6 +1294,17 @@ export const markReleaseStage = async (req, res) => {
       })
     }
 
+    await connection.query(
+      `UPDATE commissions
+       SET released_amount = (
+         SELECT COALESCE(SUM(net_release_amount), 0)
+         FROM commission_releases
+         WHERE commission_id = ? AND status = 'released'
+       )
+       WHERE id = ?`,
+      [release.commission_id, release.commission_id]
+    )
+
     await refreshCommissionStatus(connection, release.commission_id)
 
     await connection.commit()
@@ -1325,9 +1336,15 @@ export const deductCashAdvance = async (req, res) => {
   const { id: releaseId } = req.params
   const { cash_advance_id, amount, notes } = req.body
 
-  const deductionAmount = normalizeMoney(amount)
+  if (isMissing(cash_advance_id)) {
+    return res.status(400).json({
+      message: 'Select an approved cash advance before deducting. Manual deductions are disabled to avoid untracked deductions.',
+    })
+  }
 
-  if (deductionAmount <= 0) {
+  const requestedAmount = isMissing(amount) ? null : normalizeMoney(amount)
+
+  if (requestedAmount !== null && requestedAmount <= 0) {
     return res.status(400).json({
       message: 'Deduction amount must be greater than 0',
     })
@@ -1348,6 +1365,7 @@ export const deductCashAdvance = async (req, res) => {
       INNER JOIN commissions cm ON cm.id = cr.commission_id
       WHERE cr.id = ?
       LIMIT 1
+      FOR UPDATE
       `,
       [releaseId]
     )
@@ -1366,97 +1384,125 @@ export const deductCashAdvance = async (req, res) => {
       })
     }
 
-    if (!isMissing(cash_advance_id)) {
-      const [advanceRows] = await connection.query(
-        `
-        SELECT *
-        FROM cash_advances
-        WHERE id = ?
-        LIMIT 1
-        `,
-        [cash_advance_id]
-      )
+    const [advanceRows] = await connection.query(
+      `
+      SELECT *
+      FROM cash_advances
+      WHERE id = ?
+      LIMIT 1
+      FOR UPDATE
+      `,
+      [cash_advance_id]
+    )
 
-      const cashAdvance = advanceRows[0]
+    const cashAdvance = advanceRows[0]
 
-      if (!cashAdvance) {
-        await connection.rollback()
-        return res.status(404).json({
-          message: 'Cash advance not found',
-        })
-      }
-
-      if (!['approved', 'partially_deducted'].includes(cashAdvance.status)) {
-        await connection.rollback()
-        return res.status(400).json({
-          message: 'Only approved cash advances can be deducted',
-        })
-      }
-
-      if (Number(cashAdvance.seller_id) !== Number(release.seller_id)) {
-        await connection.rollback()
-        return res.status(400).json({
-          message: 'Cash advance seller does not match commission seller',
-        })
-      }
-
-      if (deductionAmount > normalizeMoney(cashAdvance.remaining_balance)) {
-        await connection.rollback()
-        return res.status(400).json({
-          message: 'Deduction exceeds cash advance remaining balance',
-        })
-      }
-
-      await connection.query(
-        `
-        INSERT INTO cash_advance_deductions (
-          cash_advance_id,
-          commission_release_id,
-          amount,
-          created_by,
-          notes
-        ) VALUES (?, ?, ?, ?, ?)
-        `,
-        [
-          cash_advance_id,
-          releaseId,
-          deductionAmount,
-          req.user.id,
-          nullableValue(notes),
-        ]
-      )
-
-      const nextRemainingBalance = normalizeMoney(
-        normalizeMoney(cashAdvance.remaining_balance) - deductionAmount
-      )
-
-      const nextCashAdvanceStatus =
-        nextRemainingBalance <= 0 ? 'deducted' : 'partially_deducted'
-
-      await connection.query(
-        `
-        UPDATE cash_advances
-        SET
-          remaining_balance = ?,
-          status = ?
-        WHERE id = ?
-        `,
-        [nextRemainingBalance, nextCashAdvanceStatus, cash_advance_id]
-      )
+    if (!cashAdvance) {
+      await connection.rollback()
+      return res.status(404).json({
+        message: 'Cash advance not found',
+      })
     }
+
+    if (!['approved', 'partially_deducted'].includes(cashAdvance.status)) {
+      await connection.rollback()
+      return res.status(400).json({
+        message: 'Only approved cash advances can be deducted',
+      })
+    }
+
+    if (Number(cashAdvance.seller_id) !== Number(release.seller_id)) {
+      await connection.rollback()
+      return res.status(400).json({
+        message: 'Cash advance seller does not match commission seller',
+      })
+    }
+
+    const currentReleaseDeduction = normalizeMoney(release.cash_advance_deduction)
+    const releaseRemainingBeforeDeduction = normalizeMoney(
+      normalizeMoney(release.gross_release_amount) - currentReleaseDeduction
+    )
+    const cashAdvanceRemaining = normalizeMoney(cashAdvance.remaining_balance)
+    const maxDeductibleAmount = Math.min(
+      cashAdvanceRemaining,
+      releaseRemainingBeforeDeduction
+    )
+    const deductionAmount = requestedAmount ?? maxDeductibleAmount
+
+    if (deductionAmount <= 0) {
+      await connection.rollback()
+      return res.status(400).json({
+        message: 'There is no remaining release amount or cash advance balance to deduct.',
+      })
+    }
+
+    if (deductionAmount > cashAdvanceRemaining) {
+      await connection.rollback()
+      return res.status(400).json({
+        message: 'Deduction exceeds cash advance remaining balance',
+      })
+    }
+
+    if (deductionAmount > releaseRemainingBeforeDeduction) {
+      await connection.rollback()
+      return res.status(400).json({
+        message: 'Deduction exceeds the release net amount. Lower the deduction amount.',
+      })
+    }
+
+    await connection.query(
+      `
+      INSERT INTO cash_advance_deductions (
+        cash_advance_id,
+        commission_release_id,
+        amount,
+        created_by,
+        notes
+      ) VALUES (?, ?, ?, ?, ?)
+      `,
+      [
+        cash_advance_id,
+        releaseId,
+        deductionAmount,
+        req.user.id,
+        nullableValue(notes),
+      ]
+    )
+
+    const nextRemainingBalance = normalizeMoney(
+      cashAdvanceRemaining - deductionAmount
+    )
+
+    const nextCashAdvanceStatus =
+      nextRemainingBalance <= 0 ? 'deducted' : 'partially_deducted'
+
+    await connection.query(
+      `
+      UPDATE cash_advances
+      SET
+        remaining_balance = ?,
+        status = ?
+      WHERE id = ?
+      `,
+      [nextRemainingBalance, nextCashAdvanceStatus, cash_advance_id]
+    )
+
+    const nextReleaseDeduction = normalizeMoney(
+      currentReleaseDeduction + deductionAmount
+    )
+    const nextNetReleaseAmount = normalizeMoney(
+      Math.max(normalizeMoney(release.gross_release_amount) - nextReleaseDeduction, 0)
+    )
 
     await connection.query(
       `
       UPDATE commission_releases
       SET
-        cash_advance_deduction = cash_advance_deduction + ?,
-        net_release_amount = GREATEST(
-          gross_release_amount - (cash_advance_deduction + ?),
-          0
-        )
+        cash_advance_deduction = ?,
+        net_release_amount = ?
       WHERE id = ?
       `,
-      [deductionAmount, deductionAmount, releaseId]
+      [nextReleaseDeduction, nextNetReleaseAmount, releaseId]
     )
 
     await connection.commit()
@@ -1473,10 +1519,9 @@ export const deductCashAdvance = async (req, res) => {
       message: 'Cash advance deducted successfully',
       data: {
         releaseId: Number(releaseId),
-        cash_advance_id: !isMissing(cash_advance_id)
-          ? Number(cash_advance_id)
-          : null,
+        cash_advance_id: Number(cash_advance_id),
         amount: deductionAmount,
+        net_release_amount: nextNetReleaseAmount,
       },
     })
   } catch (err) {
@@ -1655,6 +1700,77 @@ export const unholdRelease = async (req, res) => {
     data: { releaseId: Number(releaseId) },
   })
 }
+
+export const restoreCancelledRelease = async (req, res) => {
+  const { id: releaseId } = req.params
+
+  const connection = await db.getConnection()
+
+  try {
+    await connection.beginTransaction()
+
+    const [rows] = await connection.query(
+      `
+      SELECT
+        cr.*,
+        cm.client_unit_id
+      FROM commission_releases cr
+      INNER JOIN commissions cm ON cm.id = cr.commission_id
+      WHERE cr.id = ?
+      LIMIT 1
+      FOR UPDATE
+      `,
+      [releaseId]
+    )
+
+    const release = rows[0]
+
+    if (!release) {
+      await connection.rollback()
+      return res.status(404).json({ message: 'Release not found' })
+    }
+
+    if (release.status !== 'cancelled') {
+      await connection.rollback()
+      return res.status(400).json({
+        message: 'Only cancelled releases can be restored',
+      })
+    }
+
+    await connection.query(
+      `
+      UPDATE commission_releases
+      SET status = 'pending'
+      WHERE id = ?
+      `,
+      [releaseId]
+    )
+
+    await refreshCommissionEligibility(release.client_unit_id, connection)
+    await refreshCommissionStatus(connection, release.commission_id)
+
+    await connection.commit()
+
+    await createAuditLog({
+      userId: req.user.id,
+      action: 'restore',
+      module: 'Commission Releases',
+      description: `Restored cancelled release ${releaseId}`,
+      ipAddress: getClientIp(req),
+    })
+
+    return res.status(200).json({
+      message: 'Cancelled release restored successfully',
+      data: { releaseId: Number(releaseId) },
+    })
+  } catch (err) {
+    await connection.rollback()
+    throw err
+  } finally {
+    connection.release()
+  }
+}
+
 
 export const getApprovedCashAdvancesBySeller = async (req, res) => {
   const { sellerId } = req.params

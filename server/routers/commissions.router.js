@@ -14,6 +14,7 @@ import {
   cancelRelease,
   holdRelease,
   unholdRelease,
+  restoreCancelledRelease,
   getApprovedCashAdvancesBySeller,
 } from '../controllers/commissions.controller.js'
 import { auth } from '../middlewares/auth.middleware.js'
@@ -31,6 +32,7 @@ router.patch('/commission-releases/:id/deduct-advance', auth, deductCashAdvance)
 router.patch('/commission-releases/:id/cancel', auth, cancelRelease)
 router.patch('/commission-releases/:id/hold', auth, holdRelease)
 router.patch('/commission-releases/:id/unhold', auth, unholdRelease)
+router.patch('/commission-releases/:id/restore-cancelled', auth, restoreCancelledRelease)
 
 router.get('/sellers/:sellerId/approved-cash-advances', auth, getApprovedCashAdvancesBySeller)
 

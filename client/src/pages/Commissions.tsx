@@ -10,6 +10,7 @@ import {
 } from "react-icons/fi"
 import Alert from "../components/ui/Alert"
 import Button from "../components/ui/Button"
+import ConfirmBox from "../components/ui/ConfirmBox"
 import EmptyState from "../components/ui/EmptyState"
 import Input from "../components/ui/Input"
 import LoadingState from "../components/ui/LoadingState"
@@ -442,6 +443,17 @@ const unholdRelease = async (releaseId: number) => {
   return res.json()
 }
 
+const restoreCancelledRelease = async (releaseId: number) => {
+  const res = await fetch(`${API_URL}/commission-releases/${releaseId}/restore-cancelled`, {
+    method: "PATCH",
+    credentials: "include",
+  })
+
+  if (!res.ok) throw new Error(await getErrorMessage(res))
+
+  return res.json()
+}
+
 const commissionToEditData = (commission: Commission): CommissionEditData => ({
   seller_id: commission.seller_id,
   rate:
@@ -560,6 +572,7 @@ const Commissions = () => {
   const [deductReleaseId, setDeductReleaseId] = useState<number | null>(null)
   const [deductData, setDeductData] =
     useState<DeductAdvanceData>(defaultDeductAdvanceData)
+  const [cancelReleaseId, setCancelReleaseId] = useState<number | null>(null)
   const [successMessage, setSuccessMessage] = useState("")
 
   const {
@@ -659,6 +672,7 @@ const Commissions = () => {
     mutationFn: cancelRelease,
     onSuccess: () => {
       invalidateCommissionQueries()
+      setCancelReleaseId(null)
       setSuccessMessage("Release cancelled successfully")
     },
   })
@@ -676,6 +690,14 @@ const Commissions = () => {
     onSuccess: () => {
       invalidateCommissionQueries()
       setSuccessMessage("Release restored")
+    },
+  })
+
+  const restoreCancelledReleaseMutation = useMutation({
+    mutationFn: restoreCancelledRelease,
+    onSuccess: () => {
+      invalidateCommissionQueries()
+      setSuccessMessage("Cancelled release restored")
     },
   })
 
@@ -725,7 +747,7 @@ const Commissions = () => {
   }
 
   const handleDeduct = () => {
-    if (!deductReleaseId) return
+    if (!deductReleaseId || !deductData.cash_advance_id) return
 
     deductMutation.mutate({
       releaseId: deductReleaseId,
@@ -740,9 +762,16 @@ const Commissions = () => {
     deductMutation.error?.message ||
     cancelReleaseMutation.error?.message ||
     holdReleaseMutation.error?.message ||
-    unholdReleaseMutation.error?.message
+    unholdReleaseMutation.error?.message ||
+    restoreCancelledReleaseMutation.error?.message
 
   const totalRows = groupedRows.length
+  const releaseForDeduction = (commissionDetails?.releases || []).find(
+    (release) => release.id === deductReleaseId
+  )
+  const releaseForCancellation = (commissionDetails?.releases || []).find(
+    (release) => release.id === cancelReleaseId
+  )
 
   if (isLoading) {
     return <LoadingState label="Loading commissions..." />
@@ -1556,7 +1585,7 @@ const Commissions = () => {
                               </Button>
                               <Button
                                 disabled={cancelReleaseMutation.isPending}
-                                onClick={() => cancelReleaseMutation.mutate(release.id)}
+                                onClick={() => setCancelReleaseId(release.id)}
                                 variant="danger"
                               >
                                 Cancel
@@ -1578,7 +1607,7 @@ const Commissions = () => {
                               </Button>
                               <Button
                                 disabled={cancelReleaseMutation.isPending}
-                                onClick={() => cancelReleaseMutation.mutate(release.id)}
+                                onClick={() => setCancelReleaseId(release.id)}
                                 variant="danger"
                               >
                                 Cancel
@@ -1604,7 +1633,15 @@ const Commissions = () => {
                           ) : null}
 
                           {release.status === "cancelled" ? (
-                            <span className="text-slate-500">Cancelled</span>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-slate-500">Cancelled</span>
+                              <Button
+                                disabled={restoreCancelledReleaseMutation.isPending}
+                                onClick={() => restoreCancelledReleaseMutation.mutate(release.id)}
+                              >
+                                Restore
+                              </Button>
+                            </div>
                           ) : null}
                         </td>
                       </tr>
@@ -1686,6 +1723,32 @@ const Commissions = () => {
         </Modal>
       ) : null}
 
+      {cancelReleaseId ? (
+        <Modal
+          title="Cancel Release"
+          onClose={() => setCancelReleaseId(null)}
+        >
+          {cancelReleaseMutation.error ? (
+            <Alert variant="error" title={cancelReleaseMutation.error.message} />
+          ) : null}
+          <ConfirmBox
+            title="Cancel commission release"
+            message={
+              <span>
+                Are you sure you want to cancel this release
+                {releaseForCancellation
+                  ? ` (${getReleaseStageLabel(releaseForCancellation.release_stage)} - ${formatMoney(releaseForCancellation.net_release_amount)})`
+                  : ""}
+                ? You can restore a cancelled release later if this was a mistake.
+              </span>
+            }
+            onCancel={() => setCancelReleaseId(null)}
+            onConfirm={() => cancelReleaseMutation.mutate(cancelReleaseId)}
+            confirmLabel={cancelReleaseMutation.isPending ? "Cancelling..." : "Cancel release"}
+          />
+        </Modal>
+      ) : null}
+
       {deductReleaseId ? (
         <Modal
           title="Deduct Cash Advance"
@@ -1704,7 +1767,7 @@ const Commissions = () => {
                 Cancel
               </Button>
               <Button
-                disabled={deductMutation.isPending}
+                disabled={deductMutation.isPending || !deductData.cash_advance_id}
                 onClick={handleDeduct}
                 variant="primary"
               >
@@ -1714,17 +1777,50 @@ const Commissions = () => {
           }
         >
           <div className="space-y-4">
+            {deductMutation.error ? (
+              <Alert variant="error" title={deductMutation.error.message} />
+            ) : null}
+
+            {approvedCashAdvances.length === 0 ? (
+              <Alert
+                variant="warning"
+                title="No approved cash advance found for this seller. Approve a cash advance first before deducting."
+              />
+            ) : null}
+
+            {releaseForDeduction ? (
+              <Alert
+                variant="info"
+                title={`Release net amount available: ${formatMoney(releaseForDeduction.net_release_amount)}`}
+              />
+            ) : null}
+
             <Select
               label="Approved Cash Advance"
               value={deductData.cash_advance_id}
-              onChange={(e) =>
+              onChange={(e) => {
+                const selectedId = e.target.value ? Number(e.target.value) : ""
+                const selectedAdvance = approvedCashAdvances.find(
+                  (advance) => Number(advance.id) === Number(selectedId)
+                )
+                const releaseNetAmount = Number(
+                  releaseForDeduction?.net_release_amount || 0
+                )
+                const remainingBalance = Number(
+                  selectedAdvance?.remaining_balance || 0
+                )
+                const suggestedAmount = selectedAdvance
+                  ? Math.min(remainingBalance, releaseNetAmount)
+                  : 0
+
                 setDeductData({
                   ...deductData,
-                  cash_advance_id: e.target.value ? Number(e.target.value) : "",
+                  cash_advance_id: selectedId,
+                  amount: suggestedAmount > 0 ? String(suggestedAmount) : "",
                 })
-              }
+              }}
             >
-              <option value="">Manual deduction only / no linked advance</option>
+              <option value="">Select approved cash advance</option>
               {approvedCashAdvances.map((advance) => (
                 <option key={advance.id} value={advance.id}>
                   #{advance.id} - Remaining{" "}
@@ -1762,8 +1858,7 @@ const Commissions = () => {
             />
 
             <p className="text-sm text-slate-500">
-              Linked cash advance deductions reduce the cash advance balance.
-              Manual deductions only reduce the release net amount.
+              Select an approved cash advance. The amount is auto-filled using the lower value between the advance remaining balance and the release net amount, but you can lower it.
             </p>
           </div>
         </Modal>

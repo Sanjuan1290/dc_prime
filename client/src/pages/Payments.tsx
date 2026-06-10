@@ -9,6 +9,7 @@ import {
 } from "react-icons/fi"
 import Alert from "../components/ui/Alert"
 import Button from "../components/ui/Button"
+import ConfirmBox from "../components/ui/ConfirmBox"
 import EmptyState from "../components/ui/EmptyState"
 import Input from "../components/ui/Input"
 import LoadingState from "../components/ui/LoadingState"
@@ -99,7 +100,7 @@ const emptyFormData: PaymentFormData = {
   payment_type: "monthly",
   payment_method: "cash",
   payment_date: getLocalDate(),
-  status: "verified",
+  status: "pending",
 }
 
 const paymentTypes = [
@@ -257,6 +258,7 @@ const Payments = () => {
     useState<PaymentFormData>(emptyFormData)
   const [clientUnitSearch, setClientUnitSearch] = useState("")
   const [editClientUnitSearch, setEditClientUnitSearch] = useState("")
+  const [paymentToDelete, setPaymentToDelete] = useState<Payment | null>(null)
 
   const [page, setPage] = useState(1)
   const [rowsPerPage, setRowsPerPage] = useState(10)
@@ -312,6 +314,7 @@ const Payments = () => {
     mutationFn: deletePayment,
     onSuccess: () => {
       invalidateAfterPaymentChange()
+      setPaymentToDelete(null)
       setSuccessMessage("Payment deleted successfully")
     },
   })
@@ -432,13 +435,7 @@ const Payments = () => {
   }
 
   const handleDeletePayment = (payment: Payment) => {
-    const confirmed = window.confirm(
-      `Delete payment ${formatMoney(payment.amount)} for ${payment.client_name} - ${payment.unit_id}?`
-    )
-
-    if (!confirmed) return
-
-    deletePaymentMutation.mutate(payment.id)
+    setPaymentToDelete(payment)
   }
 
   const mutationError =
@@ -675,6 +672,21 @@ const Payments = () => {
           isPending={createPaymentMutation.isPending}
           submitLabel="Add Payment"
         />
+      ) : null}
+
+      {paymentToDelete ? (
+        <Modal title="Delete Payment" onClose={() => setPaymentToDelete(null)}>
+          {deletePaymentMutation.error ? (
+            <Alert variant="error" title={deletePaymentMutation.error.message} />
+          ) : null}
+          <ConfirmBox
+            title="Delete payment"
+            message={`Delete payment ${formatMoney(paymentToDelete.amount)} for ${paymentToDelete.client_name} - ${paymentToDelete.unit_id}? This will recalculate the client's balance and commission eligibility.`}
+            onCancel={() => setPaymentToDelete(null)}
+            onConfirm={() => deletePaymentMutation.mutate(paymentToDelete.id)}
+            confirmLabel={deletePaymentMutation.isPending ? "Deleting..." : "Delete"}
+          />
+        </Modal>
       ) : null}
 
       {editPayment ? (

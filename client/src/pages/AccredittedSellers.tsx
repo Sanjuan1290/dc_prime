@@ -579,6 +579,9 @@ const AccredittedSellers = () => {
 
       {sellerToDelete ? (
         <Modal onClose={() => setSellerToDelete(null)} title="Delete Seller">
+          {deleteSellerMutation.error ? (
+            <Alert variant="error" title={deleteSellerMutation.error.message} />
+          ) : null}
           <ConfirmBox
             message={`Are you sure you want to delete seller ${sellerToDelete.full_name}? This cannot be undone.`}
             onCancel={() => setSellerToDelete(null)}

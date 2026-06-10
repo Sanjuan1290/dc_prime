@@ -28,7 +28,7 @@ CREATE TABLE `accredited_sellers` (
   `full_name` varchar(255) NOT NULL,
   `email` varchar(255) DEFAULT NULL,
   `contact_no` varchar(50) DEFAULT NULL,
-  `seller_role` varchar(50) NOT NULL DEFAULT 'agent',
+  `seller_role` enum('agent','broker','manager') NOT NULL DEFAULT 'agent',
   `parent_seller_id` int DEFAULT NULL,
   `custom_reports_under` varchar(255) DEFAULT NULL,
   `status` varchar(50) NOT NULL DEFAULT 'active',
@@ -41,7 +41,7 @@ CREATE TABLE `accredited_sellers` (
   KEY `fk_accredited_sellers_parent` (`parent_seller_id`),
   CONSTRAINT `fk_accredited_sellers_parent` FOREIGN KEY (`parent_seller_id`) REFERENCES `accredited_sellers` (`id`),
   CONSTRAINT `fk_accredited_sellers_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -50,7 +50,6 @@ CREATE TABLE `accredited_sellers` (
 
 LOCK TABLES `accredited_sellers` WRITE;
 /*!40000 ALTER TABLE `accredited_sellers` DISABLE KEYS */;
-INSERT INTO `accredited_sellers` VALUES (1,NULL,'PARROCHO, JOSEPH E.','joseph@gmail.com','09045436456','agent',NULL,NULL,'active','2025-02-09','2026-06-10 01:58:19','2026-06-10 02:00:05',7.00),(2,NULL,'NEPOMUCENO, ERWIN','erwin@gmail.com','0991-995-8155','agent',1,NULL,'active','2025-06-04','2026-06-10 01:59:18','2026-06-10 02:00:21',5.00);
 /*!40000 ALTER TABLE `accredited_sellers` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -106,7 +105,7 @@ CREATE TABLE `audit_logs` (
   PRIMARY KEY (`id`),
   KEY `fk_audit_logs_user` (`user_id`),
   CONSTRAINT `fk_audit_logs_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=17 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -115,7 +114,6 @@ CREATE TABLE `audit_logs` (
 
 LOCK TABLES `audit_logs` WRITE;
 /*!40000 ALTER TABLE `audit_logs` DISABLE KEYS */;
-INSERT INTO `audit_logs` VALUES (1,1,'login','Auth','Admin User logged in','::1','2026-06-10 01:51:03'),(2,1,'create','Projects','Created project Bailen','::1','2026-06-10 01:52:37'),(3,1,'create','Listings','Created listing LA-0101','127.0.0.1','2026-06-10 01:53:52'),(4,1,'create','Accredited Sellers','Created accredited seller PARROCHO, JOSEPH E.','127.0.0.1','2026-06-10 01:58:19'),(5,1,'create','Accredited Sellers','Created accredited seller NEPOMUCENO, ERWIN','127.0.0.1','2026-06-10 01:59:18'),(6,1,'update','Accredited Sellers','Updated accredited seller NEPOMUCENO, ERWIN. Synced 0 open commission(s).','127.0.0.1','2026-06-10 01:59:24'),(7,1,'update','Accredited Sellers','Updated accredited seller PARROCHO, JOSEPH E.. Synced 0 open commission(s).','127.0.0.1','2026-06-10 02:00:05'),(8,1,'update','Accredited Sellers','Updated accredited seller NEPOMUCENO, ERWIN. Synced 0 open commission(s).','127.0.0.1','2026-06-10 02:00:21'),(9,1,'create','Clients','Created client robert','127.0.0.1','2026-06-10 02:06:28'),(10,1,'reserve','Client Units','Reserved LA-0101 for robert','127.0.0.1','2026-06-10 02:10:08'),(11,1,'payment','Payments','Added payment for client unit 1','127.0.0.1','2026-06-10 02:11:27'),(12,1,'update','Listings','Updated listing LA-0101','127.0.0.1','2026-06-10 02:12:01'),(13,1,'update','Listings','Updated listing LA-0101','127.0.0.1','2026-06-10 02:12:05'),(14,1,'update','Listings','Updated listing LA-0101','127.0.0.1','2026-06-10 02:12:08'),(15,1,'payment','Payments','Added payment for client unit 1','127.0.0.1','2026-06-10 02:15:06'),(16,1,'update','Listings','Updated listing LA-0101','127.0.0.1','2026-06-10 02:16:08');
 /*!40000 ALTER TABLE `audit_logs` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -261,7 +259,7 @@ CREATE TABLE `client_units` (
   CONSTRAINT `fk_client_units_listing` FOREIGN KEY (`listing_id`) REFERENCES `listings` (`id`),
   CONSTRAINT `fk_client_units_seller` FOREIGN KEY (`seller_id`) REFERENCES `accredited_sellers` (`id`),
   CONSTRAINT `chk_due_day` CHECK ((`due_day` between 1 and 31))
-) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -270,7 +268,6 @@ CREATE TABLE `client_units` (
 
 LOCK TABLES `client_units` WRITE;
 /*!40000 ALTER TABLE `client_units` DISABLE KEYS */;
-INSERT INTO `client_units` VALUES (1,1,1,1,1,'fully_paid','installment',0.00,10,'2026-06-10 02:10:08','2026-06-10 02:15:06');
 /*!40000 ALTER TABLE `client_units` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -295,7 +292,7 @@ CREATE TABLE `clients` (
   PRIMARY KEY (`id`),
   KEY `fk_clients_default_seller` (`default_seller_id`),
   CONSTRAINT `fk_clients_default_seller` FOREIGN KEY (`default_seller_id`) REFERENCES `accredited_sellers` (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -304,7 +301,6 @@ CREATE TABLE `clients` (
 
 LOCK TABLES `clients` WRITE;
 /*!40000 ALTER TABLE `clients` DISABLE KEYS */;
-INSERT INTO `clients` VALUES (1,'robert',NULL,'robertrenbysanjuan@gmail.com','09057557640','blk 70 lot 44 cremona st. Gen tri.','Region 4A',1,'2026-06-10 02:06:28','2026-06-10 02:06:28');
 /*!40000 ALTER TABLE `clients` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -337,7 +333,7 @@ CREATE TABLE `commission_releases` (
   KEY `fk_commission_releases_released_by` (`released_by`),
   CONSTRAINT `fk_commission_releases_commission` FOREIGN KEY (`commission_id`) REFERENCES `commissions` (`id`),
   CONSTRAINT `fk_commission_releases_released_by` FOREIGN KEY (`released_by`) REFERENCES `users` (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=6 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -346,7 +342,6 @@ CREATE TABLE `commission_releases` (
 
 LOCK TABLES `commission_releases` WRITE;
 /*!40000 ALTER TABLE `commission_releases` DISABLE KEYS */;
-INSERT INTO `commission_releases` VALUES (1,1,'1st_release',20.00,20.00,20.00,5040.00,0.00,5040.00,'eligible',NULL,NULL,NULL,'2026-06-10 02:10:08','2026-06-10 02:15:06'),(2,1,'2nd_release',40.00,20.00,40.00,5040.00,0.00,5040.00,'eligible',NULL,NULL,NULL,'2026-06-10 02:10:08','2026-06-10 02:15:06'),(3,1,'3rd_release',60.00,20.00,60.00,5040.00,0.00,5040.00,'eligible',NULL,NULL,NULL,'2026-06-10 02:10:08','2026-06-10 02:15:06'),(4,1,'4th_release',75.00,15.00,75.00,3780.00,0.00,3780.00,'eligible',NULL,NULL,NULL,'2026-06-10 02:10:08','2026-06-10 02:15:06'),(5,1,'retention',NULL,25.00,100.00,6300.00,0.00,6300.00,'pending',NULL,NULL,NULL,'2026-06-10 02:10:08','2026-06-10 02:10:08');
 /*!40000 ALTER TABLE `commission_releases` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -387,7 +382,7 @@ CREATE TABLE `commissions` (
   CONSTRAINT `fk_commissions_client_unit` FOREIGN KEY (`client_unit_id`) REFERENCES `client_units` (`id`),
   CONSTRAINT `fk_commissions_parent` FOREIGN KEY (`parent_commission_id`) REFERENCES `commissions` (`id`),
   CONSTRAINT `fk_commissions_seller` FOREIGN KEY (`seller_id`) REFERENCES `accredited_sellers` (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -396,7 +391,6 @@ CREATE TABLE `commissions` (
 
 LOCK TABLES `commissions` WRITE;
 /*!40000 ALTER TABLE `commissions` DISABLE KEYS */;
-INSERT INTO `commissions` VALUES (1,1,1,'agent',7.00,360000.00,25200.00,'main',NULL,'distributed',0.00,NULL,NULL,NULL,25200.00,0.00,'active','Auto-generated from reservation of LA-0101','2026-06-10 02:10:08','2026-06-10 02:10:08');
 /*!40000 ALTER TABLE `commissions` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -483,7 +477,7 @@ CREATE TABLE `listings` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_listing_project_unit` (`project_id`,`unit_id`),
   CONSTRAINT `fk_listings_project` FOREIGN KEY (`project_id`) REFERENCES `projects` (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -492,7 +486,6 @@ CREATE TABLE `listings` (
 
 LOCK TABLES `listings` WRITE;
 /*!40000 ALTER TABLE `listings` DISABLE KEYS */;
-INSERT INTO `listings` (`id`, `project_id`, `cadastral_lot_no`, `unit_id`, `lot_type`, `reservation_fee`, `price_per_sqm`, `lot_area_sqm`, `legal_misc_rate`, `status`, `created_at`, `updated_at`) VALUES (1,1,'1306','LA-0101','corner',50000.00,1200.00,300.00,10.00,'sold','2026-06-10 01:53:52','2026-06-10 02:16:08');
 /*!40000 ALTER TABLE `listings` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -510,7 +503,7 @@ CREATE TABLE `payments` (
   `payment_type` varchar(100) DEFAULT NULL,
   `payment_method` varchar(100) DEFAULT NULL,
   `payment_date` date NOT NULL DEFAULT (curdate()),
-  `status` enum('pending','verified','rejected') NOT NULL DEFAULT 'verified',
+  `status` enum('pending','verified','rejected') NOT NULL DEFAULT 'pending',
   `verified_by` int DEFAULT NULL,
   `verified_at` datetime DEFAULT NULL,
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -520,7 +513,7 @@ CREATE TABLE `payments` (
   KEY `fk_payments_verified_by` (`verified_by`),
   CONSTRAINT `fk_payments_client_unit` FOREIGN KEY (`client_unit_id`) REFERENCES `client_units` (`id`),
   CONSTRAINT `fk_payments_verified_by` FOREIGN KEY (`verified_by`) REFERENCES `users` (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -529,7 +522,6 @@ CREATE TABLE `payments` (
 
 LOCK TABLES `payments` WRITE;
 /*!40000 ALTER TABLE `payments` DISABLE KEYS */;
-INSERT INTO `payments` VALUES (1,1,50000.00,'reservation_fee','cash','2026-06-10','verified',1,'2026-06-10 10:11:27','2026-06-10 02:11:27','2026-06-10 02:11:27'),(2,1,346000.00,'full_payment','check','2026-06-10','verified',1,'2026-06-10 10:15:06','2026-06-10 02:15:06','2026-06-10 02:15:06');
 /*!40000 ALTER TABLE `payments` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -552,7 +544,7 @@ CREATE TABLE `projects` (
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -561,7 +553,6 @@ CREATE TABLE `projects` (
 
 LOCK TABLES `projects` WRITE;
 /*!40000 ALTER TABLE `projects` DISABLE KEYS */;
-INSERT INTO `projects` VALUES (1,'Bailen','Bailen, Cavite','IMELDA B. VILLALOBOS','AA-06-0005-00105','022-06-0005-003-04','active',NULL,'2026-06-10 01:52:37','2026-06-10 01:52:37');
 /*!40000 ALTER TABLE `projects` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -616,7 +607,7 @@ CREATE TABLE `settings` (
 
 LOCK TABLES `settings` WRITE;
 /*!40000 ALTER TABLE `settings` DISABLE KEYS */;
-INSERT INTO `settings` VALUES (1,'company_name','D&C Prime Realty','2026-06-10 01:50:46','2026-06-10 01:50:46'),(2,'company_email','dcprime@gmail.com','2026-06-10 01:50:46','2026-06-10 01:50:46'),(3,'company_contact','09912698393','2026-06-10 01:50:46','2026-06-10 01:50:46'),(4,'company_address','Indang, Cavite','2026-06-10 01:50:46','2026-06-10 01:50:46'),(5,'default_reservation_fee','10000','2026-06-10 01:50:46','2026-06-10 01:50:46'),(6,'default_commission_rate','5','2026-06-10 01:50:46','2026-06-10 01:50:46'),(7,'system_status','active','2026-06-10 01:50:46','2026-06-10 01:50:46');
+INSERT INTO `settings` VALUES (1,'company_name','D&C Prime Realty','2026-06-10 03:29:25','2026-06-10 03:29:25'),(2,'company_email','dcprime@gmail.com','2026-06-10 03:29:25','2026-06-10 03:29:25'),(3,'company_contact','09912698393','2026-06-10 03:29:25','2026-06-10 03:29:25'),(4,'company_address','Indang, Cavite','2026-06-10 03:29:25','2026-06-10 03:29:25'),(5,'default_reservation_fee','10000','2026-06-10 03:29:25','2026-06-10 03:29:25'),(6,'default_commission_rate','5','2026-06-10 03:29:25','2026-06-10 03:29:25'),(7,'system_status','active','2026-06-10 03:29:25','2026-06-10 03:29:25');
 /*!40000 ALTER TABLE `settings` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -648,7 +639,7 @@ CREATE TABLE `users` (
 
 LOCK TABLES `users` WRITE;
 /*!40000 ALTER TABLE `users` DISABLE KEYS */;
-INSERT INTO `users` VALUES (1,'Admin User','admin@gmail.com','$2b$10$NctIePlPkOKirDJpOSR5PemQyFQydpwRSK2uE2oTj5e1dmbpPwGGy','admin','active','2026-06-10 09:51:03','2026-06-10 01:50:46','2026-06-10 01:51:03');
+INSERT INTO `users` VALUES (1,'Admin User','admin@gmail.com','$2b$10$NctIePlPkOKirDJpOSR5PemQyFQydpwRSK2uE2oTj5e1dmbpPwGGy','admin','active',NULL,'2026-06-10 03:29:25','2026-06-10 03:29:25');
 /*!40000 ALTER TABLE `users` ENABLE KEYS */;
 UNLOCK TABLES;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
@@ -661,4 +652,4 @@ UNLOCK TABLES;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2026-06-10 10:23:10
+-- Dump completed on 2026-06-10 11:29:45

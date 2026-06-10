@@ -464,6 +464,9 @@ const Clients = () => {
 
       {clientToDelete ? (
         <Modal onClose={() => setClientToDelete(null)} title="Delete Client">
+          {deleteClientMutation.error ? (
+            <Alert variant="error" title={deleteClientMutation.error.message} />
+          ) : null}
           <ConfirmBox
             message={`Are you sure you want to delete ${clientToDelete.full_name}? This cannot be undone.`}
             onCancel={() => setClientToDelete(null)}

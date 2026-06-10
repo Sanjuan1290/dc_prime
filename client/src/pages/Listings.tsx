@@ -804,6 +804,9 @@ const Listings = () => {
 
       {listingToDelete ? (
         <Modal onClose={() => setListingToDelete(null)} title="Delete Listing">
+          {deleteListingMutation.error ? (
+            <Alert variant="error" title={deleteListingMutation.error.message} />
+          ) : null}
           <ConfirmBox
             message={`Are you sure you want to delete listing ${listingToDelete.unit_id}? This cannot be undone.`}
             onCancel={() => setListingToDelete(null)}

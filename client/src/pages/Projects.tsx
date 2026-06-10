@@ -513,6 +513,9 @@ const Projects = () => {
 
       {projectToDelete ? (
         <Modal onClose={() => setProjectToDelete(null)} title="Delete Project">
+          {deleteProjectMutation.error ? (
+            <Alert variant="error" title={deleteProjectMutation.error.message} />
+          ) : null}
           <ConfirmBox
             message={`Are you sure you want to delete ${projectToDelete.name}? This cannot be undone.`}
             onCancel={() => setProjectToDelete(null)}
