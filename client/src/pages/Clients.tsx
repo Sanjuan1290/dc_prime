@@ -18,7 +18,6 @@ import LoadingState from "../components/ui/LoadingState";
 import Modal from "../components/ui/Modal";
 import PageHeader from "../components/ui/PageHeader";
 import Pagination from "../components/ui/Pagination";
-import Select from "../components/ui/Select";
 import StatCard from "../components/ui/StatCard";
 import TableContainer from "../components/ui/TableContainer";
 import { API_URL, getErrorMessage } from "../utils/api";
@@ -514,6 +513,100 @@ type ClientFormProps = {
   error?: string;
 };
 
+
+type SellerComboboxProps = {
+  label: string
+  sellers: AccreditedSeller[]
+  value: number | null
+  onChange: (sellerId: number | null) => void
+}
+
+const SellerCombobox = ({
+  label,
+  sellers,
+  value,
+  onChange,
+}: SellerComboboxProps) => {
+  const selectedSeller = sellers.find(
+    (seller) => Number(seller.id) === Number(value)
+  )
+  const [search, setSearch] = useState(
+    selectedSeller
+      ? `${selectedSeller.full_name} - ${formatText(selectedSeller.seller_role)}`
+      : ""
+  )
+
+  const filteredSellers = sellers.filter((seller) => {
+    const keyword = search.toLowerCase().trim()
+
+    if (!keyword || Number(seller.id) === Number(value)) return true
+
+    return [seller.full_name, seller.seller_role, seller.status]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+      .includes(keyword)
+  })
+
+  return (
+    <div className="space-y-2">
+      <Input
+        label={label}
+        value={search}
+        onChange={(event) => {
+          setSearch(event.target.value)
+          onChange(null)
+        }}
+        placeholder="Search seller name or role"
+      />
+
+      <div className="max-h-52 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+        <button
+          className="block w-full border-b border-slate-100 px-3 py-2 text-left text-sm text-slate-500 hover:bg-slate-50"
+          onClick={() => {
+            onChange(null)
+            setSearch("")
+          }}
+          type="button"
+        >
+          No default seller
+        </button>
+
+        {filteredSellers.length > 0 ? (
+          filteredSellers.map((seller) => {
+            const isSelected = Number(seller.id) === Number(value)
+            const sellerLabel = `${seller.full_name} - ${formatText(seller.seller_role)}`
+
+            return (
+              <button
+                className={[
+                  "block w-full border-b border-slate-100 px-3 py-2 text-left text-sm last:border-b-0 hover:bg-slate-50",
+                  isSelected ? "bg-blue-50 text-blue-700" : "text-slate-700",
+                ].join(" ")}
+                key={seller.id}
+                onClick={() => {
+                  onChange(seller.id)
+                  setSearch(sellerLabel)
+                }}
+                type="button"
+              >
+                <span className="font-semibold text-slate-900">
+                  {seller.full_name}
+                </span>
+                <span className="block text-xs text-slate-500">
+                  {formatText(seller.seller_role)}
+                </span>
+              </button>
+            )
+          })
+        ) : (
+          <p className="px-3 py-2 text-sm text-slate-500">No sellers found.</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
 const ClientForm = ({
   clientData,
   setClientData,
@@ -584,23 +677,17 @@ const ClientForm = ({
           }
         />
 
-        <Select
+        <SellerCombobox
           label="Default Seller"
-          value={clientData.default_seller_id || ""}
-          onChange={(e) =>
+          sellers={sellers}
+          value={clientData.default_seller_id}
+          onChange={(sellerId) =>
             setClientData({
               ...clientData,
-              default_seller_id: e.target.value ? Number(e.target.value) : null,
+              default_seller_id: sellerId,
             })
           }
-        >
-          <option value="">No default seller</option>
-          {sellers.map((seller) => (
-            <option key={seller.id} value={seller.id}>
-              {seller.full_name} - {formatText(seller.seller_role)}
-            </option>
-          ))}
-        </Select>
+        />
 
         <div className="md:col-span-2">
           <Input

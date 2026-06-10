@@ -100,19 +100,29 @@ export const getDashboardSummary = async (req, res) => {
         SELECT COALESCE(SUM(amount), 0)
         FROM commissions
         WHERE status <> 'cancelled'
-      ) AS commission_payable,
+      ) AS total_commission_liability,
 
       (
-        SELECT COALESCE(SUM(released_amount), 0)
-        FROM commissions
-        WHERE status <> 'cancelled'
+        SELECT COALESCE(SUM(net_release_amount), 0)
+        FROM commission_releases
+        WHERE status = 'eligible'
+      ) AS commission_payable_now,
+
+      (
+        SELECT COALESCE(SUM(net_release_amount), 0)
+        FROM commission_releases
+        WHERE status = 'released'
       ) AS commission_released,
 
       (
-        SELECT COALESCE(SUM(amount - released_amount), 0)
+        SELECT COALESCE(SUM(amount), 0)
         FROM commissions
         WHERE status <> 'cancelled'
-      ) AS commission_remaining
+      ) - (
+        SELECT COALESCE(SUM(net_release_amount), 0)
+        FROM commission_releases
+        WHERE status = 'released'
+      ) AS commission_unreleased_balance
     `
   )
 
@@ -137,9 +147,12 @@ export const getDashboardSummary = async (req, res) => {
       collectionProgress,
       clientsCount: Number(summaryRow.clients_count || 0),
       pendingDocuments: Number(summaryRow.pending_documents || 0),
-      commissionPayable: formatDecimal(summaryRow.commission_payable),
+      totalCommissionLiability: formatDecimal(summaryRow.total_commission_liability),
+      commissionPayableNow: formatDecimal(summaryRow.commission_payable_now),
       commissionReleased: formatDecimal(summaryRow.commission_released),
-      commissionRemaining: formatDecimal(summaryRow.commission_remaining),
+      commissionUnreleasedBalance: formatDecimal(summaryRow.commission_unreleased_balance),
+      commissionPayable: formatDecimal(summaryRow.commission_payable_now),
+      commissionRemaining: formatDecimal(summaryRow.commission_unreleased_balance),
     },
   })
 }

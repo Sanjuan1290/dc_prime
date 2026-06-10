@@ -411,6 +411,98 @@ export const getClientUnits = async (req, res) => {
   })
 }
 
+
+export const searchClientUnits = async (req, res) => {
+  const { q } = req.query
+
+  if (!q || q.trim().length < 1) {
+    return res.status(200).json({
+      message: 'Client units fetched successfully',
+      data: [],
+      clientUnits: [],
+    })
+  }
+
+  const searchTerm = `%${q.trim()}%`
+
+  const [rows] = await db.query(
+    `
+    SELECT
+      cu.id,
+      cu.client_id,
+      c.full_name AS client_name,
+      cu.listing_id,
+      l.unit_id,
+      p.name AS project_name,
+      l.lot_type,
+      l.lot_area_sqm,
+      l.net_selling_price,
+      l.legal_misc_fee,
+      l.total_contract_price,
+      COALESCE(payment_summary.paid_amount, 0) AS paid_amount,
+      GREATEST(
+        COALESCE(l.total_contract_price, 0) - COALESCE(payment_summary.paid_amount, 0),
+        0
+      ) AS balance,
+      CASE
+        WHEN COALESCE(l.total_contract_price, 0) > 0
+        THEN ROUND((COALESCE(payment_summary.paid_amount, 0) / l.total_contract_price) * 100, 2)
+        ELSE 0
+      END AS payment_percentage,
+      cu.due_day,
+      cu.status,
+      cu.seller_id,
+      seller.full_name AS seller_name,
+      CASE
+        WHEN COALESCE(document_summary.required_count, 0) > 0
+          AND COALESCE(document_summary.submitted_count, 0) = document_summary.required_count
+        THEN 'complete'
+        ELSE 'incomplete'
+      END AS document_status
+    FROM client_units cu
+    INNER JOIN clients c ON c.id = cu.client_id
+    INNER JOIN listings l ON l.id = cu.listing_id
+    INNER JOIN projects p ON p.id = l.project_id
+    LEFT JOIN accredited_sellers seller ON seller.id = cu.seller_id
+    LEFT JOIN (
+      SELECT client_unit_id, SUM(amount) AS paid_amount
+      FROM payments
+      WHERE status = 'verified'
+      GROUP BY client_unit_id
+    ) payment_summary ON payment_summary.client_unit_id = cu.id
+    LEFT JOIN (
+      SELECT
+        cu_docs.id AS client_unit_id,
+        COUNT(d.id) AS required_count,
+        SUM(CASE WHEN cdl.status IN ('submitted', 'approved') THEN 1 ELSE 0 END) AS submitted_count
+      FROM client_units cu_docs
+      LEFT JOIN documents d
+        ON d.is_required = TRUE
+        AND d.status = 'active'
+      LEFT JOIN client_document_list cdl
+        ON cdl.client_unit_id = cu_docs.id
+        AND cdl.document_id = d.id
+      GROUP BY cu_docs.id
+    ) document_summary ON document_summary.client_unit_id = cu.id
+    WHERE
+      c.full_name LIKE ?
+      OR l.unit_id LIKE ?
+      OR p.name LIKE ?
+      OR l.lot_type LIKE ?
+      OR seller.full_name LIKE ?
+    ORDER BY cu.id DESC
+    LIMIT 20
+    `,
+    [searchTerm, searchTerm, searchTerm, searchTerm, searchTerm]
+  )
+
+  return res.status(200).json({
+    message: 'Client units fetched successfully',
+    data: rows,
+    clientUnits: rows,
+  })
+}
+
 export const getClientUnit = async (req, res) => {
   const { id } = req.params
 

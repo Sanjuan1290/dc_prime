@@ -39,8 +39,11 @@ type DashboardSummary = {
   collectionProgress: number | string
   clientsCount: number | string
   pendingDocuments: number | string
-  commissionPayable: number | string
+  totalCommissionLiability?: number | string
+  commissionPayableNow?: number | string
   commissionReleased: number | string
+  commissionUnreleasedBalance?: number | string
+  commissionPayable: number | string
   commissionRemaining: number | string
 }
 
@@ -88,6 +91,12 @@ const fetchAgentPerformance = async (): Promise<AgentPerformance[]> => {
   return data.agents
 }
 
+
+const safeNum = (value: unknown) => {
+  const numberValue = Number(value ?? 0)
+  return Number.isNaN(numberValue) ? 0 : numberValue
+}
+
 const Dashboard = () => {
   const {
     data: summary,
@@ -107,89 +116,127 @@ const Dashboard = () => {
     queryFn: fetchAgentPerformance,
   })
 
+  const totalSales = safeNum(summary?.totalSales)
+  const pendingSales = safeNum(summary?.pendingSales)
+  const trackedCollections = safeNum(summary?.trackedCollections)
+  const collectionProgress = safeNum(summary?.collectionProgress)
+  const clientsCount = safeNum(summary?.clientsCount)
+  const listedLotValue = safeNum(summary?.listedLotValue)
+  const availableLotValue = safeNum(summary?.availableLotValue)
+  const soldLotValue = safeNum(summary?.soldLotValue)
+  const pendingDocuments = safeNum(summary?.pendingDocuments)
+  const totalCommissionLiability = safeNum(
+    summary?.totalCommissionLiability ?? summary?.commissionPayable
+  )
+  const commissionPayableNow = safeNum(
+    summary?.commissionPayableNow ?? summary?.commissionPayable
+  )
+  const commissionReleased = safeNum(summary?.commissionReleased)
+  const commissionUnreleasedBalance = safeNum(
+    summary?.commissionUnreleasedBalance ?? summary?.commissionRemaining
+  )
+
   const stats = [
     {
       title: "Total Sales",
-      value: formatMoney(summary?.totalSales),
-      description: "Contract value from active client units",
+      value: formatMoney(totalSales),
+      description: "Contract value from active, reserved, paid, and closed client units",
+      formula: "SUM(TCP) from client units with status active, reserved, fully_paid, or closed.",
       icon: <FiDollarSign />,
     },
     {
       title: "Pending Sales",
-      value: formatMoney(summary?.pendingSales),
+      value: formatMoney(pendingSales),
       description: "Reserved client-unit contract value",
+      formula: "SUM(TCP) from client units where status = reserved.",
       icon: <FiHome />,
     },
     {
       title: "Tracked Collections",
-      value: formatMoney(summary?.trackedCollections),
-      description: `${Number(summary?.collectionProgress || 0).toFixed(2)}% collection progress`,
+      value: formatMoney(trackedCollections),
+      description: `${collectionProgress.toFixed(2)}% collection progress`,
+      formula: "SUM(payments.amount) where payment status = verified. Pending and rejected payments are excluded.",
       icon: <FiCreditCard />,
     },
     {
       title: "Clients",
-      value: formatNumber(summary?.clientsCount),
+      value: formatNumber(clientsCount),
       description: "Registered client records",
+      formula: "COUNT(*) from clients.",
       icon: <FiUsers />,
     },
     {
       title: "Listed Lot Value",
-      value: formatMoney(summary?.listedLotValue),
+      value: formatMoney(listedLotValue),
       description: "All non-inactive listings",
+      formula: "SUM(TCP) from listings where status is not inactive.",
       icon: <FiHome />,
     },
     {
       title: "Available Lot Value",
-      value: formatMoney(summary?.availableLotValue),
+      value: formatMoney(availableLotValue),
       description: "Available inventory value",
+      formula: "SUM(TCP) from listings where status = available.",
       icon: <FiHome />,
     },
     {
       title: "Sold Lot Value",
-      value: formatMoney(summary?.soldLotValue),
+      value: formatMoney(soldLotValue),
       description: "Sold inventory value",
+      formula: "SUM(TCP) from listings where status = sold.",
       icon: <FiDollarSign />,
     },
     {
       title: "Pending Documents",
-      value: formatNumber(summary?.pendingDocuments),
+      value: formatNumber(pendingDocuments),
       description: "Not submitted or rejected checklist items",
+      formula: "COUNT(*) from client document checklist where status is not_submitted or rejected.",
       icon: <FiFileText />,
     },
     {
-      title: "Commission Payable",
-      value: formatMoney(summary?.commissionPayable),
-      description: "Total payable commission",
+      title: "Total Commission",
+      value: formatMoney(totalCommissionLiability),
+      description: "Full commission liability, including future releases",
+      formula: "SUM(commissions.amount) where commission status is not cancelled.",
+      icon: <FiDollarSign />,
+    },
+    {
+      title: "Payable Now",
+      value: formatMoney(commissionPayableNow),
+      description: "Only eligible commission releases ready to pay",
+      formula: "SUM(commission_releases.net_release_amount) where release status = eligible.",
       icon: <FiDollarSign />,
     },
     {
       title: "Commission Released",
-      value: formatMoney(summary?.commissionReleased),
-      description: "Released commission value",
+      value: formatMoney(commissionReleased),
+      description: "Already released commission value",
+      formula: "SUM(commission_releases.net_release_amount) where release status = released.",
       icon: <FiDollarSign />,
     },
     {
-      title: "Commission Remaining",
-      value: formatMoney(summary?.commissionRemaining),
-      description: "Unreleased commission balance",
+      title: "Unreleased Commission",
+      value: formatMoney(commissionUnreleasedBalance),
+      description: "Total commission liability minus released releases",
+      formula: "SUM(commissions.amount) minus SUM(released commission release net amounts).",
       icon: <FiDollarSign />,
     },
   ]
 
   const commissionData = [
     {
-      name: "Payable",
-      value: Number(summary?.commissionPayable || 0),
+      name: "Payable Now",
+      value: commissionPayableNow,
       color: "#2563eb",
     },
     {
       name: "Released",
-      value: Number(summary?.commissionReleased || 0),
+      value: commissionReleased,
       color: "#10b981",
     },
     {
-      name: "Remaining",
-      value: Number(summary?.commissionRemaining || 0),
+      name: "Unreleased",
+      value: commissionUnreleasedBalance,
       color: "#f59e0b",
     },
   ]
@@ -197,11 +244,11 @@ const Dashboard = () => {
   const salesCollectionsData = [
     {
       name: "Sales",
-      value: Number(summary?.totalSales || 0),
+      value: totalSales,
     },
     {
       name: "Collections",
-      value: Number(summary?.trackedCollections || 0),
+      value: trackedCollections,
     },
   ]
 
@@ -231,6 +278,7 @@ const Dashboard = () => {
         {stats.map((stat) => (
           <StatCard
             description={stat.description}
+            formula={stat.formula}
             icon={stat.icon}
             key={stat.title}
             title={stat.title}
@@ -242,7 +290,7 @@ const Dashboard = () => {
       <div className="mb-6 grid grid-cols-1 gap-4 xl:grid-cols-3">
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm xl:col-span-1">
           <h2 className="text-base font-bold text-slate-900">
-            Commission Payable vs Released vs Remaining
+            Payable Now vs Released vs Unreleased
           </h2>
           <div className="mt-4 h-72">
             <ResponsiveContainer height="100%" width="100%">

@@ -159,7 +159,6 @@ type ReserveListingData = {
   status: string
   mode_of_payment: "cash" | "installment"
   sale_type: "distributed" | "direct"
-  main_commission_rate_override: string
   override_seller_id: number | ""
   override_rate: string
   override_notes: string
@@ -174,7 +173,6 @@ type EditUnitData = {
   status: string
   mode_of_payment: "cash" | "installment"
   regenerate_commission: boolean
-  main_commission_rate_override: string
   sale_type: "distributed" | "direct"
 }
 
@@ -185,7 +183,6 @@ const defaultReserveData: ReserveListingData = {
   status: "reserved",
   mode_of_payment: "installment",
   sale_type: "distributed",
-  main_commission_rate_override: "",
   override_seller_id: "",
   override_rate: "",
   override_notes: "",
@@ -200,7 +197,6 @@ const defaultEditUnitData: EditUnitData = {
   status: "reserved",
   mode_of_payment: "installment",
   regenerate_commission: false,
-  main_commission_rate_override: "",
   sale_type: "distributed",
 }
 
@@ -281,10 +277,6 @@ const reserveListing = async ({
       status: reserveData.status,
       mode_of_payment: reserveData.mode_of_payment,
       sale_type: reserveData.sale_type,
-      main_commission_rate_override:
-        reserveData.main_commission_rate_override === ""
-          ? null
-          : Number(reserveData.main_commission_rate_override),
       override_seller_id: reserveData.override_seller_id || null,
       override_rate:
         reserveData.override_rate === ""
@@ -324,10 +316,6 @@ const updateClientUnit = async ({
       status: unitData.status,
       mode_of_payment: unitData.mode_of_payment,
       regenerate_commission: unitData.regenerate_commission,
-      main_commission_rate_override:
-        unitData.main_commission_rate_override === ""
-          ? null
-          : Number(unitData.main_commission_rate_override),
       sale_type: unitData.sale_type,
     }),
   })
@@ -421,6 +409,7 @@ const ClientProfile = () => {
   const [selectedDocumentsUnit, setSelectedDocumentsUnit] =
     useState<ClientUnit | null>(null)
   const [successMessage, setSuccessMessage] = useState("")
+  const [listingSearch, setListingSearch] = useState("")
 
   const {
     data: client,
@@ -534,11 +523,32 @@ const ClientProfile = () => {
     (listing) => Number(listing.id) === Number(reserveData.listing_id)
   )
 
+  const filteredAvailableListings = availableListings.filter((listing) => {
+    const search = listingSearch.toLowerCase().trim()
+
+    if (!search || Number(listing.id) === Number(reserveData.listing_id)) {
+      return true
+    }
+
+    return [
+      listing.unit_id,
+      listing.project_name,
+      listing.project_location,
+      listing.lot_type,
+      listing.status,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+      .includes(search)
+  })
+
   const openReserveModal = () => {
     setReserveData({
       ...defaultReserveData,
       seller_id: client?.default_seller_id || "",
     })
+    setListingSearch("")
     setSuccessMessage("")
     setIsReserveOpen(true)
   }
@@ -552,8 +562,7 @@ const ClientProfile = () => {
       mode_of_payment:
         unit.mode_of_payment === "cash" ? "cash" : "installment",
       regenerate_commission: false,
-      main_commission_rate_override: "",
-      sale_type: "distributed",
+          sale_type: "distributed",
     })
   }
 
@@ -833,25 +842,66 @@ const ClientProfile = () => {
               </h3>
 
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <Select
-                  label="Available Listing"
-                  value={reserveData.listing_id}
-                  onChange={(e) =>
-                    setReserveData({
-                      ...reserveData,
-                      listing_id: e.target.value ? Number(e.target.value) : "",
-                    })
-                  }
-                  required
-                >
-                  <option value="">Select listing</option>
-                  {availableListings.map((listing) => (
-                    <option key={listing.id} value={listing.id}>
-                      {listing.unit_id} - {listing.project_name} -{" "}
-                      {formatMoney(listing.total_contract_price)}
-                    </option>
-                  ))}
-                </Select>
+                <div className="space-y-2">
+                  <Input
+                    label="Available Listing"
+                    value={listingSearch}
+                    onChange={(e) => {
+                      setListingSearch(e.target.value)
+                      setReserveData({
+                        ...reserveData,
+                        listing_id: "",
+                      })
+                    }}
+                    placeholder="Search unit, project, or lot type"
+                    required
+                  />
+
+                  <div className="max-h-60 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+                    {filteredAvailableListings.length > 0 ? (
+                      filteredAvailableListings.map((listing) => {
+                        const isSelected =
+                          Number(reserveData.listing_id) === Number(listing.id)
+                        const label = `${listing.unit_id} - ${listing.project_name} - ${formatMoney(listing.total_contract_price)}`
+
+                        return (
+                          <button
+                            className={[
+                              "block w-full border-b border-slate-100 px-3 py-2 text-left text-sm last:border-b-0 hover:bg-slate-50",
+                              isSelected ? "bg-blue-50 text-blue-700" : "text-slate-700",
+                            ].join(" ")}
+                            key={listing.id}
+                            onClick={() => {
+                              setReserveData({
+                                ...reserveData,
+                                listing_id: listing.id,
+                              })
+                              setListingSearch(label)
+                            }}
+                            type="button"
+                          >
+                            <span className="font-semibold text-slate-900">
+                              {listing.unit_id}
+                            </span>
+                            <span className="block text-xs text-slate-500">
+                              {listing.project_name} • {formatText(listing.lot_type)} • {formatMoney(listing.total_contract_price)}
+                            </span>
+                          </button>
+                        )
+                      })
+                    ) : (
+                      <p className="px-3 py-3 text-sm text-slate-500">
+                        No available listings found.
+                      </p>
+                    )}
+                  </div>
+
+                  {reserveData.listing_id === "" ? (
+                    <p className="text-xs text-amber-600">
+                      Select one available listing before saving.
+                    </p>
+                  ) : null}
+                </div>
 
                 <Select
                   label="Mode of Payment"
@@ -872,12 +922,20 @@ const ClientProfile = () => {
                 <Select
                   label="Distributed / Direct"
                   value={reserveData.sale_type}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    const saleType = e.target.value as "distributed" | "direct"
+
                     setReserveData({
                       ...reserveData,
-                      sale_type: e.target.value as "distributed" | "direct",
+                      sale_type: saleType,
+                      override_seller_id:
+                        saleType === "direct" ? "" : reserveData.override_seller_id,
+                      override_rate:
+                        saleType === "direct" ? "" : reserveData.override_rate,
+                      override_notes:
+                        saleType === "direct" ? "" : reserveData.override_notes,
                     })
-                  }
+                  }}
                 >
                   <option value="distributed">Distributed</option>
                   <option value="direct">Direct</option>
@@ -901,22 +959,6 @@ const ClientProfile = () => {
                     </option>
                   ))}
                 </Select>
-
-                <Input
-                  label="Main Rate Override (%)"
-                  type="number"
-                  min={0}
-                  max={100}
-                  step="0.01"
-                  value={reserveData.main_commission_rate_override}
-                  onChange={(e) =>
-                    setReserveData({
-                      ...reserveData,
-                      main_commission_rate_override: e.target.value,
-                    })
-                  }
-                  placeholder="Optional"
-                />
 
                 <Input
                   label="Due Day"
@@ -955,10 +997,10 @@ const ClientProfile = () => {
                   value={getSellerRateLabel(selectedMainSeller)}
                 />
                 <MiniDetail
-                  label="Selected Listing TCP"
+                  label="Selected Listing NSP"
                   value={
                     selectedListing
-                      ? formatMoney(selectedListing.total_contract_price)
+                      ? formatMoney(selectedListing.net_selling_price)
                       : "-"
                   }
                 />
@@ -967,13 +1009,8 @@ const ClientProfile = () => {
                   value={
                     selectedListing && selectedMainSeller
                       ? formatMoney(
-                          Number(selectedListing.total_contract_price || 0) *
-                            (Number(
-                              reserveData.main_commission_rate_override ||
-                                selectedMainSeller.commission_rate ||
-                                0
-                            ) /
-                              100)
+                          Number(selectedListing.net_selling_price || 0) *
+                            (Number(selectedMainSeller.commission_rate || 0) / 100)
                         )
                       : "-"
                   }
@@ -981,6 +1018,7 @@ const ClientProfile = () => {
               </div>
             </section>
 
+            {reserveData.sale_type === "distributed" ? (
             <section className="rounded-xl border border-dashed border-slate-300 p-4">
               <h3 className="mb-1 text-base font-bold text-slate-900">
                 Optional Agent / Override Commission
@@ -1044,6 +1082,7 @@ const ClientProfile = () => {
                 />
               </div>
             </section>
+            ) : null}
 
             <section className="rounded-xl border border-dashed border-slate-300 p-4">
               <h3 className="mb-1 text-base font-bold text-slate-900">
@@ -1194,22 +1233,6 @@ const ClientProfile = () => {
               <option value="distributed">Distributed</option>
               <option value="direct">Direct</option>
             </Select>
-
-            <Input
-              label="Rate Override for Regeneration (%)"
-              type="number"
-              min={0}
-              max={100}
-              step="0.01"
-              value={editUnitData.main_commission_rate_override}
-              onChange={(e) =>
-                setEditUnitData({
-                  ...editUnitData,
-                  main_commission_rate_override: e.target.value,
-                })
-              }
-              placeholder="Optional"
-            />
 
             <label className="flex items-center gap-2 rounded-xl border border-slate-200 p-3 text-sm text-slate-700">
               <input

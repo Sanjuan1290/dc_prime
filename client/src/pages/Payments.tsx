@@ -208,7 +208,7 @@ const formatPaymentPayload = (paymentData: PaymentFormData) => {
     payment_type: paymentData.payment_type || null,
     payment_method: paymentData.payment_method || null,
     payment_date: paymentData.payment_date || getLocalDate(),
-    status: paymentData.status || "verified",
+    status: paymentData.status || "pending",
   }
 }
 
@@ -221,7 +221,7 @@ const paymentToFormData = (payment: Payment): PaymentFormData => {
     payment_date: payment.payment_date
       ? payment.payment_date.slice(0, 10)
       : getLocalDate(),
-    status: payment.status || "verified",
+    status: payment.status || "pending",
   }
 }
 
@@ -750,32 +750,67 @@ const PaymentModal = ({
       }
     >
       <div className="space-y-4">
-        <Input
-          label="Search Client Unit"
-          icon={<FiSearch />}
-          placeholder="Search client, unit, project, seller..."
-          value={clientUnitSearch}
-          onChange={(e) => setClientUnitSearch(e.target.value)}
-        />
+        <div className="space-y-2">
+          <Input
+            label="Search Client Unit"
+            icon={<FiSearch />}
+            placeholder="Search client, unit, project, seller..."
+            value={clientUnitSearch}
+            onChange={(e) => {
+              setClientUnitSearch(e.target.value)
+              setFormData({
+                ...formData,
+                client_unit_id: "",
+              })
+            }}
+            required
+          />
 
-        <Select
-          label="Client Unit"
-          value={formData.client_unit_id}
-          onChange={(e) =>
-            setFormData({
-              ...formData,
-              client_unit_id: e.target.value ? Number(e.target.value) : "",
-            })
-          }
-          required
-        >
-          <option value="">Select client unit</option>
-          {clientUnits.map((unit) => (
-            <option key={unit.id} value={unit.id}>
-              {unit.client_name} - {unit.unit_id} - {unit.project_name}
-            </option>
-          ))}
-        </Select>
+          <div className="max-h-64 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+            {clientUnits.length > 0 ? (
+              clientUnits.slice(0, 20).map((unit) => {
+                const isSelected =
+                  Number(formData.client_unit_id) === Number(unit.id)
+                const label = `${unit.client_name} — ${unit.unit_id} (${unit.project_name})`
+
+                return (
+                  <button
+                    className={[
+                      "block w-full border-b border-slate-100 px-3 py-2 text-left text-sm last:border-b-0 hover:bg-slate-50",
+                      isSelected ? "bg-blue-50 text-blue-700" : "text-slate-700",
+                    ].join(" ")}
+                    key={unit.id}
+                    onClick={() => {
+                      setFormData({
+                        ...formData,
+                        client_unit_id: unit.id,
+                      })
+                      setClientUnitSearch(label)
+                    }}
+                    type="button"
+                  >
+                    <span className="font-semibold text-slate-900">
+                      {unit.client_name}
+                    </span>
+                    <span className="block text-xs text-slate-500">
+                      {unit.unit_id} • {unit.project_name} • {formatText(unit.status)}
+                    </span>
+                  </button>
+                )
+              })
+            ) : (
+              <p className="px-3 py-3 text-sm text-slate-500">
+                No client units found. Type a client name, unit ID, project, or seller.
+              </p>
+            )}
+          </div>
+
+          {formData.client_unit_id === "" ? (
+            <p className="text-xs text-amber-600">
+              Select one result before saving the payment.
+            </p>
+          ) : null}
+        </div>
 
         {selectedClientUnit ? (
           <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
