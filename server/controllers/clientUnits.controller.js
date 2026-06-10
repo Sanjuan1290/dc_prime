@@ -873,6 +873,9 @@ export const updateClientUnit = async (req, res) => {
     regenerate_commission = false,
     main_commission_rate_override,
     sale_type,
+    override_seller_id,
+    override_rate,
+    override_notes,
   } = req.body
 
   const existingClientUnit = await getClientUnitById(id)
@@ -899,6 +902,21 @@ export const updateClientUnit = async (req, res) => {
     })
   }
 
+  const hasOverrideSeller = !isMissing(override_seller_id)
+  const hasOverrideRate = !isMissing(override_rate)
+
+  if (hasOverrideSeller && !hasOverrideRate) {
+    return res.status(400).json({
+      message: 'Override rate is required when override seller is selected',
+    })
+  }
+
+  if (!hasOverrideSeller && hasOverrideRate) {
+    return res.status(400).json({
+      message: 'Override seller is required when override rate is entered',
+    })
+  }
+
   const finalSellerId = !isMissing(seller_id)
     ? seller_id
     : existingClientUnit.seller_id
@@ -921,6 +939,24 @@ export const updateClientUnit = async (req, res) => {
         await connection.rollback()
         return res.status(404).json({
           message: 'Seller not found or inactive',
+        })
+      }
+    }
+
+    if (hasOverrideSeller) {
+      const overrideSeller = await getSellerById(connection, override_seller_id)
+
+      if (!overrideSeller) {
+        await connection.rollback()
+        return res.status(404).json({
+          message: 'Override seller not found or inactive',
+        })
+      }
+
+      if (Number(override_seller_id) === Number(finalSellerId)) {
+        await connection.rollback()
+        return res.status(400).json({
+          message: 'Override seller must be different from main seller',
         })
       }
     }
@@ -992,10 +1028,7 @@ export const updateClientUnit = async (req, res) => {
 
     let regeneratedCommission = null
 
-    const sellerChanged =
-      Number(finalSellerId || 0) !== Number(existingClientUnit.seller_id || 0)
-
-    if (regenerate_commission && sellerChanged && !isMissing(finalSellerId)) {
+    if (regenerate_commission && !isMissing(finalSellerId)) {
       await connection.query(
         `
         DELETE cr
@@ -1017,17 +1050,24 @@ export const updateClientUnit = async (req, res) => {
       )
 
       const listing = await getListingById(connection, existingClientUnit.listing_id)
+      const finalSaleType = validateSaleType(sale_type)
 
-      regeneratedCommission = await createAutoCommissionForClientUnit({
+      regeneratedCommission = await createReservationCommissions({
         connection,
         clientUnitId: id,
+        listing,
         sellerId: finalSellerId,
-        rateOverride: main_commission_rate_override,
-        commissionRole: null,
-        sourceType: 'main',
-        parentCommissionId: null,
-        saleType: validateSaleType(sale_type),
-        notes: `Regenerated after seller update for ${listing?.unit_id || 'client unit'}`,
+        mainRateOverride: main_commission_rate_override,
+        saleType: finalSaleType,
+        overrideSellerId:
+          finalSaleType === 'distributed' ? override_seller_id : null,
+        overrideRate:
+          finalSaleType === 'distributed' ? override_rate : null,
+        overrideNotes:
+          finalSaleType === 'distributed' ? override_notes : null,
+        cashKaliwaanAmount: 0,
+        cashKaliwaanDate: null,
+        cashKaliwaanNotes: null,
       })
     }
 

@@ -965,6 +965,9 @@ export const updateCommission = async (req, res) => {
     cash_kaliwaan_date,
     cash_kaliwaan_notes,
     override_notes,
+    override_seller_id,
+    override_rate,
+    override_notes_for_child,
     status,
     notes,
   } = req.body
@@ -1026,6 +1029,96 @@ export const updateCommission = async (req, res) => {
     finalRate = normalizeRate(rate)
   }
 
+  const finalSourceType =
+    source_type === 'override' ? 'override' : existingCommission.source_type || 'main'
+
+  const finalSaleType =
+    sale_type === 'direct' ? 'direct' : sale_type === 'distributed'
+      ? 'distributed'
+      : existingCommission.sale_type || 'distributed'
+
+  const shouldSyncOverride =
+    finalSourceType === 'main' && finalSaleType === 'distributed'
+
+  const shouldCancelOverride =
+    finalSourceType === 'main' && finalSaleType === 'direct'
+
+  const hasOverrideSeller = !isMissing(override_seller_id)
+  const hasOverrideRate = !isMissing(override_rate)
+
+  if (shouldSyncOverride && hasOverrideSeller && !hasOverrideRate) {
+    return res.status(400).json({
+      message: 'Override rate is required when override seller is selected',
+    })
+  }
+
+  if (shouldSyncOverride && !hasOverrideSeller && hasOverrideRate) {
+    return res.status(400).json({
+      message: 'Override seller is required when override rate is entered',
+    })
+  }
+
+  if (
+    shouldSyncOverride &&
+    hasOverrideSeller &&
+    Number(override_seller_id) === Number(finalSellerId)
+  ) {
+    return res.status(400).json({
+      message: 'Override seller must be different from the main seller',
+    })
+  }
+
+  const [existingOverrideRows] = await db.query(
+    `
+    SELECT *
+    FROM commissions
+    WHERE parent_commission_id = ?
+      AND source_type = 'override'
+      AND status <> 'cancelled'
+    ORDER BY id DESC
+    LIMIT 1
+    `,
+    [id]
+  )
+
+  const existingOverrideCommission = existingOverrideRows[0] || null
+
+  if (existingOverrideCommission) {
+    const [overrideReleaseRows] = await db.query(
+      `
+      SELECT COUNT(id) AS released_count
+      FROM commission_releases
+      WHERE commission_id = ?
+        AND status = 'released'
+      `,
+      [existingOverrideCommission.id]
+    )
+
+    const overrideReleasedCount = Number(
+      overrideReleaseRows[0]?.released_count || 0
+    )
+
+    const overrideSellerChanged =
+      hasOverrideSeller &&
+      Number(override_seller_id) !==
+        Number(existingOverrideCommission.seller_id)
+
+    const overrideRateChanged =
+      hasOverrideRate &&
+      normalizeRate(override_rate) !==
+        normalizeRate(existingOverrideCommission.rate)
+
+    if (
+      overrideReleasedCount > 0 &&
+      (overrideSellerChanged || overrideRateChanged)
+    ) {
+      return res.status(400).json({
+        message:
+          'Cannot change override seller or rate after an override release has been paid',
+      })
+    }
+  }
+
   const grossCommission = calculateGrossCommission(
     existingCommission.commission_base,
     finalRate
@@ -1057,11 +1150,11 @@ export const updateCommission = async (req, res) => {
       finalRate,
       grossCommission,
       grossCommission,
-      source_type || existingCommission.source_type || 'main',
+      finalSourceType,
       !isMissing(parent_commission_id)
         ? parent_commission_id
         : existingCommission.parent_commission_id,
-      sale_type || existingCommission.sale_type || 'distributed',
+      finalSaleType,
       !isMissing(cash_kaliwaan_amount)
         ? normalizeMoney(cash_kaliwaan_amount)
         : normalizeMoney(existingCommission.cash_kaliwaan_amount),
@@ -1094,7 +1187,128 @@ export const updateCommission = async (req, res) => {
     await refreshCommissionEligibility(existingCommission.client_unit_id)
   }
 
+  let syncedOverrideCommission = null
+
+  if (shouldCancelOverride && existingOverrideCommission) {
+    await db.query(
+      `
+      UPDATE commissions
+      SET status = 'cancelled'
+      WHERE id = ?
+        AND NOT EXISTS (
+          SELECT 1
+          FROM commission_releases cr
+          WHERE cr.commission_id = commissions.id
+            AND cr.status = 'released'
+        )
+      `,
+      [existingOverrideCommission.id]
+    )
+  }
+
+  if (shouldSyncOverride && hasOverrideSeller && hasOverrideRate) {
+    const overrideSeller = await getSeller(db, override_seller_id)
+
+    if (!overrideSeller) {
+      return res.status(404).json({ message: 'Override seller not found' })
+    }
+
+    const finalOverrideRate = normalizeRate(override_rate)
+    const overrideGrossCommission = calculateGrossCommission(
+      existingCommission.commission_base,
+      finalOverrideRate
+    )
+
+    if (existingOverrideCommission) {
+      await db.query(
+        `
+        UPDATE commissions
+        SET
+          seller_id = ?,
+          commission_role = ?,
+          rate = ?,
+          gross_commission = ?,
+          amount = ?,
+          sale_type = ?,
+          override_notes = ?,
+          status = CASE
+            WHEN status = 'cancelled' THEN 'active'
+            ELSE status
+          END
+        WHERE id = ?
+        `,
+        [
+          override_seller_id,
+          overrideSeller.seller_role || 'agent',
+          finalOverrideRate,
+          overrideGrossCommission,
+          overrideGrossCommission,
+          finalSaleType,
+          nullableValue(override_notes_for_child),
+          existingOverrideCommission.id,
+        ]
+      )
+
+      const [currentOverrideReleaseRows] = await db.query(
+        `
+        SELECT COUNT(id) AS released_count
+        FROM commission_releases
+        WHERE commission_id = ?
+          AND status = 'released'
+        `,
+        [existingOverrideCommission.id]
+      )
+
+      const currentOverrideReleasedCount = Number(
+        currentOverrideReleaseRows[0]?.released_count || 0
+      )
+
+      if (currentOverrideReleasedCount === 0) {
+        await db.query(
+          `
+          DELETE FROM commission_releases
+          WHERE commission_id = ?
+            AND status <> 'released'
+          `,
+          [existingOverrideCommission.id]
+        )
+
+        await generateReleaseMilestonesForCommission(
+          existingOverrideCommission.id,
+          overrideGrossCommission
+        )
+      }
+
+      syncedOverrideCommission = {
+        commissionId: existingOverrideCommission.id,
+        gross_commission: overrideGrossCommission,
+        rate: finalOverrideRate,
+        updated: true,
+      }
+    } else {
+      syncedOverrideCommission = await createAutoCommissionForClientUnit({
+        clientUnitId: existingCommission.client_unit_id,
+        sellerId: override_seller_id,
+        rateOverride: finalOverrideRate,
+        commissionRole: overrideSeller.seller_role || 'agent',
+        sourceType: 'override',
+        parentCommissionId: Number(id),
+        saleType: finalSaleType,
+        cashKaliwaanAmount: cash_kaliwaan_amount,
+        cashKaliwaanDate: cash_kaliwaan_date,
+        cashKaliwaanNotes: cash_kaliwaan_notes,
+        overrideNotes: override_notes_for_child,
+        notes: `Optional override commission for main commission ${id}`,
+      })
+    }
+  }
+
+  await refreshCommissionEligibility(existingCommission.client_unit_id)
   await refreshCommissionStatus(db, id)
+
+  if (existingOverrideCommission) {
+    await refreshCommissionStatus(db, existingOverrideCommission.id)
+  }
 
   await createAuditLog({
     userId: req.user.id,
@@ -1111,6 +1325,7 @@ export const updateCommission = async (req, res) => {
       gross_commission: grossCommission,
       commission_base: normalizeMoney(existingCommission.commission_base),
       rate: finalRate,
+      overrideCommission: syncedOverrideCommission,
     },
   })
 }

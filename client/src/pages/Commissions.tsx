@@ -189,6 +189,9 @@ type CommissionEditData = {
   cash_kaliwaan_date: string
   cash_kaliwaan_notes: string
   override_notes: string
+  override_seller_id: number | ""
+  override_rate: string
+  override_notes_for_child: string
   status: CommissionStatus
   notes: string
 }
@@ -235,6 +238,9 @@ const defaultCommissionEditData: CommissionEditData = {
   cash_kaliwaan_date: "",
   cash_kaliwaan_notes: "",
   override_notes: "",
+  override_seller_id: "",
+  override_rate: "",
+  override_notes_for_child: "",
   status: "active",
   notes: "",
 }
@@ -345,6 +351,23 @@ const updateCommission = async ({
       cash_kaliwaan_date: commissionData.cash_kaliwaan_date || null,
       cash_kaliwaan_notes: commissionData.cash_kaliwaan_notes || null,
       override_notes: commissionData.override_notes || null,
+      override_seller_id:
+        commissionData.source_type === "main" &&
+        commissionData.sale_type === "distributed" &&
+        commissionData.override_seller_id
+          ? commissionData.override_seller_id
+          : null,
+      override_rate:
+        commissionData.source_type === "main" &&
+        commissionData.sale_type === "distributed" &&
+        commissionData.override_rate !== ""
+          ? Number(commissionData.override_rate)
+          : null,
+      override_notes_for_child:
+        commissionData.source_type === "main" &&
+        commissionData.sale_type === "distributed"
+          ? commissionData.override_notes_for_child || null
+          : null,
       status: commissionData.status,
       notes: commissionData.notes || null,
     }),
@@ -454,7 +477,10 @@ const restoreCancelledRelease = async (releaseId: number) => {
   return res.json()
 }
 
-const commissionToEditData = (commission: Commission): CommissionEditData => ({
+const commissionToEditData = (
+  commission: Commission,
+  overrideCommission?: Commission
+): CommissionEditData => ({
   seller_id: commission.seller_id,
   rate:
     commission.rate === null || commission.rate === undefined
@@ -472,6 +498,12 @@ const commissionToEditData = (commission: Commission): CommissionEditData => ({
     : "",
   cash_kaliwaan_notes: commission.cash_kaliwaan_notes || "",
   override_notes: commission.override_notes || "",
+  override_seller_id: overrideCommission?.seller_id || "",
+  override_rate:
+    overrideCommission?.rate === null || overrideCommission?.rate === undefined
+      ? ""
+      : String(overrideCommission?.rate || ""),
+  override_notes_for_child: overrideCommission?.override_notes || "",
   status: commission.status || "active",
   notes: commission.notes || "",
 })
@@ -732,8 +764,18 @@ const Commissions = () => {
   const paginatedGroups = paginateRows(groupedRows, page, rowsPerPage)
 
   const openEditModal = (commission: Commission) => {
+    const overrideCommission =
+      commission.source_type === "main"
+        ? commissions.find(
+            (item) =>
+              item.source_type === "override" &&
+              Number(item.parent_commission_id || 0) === Number(commission.id) &&
+              item.status !== "cancelled"
+          )
+        : undefined
+
     setEditCommission(commission)
-    setEditData(commissionToEditData(commission))
+    setEditData(commissionToEditData(commission, overrideCommission))
     setSuccessMessage("")
   }
 
@@ -1273,12 +1315,22 @@ const Commissions = () => {
             <Select
               label="Source Type"
               value={editData.source_type}
-              onChange={(e) =>
+              onChange={(e) => {
+                const sourceType = e.target.value as "main" | "override"
+
                 setEditData({
                   ...editData,
-                  source_type: e.target.value as "main" | "override",
+                  source_type: sourceType,
+                  override_seller_id:
+                    sourceType === "override" ? "" : editData.override_seller_id,
+                  override_rate:
+                    sourceType === "override" ? "" : editData.override_rate,
+                  override_notes_for_child:
+                    sourceType === "override"
+                      ? ""
+                      : editData.override_notes_for_child,
                 })
-              }
+              }}
             >
               <option value="main">Main</option>
               <option value="override">Override / Agent</option>
@@ -1287,12 +1339,20 @@ const Commissions = () => {
             <Select
               label="Distributed / Direct"
               value={editData.sale_type}
-              onChange={(e) =>
+              onChange={(e) => {
+                const saleType = e.target.value as "distributed" | "direct"
+
                 setEditData({
                   ...editData,
-                  sale_type: e.target.value as "distributed" | "direct",
+                  sale_type: saleType,
+                  override_seller_id:
+                    saleType === "direct" ? "" : editData.override_seller_id,
+                  override_rate:
+                    saleType === "direct" ? "" : editData.override_rate,
+                  override_notes_for_child:
+                    saleType === "direct" ? "" : editData.override_notes_for_child,
                 })
-              }
+              }}
             >
               <option value="distributed">Distributed</option>
               <option value="direct">Direct</option>
@@ -1378,6 +1438,77 @@ const Commissions = () => {
               placeholder="Optional"
             />
           </div>
+
+          {editData.source_type === "main" &&
+          editData.sale_type === "distributed" ? (
+            <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-4">
+              <h3 className="text-sm font-bold text-slate-900">
+                Agent / Optional Override Commission
+              </h3>
+
+              <p className="mt-1 text-xs text-slate-600">
+                This creates or updates the linked override commission row for
+                this main commission.
+              </p>
+
+              <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+                <Select
+                  label="Override Seller / Agent"
+                  value={editData.override_seller_id}
+                  onChange={(e) =>
+                    setEditData({
+                      ...editData,
+                      override_seller_id: e.target.value
+                        ? Number(e.target.value)
+                        : "",
+                    })
+                  }
+                >
+                  <option value="">No override seller</option>
+                  {sellers
+                    .filter((seller) => Number(seller.id) !== Number(editData.seller_id))
+                    .map((seller) => (
+                      <option key={seller.id} value={seller.id}>
+                        {seller.full_name} - {formatText(seller.seller_role)}
+                      </option>
+                    ))}
+                </Select>
+
+                <Input
+                  label="Override Rate (%)"
+                  type="number"
+                  min={0}
+                  max={100}
+                  step="0.01"
+                  value={editData.override_rate}
+                  onChange={(e) =>
+                    setEditData({
+                      ...editData,
+                      override_rate: e.target.value,
+                    })
+                  }
+                  placeholder="Example: 2"
+                />
+
+                <label className="block md:col-span-2">
+                  <span className="mb-1.5 block text-sm font-semibold text-slate-700">
+                    Override Notes
+                  </span>
+                  <textarea
+                    className="min-h-24 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    value={editData.override_notes_for_child}
+                    onChange={(e) =>
+                      setEditData({
+                        ...editData,
+                        override_notes_for_child: e.target.value,
+                      })
+                    }
+                    placeholder="Reason for optional override commission"
+                  />
+                </label>
+              </div>
+            </div>
+          ) : null}
 
           <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
             <ComputedBox
