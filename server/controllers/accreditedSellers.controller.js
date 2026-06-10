@@ -2,7 +2,7 @@ import { db } from '../db/connect.js'
 import { createAuditLog } from '../utils/createAuditLog.js'
 import { getClientIp } from '../utils/getClientIp.js'
 
-const allowedSellerRoles = ['broker_network_manager', 'broker', 'agent']
+const allowedSellerRoles = ['broker_network_manager', 'broker', 'manager', 'agent']
 const allowedStatuses = ['active', 'inactive']
 
 const isMissing = (value) => {
@@ -533,8 +533,9 @@ export const getSellerHierarchy = async (req, res) => {
       CASE seller.seller_role
         WHEN 'broker_network_manager' THEN 1
         WHEN 'broker' THEN 2
-        WHEN 'agent' THEN 3
-        ELSE 4
+        WHEN 'manager' THEN 3
+        WHEN 'agent' THEN 4
+        ELSE 5
       END,
       seller.full_name ASC
     `
@@ -590,8 +591,9 @@ export const getPossibleParentSellers = async (req, res) => {
       CASE seller.seller_role
         WHEN 'broker_network_manager' THEN 1
         WHEN 'broker' THEN 2
-        WHEN 'agent' THEN 3
-        ELSE 4
+        WHEN 'manager' THEN 3
+        WHEN 'agent' THEN 4
+        ELSE 5
       END,
       seller.full_name ASC
     `,

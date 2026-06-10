@@ -48,7 +48,8 @@ const validateDueDay = (dueDay) => {
 
 const listingStatusFromClientUnitStatus = (status) => {
   if (status === 'cancelled') return 'available'
-  if (status === 'reserved' || status === 'active') return 'reserved'
+  if (status === 'reserved') return 'reserved'
+  if (status === 'active') return 'active'
   if (status === 'fully_paid' || status === 'closed') return 'sold'
 
   return null
@@ -1048,6 +1049,361 @@ export const updateClientUnit = async (req, res) => {
       data: {
         clientUnitId: Number(id),
         regeneratedCommission,
+      },
+    })
+  } catch (err) {
+    await connection.rollback()
+    throw err
+  } finally {
+    connection.release()
+  }
+}
+
+export const changeClientUnitListing = async (req, res) => {
+  const { id } = req.params
+
+  const {
+    new_listing_id,
+    status,
+    regenerate_commission = true,
+    reason = null,
+  } = req.body
+
+  if (isMissing(new_listing_id)) {
+    return res.status(400).json({
+      message: 'New listing is required',
+    })
+  }
+
+  const existingClientUnit = await getClientUnitById(id)
+
+  if (!existingClientUnit) {
+    return res.status(404).json({
+      message: 'Client unit not found',
+    })
+  }
+
+  if (['cancelled', 'fully_paid', 'closed'].includes(existingClientUnit.status)) {
+    return res.status(400).json({
+      message: 'Cannot change unit for cancelled, fully paid, or closed account',
+    })
+  }
+
+  if (Number(existingClientUnit.listing_id) === Number(new_listing_id)) {
+    return res.status(400).json({
+      message: 'Client is already assigned to this listing',
+    })
+  }
+
+  const finalStatus = status || existingClientUnit.status || 'reserved'
+
+  if (!validateClientUnitStatus(finalStatus)) {
+    return res.status(400).json({
+      message: 'Invalid client unit status',
+    })
+  }
+
+  const connection = await db.getConnection()
+
+  try {
+    await connection.beginTransaction()
+
+    const oldListing = await getListingById(connection, existingClientUnit.listing_id)
+    const newListing = await getListingById(connection, new_listing_id)
+
+    if (!newListing) {
+      await connection.rollback()
+      return res.status(404).json({
+        message: 'New listing not found',
+      })
+    }
+
+    if (newListing.status !== 'available') {
+      await connection.rollback()
+      return res.status(400).json({
+        message: 'New listing is not available',
+      })
+    }
+
+    const [releasedRows] = await connection.query(
+      `
+      SELECT COUNT(cr.id) AS released_count
+      FROM commission_releases cr
+      INNER JOIN commissions cm ON cm.id = cr.commission_id
+      WHERE cm.client_unit_id = ?
+        AND cr.status = 'released'
+      `,
+      [id]
+    )
+
+    if (Number(releasedRows[0]?.released_count || 0) > 0) {
+      await connection.rollback()
+      return res.status(400).json({
+        message: 'Cannot change unit after commission release has been paid',
+      })
+    }
+
+    await connection.query(
+      `
+      UPDATE listings
+      SET status = 'available'
+      WHERE id = ?
+      `,
+      [existingClientUnit.listing_id]
+    )
+
+    const nextListingStatus = listingStatusFromClientUnitStatus(finalStatus) || 'reserved'
+
+    await connection.query(
+      `
+      UPDATE listings
+      SET status = ?
+      WHERE id = ?
+      `,
+      [nextListingStatus, new_listing_id]
+    )
+
+    await connection.query(
+      `
+      UPDATE client_units
+      SET
+        listing_id = ?,
+        status = ?,
+        balance = ?
+      WHERE id = ?
+      `,
+      [new_listing_id, finalStatus, normalizeMoney(newListing.total_contract_price), id]
+    )
+
+    await connection.query(
+      `
+      UPDATE commission_releases cr
+      INNER JOIN commissions cm ON cm.id = cr.commission_id
+      SET cr.status = 'cancelled'
+      WHERE cm.client_unit_id = ?
+        AND cr.status <> 'released'
+      `,
+      [id]
+    )
+
+    await connection.query(
+      `
+      UPDATE commissions
+      SET status = 'cancelled'
+      WHERE client_unit_id = ?
+        AND status <> 'released'
+      `,
+      [id]
+    )
+
+    let regeneratedCommission = null
+
+    if (regenerate_commission && !isMissing(existingClientUnit.seller_id)) {
+      regeneratedCommission = await createAutoCommissionForClientUnit({
+        connection,
+        clientUnitId: id,
+        sellerId: existingClientUnit.seller_id,
+        rateOverride: null,
+        commissionRole: null,
+        sourceType: 'main',
+        parentCommissionId: null,
+        saleType: 'distributed',
+        notes: `Regenerated after unit change from ${oldListing?.unit_id || 'old unit'} to ${newListing.unit_id}`,
+      })
+    }
+
+    await refreshCommissionEligibility(id, connection)
+
+    await connection.commit()
+
+    await createAuditLog({
+      userId: req.user.id,
+      action: 'change_unit',
+      module: 'Client Units',
+      description: `Changed client unit ${id} from ${oldListing?.unit_id || 'old unit'} to ${newListing.unit_id}${reason ? `: ${reason}` : ''}`,
+      ipAddress: getClientIp(req),
+    })
+
+    return res.status(200).json({
+      message: 'Client unit listing changed successfully',
+      data: {
+        clientUnitId: Number(id),
+        old_listing_id: Number(existingClientUnit.listing_id),
+        new_listing_id: Number(new_listing_id),
+        regeneratedCommission,
+      },
+    })
+  } catch (err) {
+    await connection.rollback()
+    throw err
+  } finally {
+    connection.release()
+  }
+}
+
+export const cancelClientUnit = async (req, res) => {
+  const { id } = req.params
+  const { release_listing = true, reason = null } = req.body
+
+  const existingClientUnit = await getClientUnitById(id)
+
+  if (!existingClientUnit) {
+    return res.status(404).json({
+      message: 'Client unit not found',
+    })
+  }
+
+  if (['fully_paid', 'closed'].includes(existingClientUnit.status)) {
+    return res.status(400).json({
+      message: 'Fully paid or closed account cannot be cancelled here',
+    })
+  }
+
+  const connection = await db.getConnection()
+
+  try {
+    await connection.beginTransaction()
+
+    await connection.query(
+      `
+      UPDATE client_units
+      SET status = 'cancelled'
+      WHERE id = ?
+      `,
+      [id]
+    )
+
+    await connection.query(
+      `
+      UPDATE listings
+      SET status = ?
+      WHERE id = ?
+      `,
+      [release_listing ? 'available' : 'hold', existingClientUnit.listing_id]
+    )
+
+    await connection.query(
+      `
+      UPDATE commission_releases cr
+      INNER JOIN commissions cm ON cm.id = cr.commission_id
+      SET cr.status = 'cancelled'
+      WHERE cm.client_unit_id = ?
+        AND cr.status <> 'released'
+      `,
+      [id]
+    )
+
+    await connection.query(
+      `
+      UPDATE commissions
+      SET status = 'cancelled'
+      WHERE client_unit_id = ?
+        AND status <> 'released'
+      `,
+      [id]
+    )
+
+    await connection.commit()
+
+    await createAuditLog({
+      userId: req.user.id,
+      action: 'cancel',
+      module: 'Client Units',
+      description: `Cancelled client unit ${id}${reason ? `: ${reason}` : ''}`,
+      ipAddress: getClientIp(req),
+    })
+
+    return res.status(200).json({
+      message: 'Client unit cancelled successfully',
+      data: {
+        clientUnitId: Number(id),
+        listing_status: release_listing ? 'available' : 'hold',
+      },
+    })
+  } catch (err) {
+    await connection.rollback()
+    throw err
+  } finally {
+    connection.release()
+  }
+}
+
+export const deleteClientUnit = async (req, res) => {
+  const { id } = req.params
+
+  const existingClientUnit = await getClientUnitById(id)
+
+  if (!existingClientUnit) {
+    return res.status(404).json({
+      message: 'Client unit not found',
+    })
+  }
+
+  const connection = await db.getConnection()
+
+  try {
+    await connection.beginTransaction()
+
+    const [[paymentCount]] = await connection.query(
+      `SELECT COUNT(id) AS total FROM payments WHERE client_unit_id = ?`,
+      [id]
+    )
+
+    const [[commissionCount]] = await connection.query(
+      `SELECT COUNT(id) AS total FROM commissions WHERE client_unit_id = ?`,
+      [id]
+    )
+
+    const [[documentActivityCount]] = await connection.query(
+      `
+      SELECT COUNT(id) AS total
+      FROM client_document_list
+      WHERE client_unit_id = ?
+        AND status <> 'not_submitted'
+      `,
+      [id]
+    )
+
+    if (
+      Number(paymentCount.total || 0) > 0 ||
+      Number(commissionCount.total || 0) > 0 ||
+      Number(documentActivityCount.total || 0) > 0
+    ) {
+      await connection.rollback()
+      return res.status(400).json({
+        message: 'This unit already has transaction history. Cancel it instead.',
+      })
+    }
+
+    await connection.query(
+      `DELETE FROM client_document_list WHERE client_unit_id = ?`,
+      [id]
+    )
+
+    await connection.query(
+      `DELETE FROM client_units WHERE id = ?`,
+      [id]
+    )
+
+    await connection.query(
+      `UPDATE listings SET status = 'available' WHERE id = ?`,
+      [existingClientUnit.listing_id]
+    )
+
+    await connection.commit()
+
+    await createAuditLog({
+      userId: req.user.id,
+      action: 'delete',
+      module: 'Client Units',
+      description: `Deleted wrong client unit input ${id}`,
+      ipAddress: getClientIp(req),
+    })
+
+    return res.status(200).json({
+      message: 'Client unit deleted successfully',
+      data: {
+        clientUnitId: Number(id),
       },
     })
   } catch (err) {

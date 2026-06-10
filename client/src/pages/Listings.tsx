@@ -34,6 +34,7 @@ import { paginateRows } from "../utils/pagination";
 type ListingStatus =
   | "available"
   | "reserved"
+  | "active"
   | "hold"
   | "sold"
   | "inactive"
@@ -1047,6 +1048,7 @@ const ListingFormModal = ({
         >
           <option value="available">Available</option>
           <option value="reserved">Reserved</option>
+          <option value="active">Active</option>
           <option value="hold">Hold</option>
           <option value="sold">Sold</option>
           <option value="inactive">Inactive</option>

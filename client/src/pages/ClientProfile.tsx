@@ -71,6 +71,7 @@ type ClientUnit = {
   seller_name: string | null
   seller_role: string | null
   seller_commission_rate?: number | string | null
+  sale_type?: "distributed" | "direct" | string | null
   reports_under: string | null
   document_status: string
   commission_count?: number | string
@@ -174,6 +175,21 @@ type EditUnitData = {
   mode_of_payment: "cash" | "installment"
   regenerate_commission: boolean
   sale_type: "distributed" | "direct"
+  override_seller_id: string
+  override_rate: string
+  override_notes: string
+}
+
+type ChangeUnitData = {
+  new_listing_id: number | ""
+  status: string
+  regenerate_commission: boolean
+  reason: string
+}
+
+type CancelUnitData = {
+  release_listing: boolean
+  reason: string
 }
 
 const defaultReserveData: ReserveListingData = {
@@ -198,6 +214,21 @@ const defaultEditUnitData: EditUnitData = {
   mode_of_payment: "installment",
   regenerate_commission: false,
   sale_type: "distributed",
+  override_seller_id: "",
+  override_rate: "",
+  override_notes: "",
+}
+
+const defaultChangeUnitData: ChangeUnitData = {
+  new_listing_id: "",
+  status: "reserved",
+  regenerate_commission: true,
+  reason: "",
+}
+
+const defaultCancelUnitData: CancelUnitData = {
+  release_listing: true,
+  reason: "",
 }
 
 const fetchClient = async (clientId: string) => {
@@ -317,6 +348,18 @@ const updateClientUnit = async ({
       mode_of_payment: unitData.mode_of_payment,
       regenerate_commission: unitData.regenerate_commission,
       sale_type: unitData.sale_type,
+      override_seller_id:
+        unitData.sale_type === "distributed" && unitData.override_seller_id
+          ? Number(unitData.override_seller_id)
+          : null,
+      override_rate:
+        unitData.sale_type === "distributed" && unitData.override_rate !== ""
+          ? Number(unitData.override_rate)
+          : null,
+      override_notes:
+        unitData.sale_type === "distributed"
+          ? unitData.override_notes || null
+          : null,
     }),
   })
 
@@ -325,22 +368,60 @@ const updateClientUnit = async ({
   return res.json()
 }
 
-const updateClientDocumentStatus = async ({
-  documentId,
-  status,
+const changeClientUnitListing = async ({
+  clientUnitId,
+  changeData,
 }: {
-  documentId: number
-  status: "submitted" | "not_submitted"
+  clientUnitId: number
+  changeData: ChangeUnitData
 }) => {
-  const res = await fetch(`${API_URL}/client-documents/${documentId}/status`, {
+  const res = await fetch(`${API_URL}/client-units/${clientUnitId}/change-listing`, {
     method: "PATCH",
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      status,
+      new_listing_id: changeData.new_listing_id,
+      status: changeData.status,
+      regenerate_commission: changeData.regenerate_commission,
+      reason: changeData.reason || null,
     }),
+  })
+
+  if (!res.ok) throw new Error(await getErrorMessage(res))
+
+  return res.json()
+}
+
+const cancelClientUnit = async ({
+  clientUnitId,
+  cancelData,
+}: {
+  clientUnitId: number
+  cancelData: CancelUnitData
+}) => {
+  const res = await fetch(`${API_URL}/client-units/${clientUnitId}/cancel`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      release_listing: cancelData.release_listing,
+      reason: cancelData.reason || null,
+    }),
+  })
+
+  if (!res.ok) throw new Error(await getErrorMessage(res))
+
+  return res.json()
+}
+
+const deleteClientUnit = async (clientUnitId: number) => {
+  const res = await fetch(`${API_URL}/client-units/${clientUnitId}`, {
+    method: "DELETE",
+    credentials: "include",
   })
 
   if (!res.ok) throw new Error(await getErrorMessage(res))
@@ -376,40 +457,59 @@ const applyExistingReusableDocuments = async (clientUnitId: number) => {
   return res.json()
 }
 
-const getSellerRateLabel = (seller?: Seller | null) => {
-  if (!seller) return "-"
-  if (seller.commission_rate === null || seller.commission_rate === undefined) {
-    return "Uses system default"
-  }
+const updateClientDocumentStatus = async ({
+  clientDocumentId,
+  status,
+}: {
+  clientDocumentId: number
+  status: string
+}) => {
+  const res = await fetch(`${API_URL}/client-documents/${clientDocumentId}/status`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ status }),
+  })
 
-  return `${formatNumber(seller.commission_rate)}%`
-}
+  if (!res.ok) throw new Error(await getErrorMessage(res))
 
-const isRequired = (value: number | boolean) => {
-  return value === true || value === 1
+  return res.json()
 }
 
 const isSubmitted = (status: string) => {
-  return status === "submitted" || status === "approved"
+  return ["submitted", "approved"].includes(status)
+}
+
+const isRequired = (value: number | boolean) => {
+  return value === true || Number(value) === 1
 }
 
 const ClientProfile = () => {
-  const { id } = useParams()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-
-  const clientId = id || ""
+  const { id: clientId } = useParams()
 
   const [isReserveOpen, setIsReserveOpen] = useState(false)
-  const [reserveData, setReserveData] =
-    useState<ReserveListingData>(defaultReserveData)
+  const [reserveData, setReserveData] = useState<ReserveListingData>(
+    defaultReserveData
+  )
+  const [listingSearch, setListingSearch] = useState("")
   const [editUnit, setEditUnit] = useState<ClientUnit | null>(null)
   const [editUnitData, setEditUnitData] =
     useState<EditUnitData>(defaultEditUnitData)
+  const [changeUnit, setChangeUnit] = useState<ClientUnit | null>(null)
+  const [changeUnitData, setChangeUnitData] =
+    useState<ChangeUnitData>(defaultChangeUnitData)
+  const [changeListingSearch, setChangeListingSearch] = useState("")
+  const [cancelUnit, setCancelUnit] = useState<ClientUnit | null>(null)
+  const [cancelUnitData, setCancelUnitData] =
+    useState<CancelUnitData>(defaultCancelUnitData)
+  const [deleteUnit, setDeleteUnit] = useState<ClientUnit | null>(null)
   const [selectedDocumentsUnit, setSelectedDocumentsUnit] =
     useState<ClientUnit | null>(null)
   const [successMessage, setSuccessMessage] = useState("")
-  const [listingSearch, setListingSearch] = useState("")
 
   const {
     data: client,
@@ -417,7 +517,7 @@ const ClientProfile = () => {
     error: clientError,
   } = useQuery({
     queryKey: ["client", clientId],
-    queryFn: () => fetchClient(clientId),
+    queryFn: () => fetchClient(clientId || ""),
     enabled: Boolean(clientId),
   })
 
@@ -427,7 +527,7 @@ const ClientProfile = () => {
     error: unitsError,
   } = useQuery({
     queryKey: ["client-units", clientId],
-    queryFn: () => fetchClientUnits(clientId),
+    queryFn: () => fetchClientUnits(clientId || ""),
     enabled: Boolean(clientId),
   })
 
@@ -487,6 +587,36 @@ const ClientProfile = () => {
     },
   })
 
+  const changeUnitMutation = useMutation({
+    mutationFn: changeClientUnitListing,
+    onSuccess: () => {
+      invalidateClientProfile()
+      setChangeUnit(null)
+      setChangeUnitData(defaultChangeUnitData)
+      setChangeListingSearch("")
+      setSuccessMessage("Client unit changed successfully")
+    },
+  })
+
+  const cancelUnitMutation = useMutation({
+    mutationFn: cancelClientUnit,
+    onSuccess: () => {
+      invalidateClientProfile()
+      setCancelUnit(null)
+      setCancelUnitData(defaultCancelUnitData)
+      setSuccessMessage("Client unit cancelled successfully")
+    },
+  })
+
+  const deleteUnitMutation = useMutation({
+    mutationFn: deleteClientUnit,
+    onSuccess: () => {
+      invalidateClientProfile()
+      setDeleteUnit(null)
+      setSuccessMessage("Client unit deleted successfully")
+    },
+  })
+
   const updateDocumentMutation = useMutation({
     mutationFn: updateClientDocumentStatus,
     onSuccess: () => {
@@ -523,7 +653,7 @@ const ClientProfile = () => {
     (listing) => Number(listing.id) === Number(reserveData.listing_id)
   )
 
-  const filteredAvailableListings = availableListings.filter((listing) => {
+  const filteredReserveListings = availableListings.filter((listing) => {
     const search = listingSearch.toLowerCase().trim()
 
     if (!search || Number(listing.id) === Number(reserveData.listing_id)) {
@@ -542,6 +672,60 @@ const ClientProfile = () => {
       .toLowerCase()
       .includes(search)
   })
+
+  const filteredChangeListings = availableListings.filter((listing) => {
+    const search = changeListingSearch.toLowerCase().trim()
+
+    if (!search || Number(listing.id) === Number(changeUnitData.new_listing_id)) {
+      return true
+    }
+
+    return [
+      listing.unit_id,
+      listing.project_name,
+      listing.project_location,
+      listing.lot_type,
+      listing.status,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+      .includes(search)
+  })
+
+  const submittedDocumentCount = useMemo(() => {
+    return clientDocuments.filter((document) => isSubmitted(document.status)).length
+  }, [clientDocuments])
+
+  const requiredDocumentCount = useMemo(() => {
+    return clientDocuments.filter((document) => isRequired(document.is_required)).length
+  }, [clientDocuments])
+
+  const submittedRequiredDocumentCount = useMemo(() => {
+    return clientDocuments.filter(
+      (document) =>
+        isRequired(document.is_required) && isSubmitted(document.status)
+    ).length
+  }, [clientDocuments])
+
+  const totals = useMemo(() => {
+    return clientUnits.reduce(
+      (summary, unit) => {
+        summary.totalContractPrice += Number(unit.total_contract_price || 0)
+        summary.totalPaid += Number(unit.paid_amount || 0)
+        summary.totalBalance += Number(unit.balance || 0)
+        summary.totalCommission += Number(unit.gross_commission_total || 0)
+
+        return summary
+      },
+      {
+        totalContractPrice: 0,
+        totalPaid: 0,
+        totalBalance: 0,
+        totalCommission: 0,
+      }
+    )
+  }, [clientUnits])
 
   const openReserveModal = () => {
     setReserveData({
@@ -562,8 +746,32 @@ const ClientProfile = () => {
       mode_of_payment:
         unit.mode_of_payment === "cash" ? "cash" : "installment",
       regenerate_commission: false,
-          sale_type: "distributed",
+      sale_type: unit.sale_type === "direct" ? "direct" : "distributed",
+      override_seller_id: "",
+      override_rate: "",
+      override_notes: "",
     })
+  }
+
+  const openChangeUnitModal = (unit: ClientUnit) => {
+    setChangeUnit(unit)
+    setChangeUnitData({
+      ...defaultChangeUnitData,
+      status: unit.status === "active" ? "active" : "reserved",
+    })
+    setChangeListingSearch("")
+    setSuccessMessage("")
+  }
+
+  const openCancelUnitModal = (unit: ClientUnit) => {
+    setCancelUnit(unit)
+    setCancelUnitData(defaultCancelUnitData)
+    setSuccessMessage("")
+  }
+
+  const openDeleteUnitModal = (unit: ClientUnit) => {
+    setDeleteUnit(unit)
+    setSuccessMessage("")
   }
 
   const openDocumentsModal = (unit: ClientUnit) => {
@@ -572,6 +780,8 @@ const ClientProfile = () => {
   }
 
   const handleReserveListing = () => {
+    if (!clientId || !reserveData.listing_id) return
+
     reserveMutation.mutate({
       clientId,
       reserveData,
@@ -587,69 +797,65 @@ const ClientProfile = () => {
     })
   }
 
+  const handleChangeUnit = () => {
+    if (!changeUnit || !changeUnitData.new_listing_id) return
+
+    changeUnitMutation.mutate({
+      clientUnitId: changeUnit.id,
+      changeData: changeUnitData,
+    })
+  }
+
+  const handleCancelUnit = () => {
+    if (!cancelUnit) return
+
+    cancelUnitMutation.mutate({
+      clientUnitId: cancelUnit.id,
+      cancelData: cancelUnitData,
+    })
+  }
+
+  const handleDeleteUnit = () => {
+    if (!deleteUnit) return
+
+    deleteUnitMutation.mutate(deleteUnit.id)
+  }
+
   const handleDocumentChecklistToggle = (
     document: ClientDocument,
     checked: boolean
   ) => {
     updateDocumentMutation.mutate({
-      documentId: document.id,
+      clientDocumentId: document.id,
       status: checked ? "submitted" : "not_submitted",
     })
   }
-
-  const submittedDocumentCount = clientDocuments.filter((document) =>
-    isSubmitted(document.status)
-  ).length
-
-  const requiredDocumentCount = clientDocuments.filter((document) =>
-    isRequired(document.is_required)
-  ).length
-
-  const submittedRequiredDocumentCount = clientDocuments.filter(
-    (document) => isRequired(document.is_required) && isSubmitted(document.status)
-  ).length
-
-  const totalTcp = useMemo(() => {
-    return clientUnits.reduce(
-      (sum, unit) => sum + Number(unit.total_contract_price || 0),
-      0
-    )
-  }, [clientUnits])
-
-  const totalPaid = useMemo(() => {
-    return clientUnits.reduce(
-      (sum, unit) => sum + Number(unit.paid_amount || 0),
-      0
-    )
-  }, [clientUnits])
-
-  const totalBalance = Math.max(totalTcp - totalPaid, 0)
-
-  const mutationError =
-    reserveMutation.error?.message ||
-    updateUnitMutation.error?.message ||
-    updateDocumentMutation.error?.message ||
-    createChecklistMutation.error?.message ||
-    applyReusableMutation.error?.message
 
   if (isClientLoading || areUnitsLoading) {
     return <LoadingState label="Loading client profile..." />
   }
 
   if (clientError || unitsError || !client) {
-    return <Alert variant="error" title="Failed to load client profile" />
+    return (
+      <div className="p-6">
+        <Alert variant="error" title="Failed to load client profile" />
+        <Button icon={<FiArrowLeft />} onClick={() => navigate("/clients")}>
+          Back to Clients
+        </Button>
+      </div>
+    )
   }
 
   return (
-    <div>
+    <div className="p-6">
       <PageHeader
         icon={<FiUser />}
-        title="Client Profile"
-        subtitle="View client details, reserved units, document checklist, and commission setup."
+        title={client.full_name}
+        subtitle="Client profile, reserved units, payments, documents, and commission setup"
         actions={
           <div className="flex flex-wrap gap-2">
             <Button icon={<FiArrowLeft />} onClick={() => navigate("/clients")}>
-              Back to Clients
+              Back
             </Button>
             <Button icon={<FiPlus />} onClick={openReserveModal} variant="primary">
               Reserve Listing
@@ -659,64 +865,149 @@ const ClientProfile = () => {
       />
 
       {successMessage ? <Alert variant="success" title={successMessage} /> : null}
-      {mutationError ? <Alert variant="error" title={mutationError} /> : null}
 
-      <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-4">
-        <StatCard label="Reserved Units" value={clientUnits.length} />
-        <StatCard label="Total TCP" value={formatMoney(totalTcp)} />
-        <StatCard label="Total Paid" value={formatMoney(totalPaid)} />
-        <StatCard label="Balance" value={formatMoney(totalBalance)} />
+      {reserveMutation.error ? (
+        <Alert
+          variant="error"
+          title={
+            reserveMutation.error instanceof Error
+              ? reserveMutation.error.message
+              : "Failed to reserve listing"
+          }
+        />
+      ) : null}
+
+      {updateUnitMutation.error ? (
+        <Alert
+          variant="error"
+          title={
+            updateUnitMutation.error instanceof Error
+              ? updateUnitMutation.error.message
+              : "Failed to update unit"
+          }
+        />
+      ) : null}
+
+      {changeUnitMutation.error ? (
+        <Alert
+          variant="error"
+          title={
+            changeUnitMutation.error instanceof Error
+              ? changeUnitMutation.error.message
+              : "Failed to change unit"
+          }
+        />
+      ) : null}
+
+      {cancelUnitMutation.error ? (
+        <Alert
+          variant="error"
+          title={
+            cancelUnitMutation.error instanceof Error
+              ? cancelUnitMutation.error.message
+              : "Failed to cancel unit"
+          }
+        />
+      ) : null}
+
+      {deleteUnitMutation.error ? (
+        <Alert
+          variant="error"
+          title={
+            deleteUnitMutation.error instanceof Error
+              ? deleteUnitMutation.error.message
+              : "Failed to delete unit"
+          }
+        />
+      ) : null}
+
+      <div className="grid gap-4 md:grid-cols-4">
+        <StatCard
+          title="Total Contract Price"
+          value={formatMoney(totals.totalContractPrice)}
+          icon={<FiHome />}
+        />
+        <StatCard
+          title="Total Paid"
+          value={formatMoney(totals.totalPaid)}
+          icon={<FiFileText />}
+        />
+        <StatCard
+          title="Balance"
+          value={formatMoney(totals.totalBalance)}
+          icon={<FiFileText />}
+        />
+        <StatCard
+          title="Gross Commission"
+          value={formatMoney(totals.totalCommission)}
+          icon={<FiUser />}
+        />
       </div>
 
-      <div className="mb-6 grid grid-cols-1 gap-4 xl:grid-cols-3">
-        <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm xl:col-span-1">
-          <h2 className="mb-4 flex items-center gap-2 text-lg font-bold text-slate-900">
-            <FiUser />
-            Client Details
-          </h2>
+      <div className="mt-6 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <h2 className="text-lg font-bold text-slate-900">Client Details</h2>
 
-          <div className="space-y-3">
-            <Detail label="Full Name" value={client.full_name} />
-            <Detail
-              label="Spouse / Co-owner"
-              value={client.spouse_co_owner_name}
+        <div className="mt-4 grid gap-4 md:grid-cols-3">
+          <Detail label="Buyer Name" value={client.full_name} />
+          <Detail label="Spouse / Co-owner" value={client.spouse_co_owner_name} />
+          <Detail label="Email" value={client.email} />
+          <Detail label="Contact No." value={client.contact_no} />
+          <Detail label="Address" value={client.address} />
+          <Detail label="Region" value={client.region} />
+          <Detail label="Default Seller" value={client.default_seller_name} />
+          <Detail
+            label="Seller Role"
+            value={
+              client.default_seller_role
+                ? formatText(client.default_seller_role)
+                : "-"
+            }
+          />
+          <Detail
+            label="Seller Rate"
+            value={
+              client.default_seller_commission_rate
+                ? `${formatNumber(client.default_seller_commission_rate)}%`
+                : "-"
+            }
+          />
+        </div>
+      </div>
+
+      <div className="mt-6">
+        <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="text-lg font-bold text-slate-900">Client Units</h2>
+          <Button icon={<FiPlus />} onClick={openReserveModal} variant="primary">
+            Reserve Listing
+          </Button>
+        </div>
+
+        {clientUnits.length === 0 ? (
+          <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+            <EmptyState
+              title="No reserved units"
+              description="Reserve a listing for this client."
+              action={
+                <Button icon={<FiPlus />} onClick={openReserveModal} variant="primary">
+                  Reserve Listing
+                </Button>
+              }
             />
-            <Detail label="Email" value={client.email} />
-            <Detail label="Contact No." value={client.contact_no} />
-            <Detail label="Address" value={client.address} />
-            <Detail label="Region" value={client.region} />
-            <Detail
-              label="Default Seller"
-              value={client.default_seller_name || "-"}
-            />
-            <Detail
-              label="Default Seller Role"
-              value={formatText(client.default_seller_role)}
-            />
-            <Detail label="Created At" value={formatDate(client.created_at)} />
           </div>
-        </section>
-
-        <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm xl:col-span-2">
-          <h2 className="mb-4 flex items-center gap-2 text-lg font-bold text-slate-900">
-            <FiHome />
-            Reserved Units
-          </h2>
-
+        ) : (
           <TableContainer>
             <table className="w-full text-sm">
               <thead className="bg-slate-50">
                 <tr className="border-b border-slate-200">
                   <th className="px-4 py-3 text-left">Unit</th>
                   <th className="px-4 py-3 text-left">Project</th>
-                  <th className="px-4 py-3 text-left">MOP</th>
-                  <th className="px-4 py-3 text-left">Lot Type</th>
                   <th className="px-4 py-3 text-left">TCP</th>
                   <th className="px-4 py-3 text-left">Paid</th>
-                  <th className="px-4 py-3 text-left">Payment %</th>
                   <th className="px-4 py-3 text-left">Balance</th>
+                  <th className="px-4 py-3 text-left">Payment %</th>
                   <th className="px-4 py-3 text-left">Seller</th>
-                  <th className="px-4 py-3 text-left">Commission</th>
+                  <th className="px-4 py-3 text-left">Sale Type</th>
+                  <th className="px-4 py-3 text-left">Due Day</th>
                   <th className="px-4 py-3 text-left">Documents</th>
                   <th className="px-4 py-3 text-left">Status</th>
                   <th className="px-4 py-3 text-left">Actions</th>
@@ -726,95 +1017,95 @@ const ClientProfile = () => {
               <tbody>
                 {clientUnits.map((unit) => (
                   <tr key={unit.id} className="border-b border-slate-100">
-                    <td className="px-4 py-3 font-semibold text-slate-900">
-                      {unit.unit_id}
+                    <td className="px-4 py-3">
+                      <p className="font-bold text-slate-900">{unit.unit_id}</p>
+                      <p className="text-xs text-slate-500">
+                        {unit.lot_type || "-"} · {formatNumber(unit.lot_area_sqm)} sqm
+                      </p>
                     </td>
+
                     <td className="px-4 py-3 text-slate-600">
                       {unit.project_name}
                     </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {formatText(unit.mode_of_payment || "-")}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {formatText(unit.lot_type)}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
+
+                    <td className="px-4 py-3 font-semibold text-slate-900">
                       {formatMoney(unit.total_contract_price)}
                     </td>
+
                     <td className="px-4 py-3 text-slate-600">
                       {formatMoney(unit.paid_amount)}
                     </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {formatNumber(unit.payment_percentage || 0)}%
-                    </td>
+
                     <td className="px-4 py-3 text-slate-600">
                       {formatMoney(unit.balance)}
                     </td>
+
                     <td className="px-4 py-3 text-slate-600">
-                      <p>{unit.seller_name || "-"}</p>
-                      <p className="text-xs text-slate-500">
-                        {formatText(unit.seller_role)}
-                      </p>
+                      {formatNumber(unit.payment_percentage || 0)}%
                     </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      <p>{formatNumber(unit.commission_count || 0)} row/s</p>
-                      <p className="text-xs text-slate-500">
-                        Gross: {formatMoney(unit.gross_commission_total || 0)}
-                      </p>
-                      <p className="text-xs text-slate-500">
-                        Released:{" "}
-                        {formatMoney(unit.released_commission_total || 0)}
-                      </p>
-                    </td>
+
                     <td className="px-4 py-3">
-                      <StatusBadge status={unit.document_status} />
+                      <p className="font-semibold text-slate-900">
+                        {unit.seller_name || "-"}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        {unit.seller_role ? formatText(unit.seller_role) : "-"}
+                      </p>
                     </td>
+
+                    <td className="px-4 py-3 text-slate-600">
+                      {formatText(unit.sale_type || "distributed")}
+                    </td>
+
+                    <td className="px-4 py-3 text-slate-600">
+                      {unit.due_day || "-"}
+                    </td>
+
+                    <td className="px-4 py-3">
+                      <button
+                        className="font-semibold text-blue-600 hover:text-blue-700"
+                        onClick={() => openDocumentsModal(unit)}
+                        type="button"
+                      >
+                        {formatText(unit.document_status || "incomplete")}
+                      </button>
+                    </td>
+
                     <td className="px-4 py-3">
                       <StatusBadge status={unit.status} />
                     </td>
+
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-2">
-                        <Button
-                          icon={<FiFileText />}
-                          onClick={() => openDocumentsModal(unit)}
-                        >
-                          Docs
-                        </Button>
                         <Button
                           icon={<FiEdit2 />}
                           onClick={() => openEditUnitModal(unit)}
                         >
                           Edit
                         </Button>
+                        <Button onClick={() => openChangeUnitModal(unit)}>
+                          Change Unit
+                        </Button>
+                        <Button
+                          onClick={() => openCancelUnitModal(unit)}
+                          variant="secondary"
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          onClick={() => openDeleteUnitModal(unit)}
+                          variant="danger"
+                        >
+                          Delete
+                        </Button>
                       </div>
                     </td>
                   </tr>
                 ))}
-
-                {clientUnits.length === 0 ? (
-                  <tr>
-                    <td colSpan={13}>
-                      <EmptyState
-                        icon={<FiFileText />}
-                        title="No reserved units yet"
-                        description="Use Reserve Listing to assign an available unit to this client."
-                        action={
-                          <Button
-                            icon={<FiPlus />}
-                            onClick={openReserveModal}
-                            variant="primary"
-                          >
-                            Reserve Listing
-                          </Button>
-                        }
-                      />
-                    </td>
-                  </tr>
-                ) : null}
               </tbody>
             </table>
           </TableContainer>
-        </section>
+        )}
       </div>
 
       {isReserveOpen ? (
@@ -826,7 +1117,7 @@ const ClientProfile = () => {
             <div className="flex justify-end gap-2">
               <Button onClick={() => setIsReserveOpen(false)}>Cancel</Button>
               <Button
-                disabled={reserveMutation.isPending}
+                disabled={reserveMutation.isPending || !reserveData.listing_id}
                 onClick={handleReserveListing}
                 variant="primary"
               >
@@ -835,305 +1126,317 @@ const ClientProfile = () => {
             </div>
           }
         >
-          <div className="space-y-6">
-            <section>
-              <h3 className="mb-3 text-base font-bold text-slate-900">
-                Sale Details
-              </h3>
+          <div className="space-y-5">
+            <div className="space-y-2">
+              <Input
+                label="Search Available Listing"
+                value={listingSearch}
+                onChange={(e) => {
+                  setListingSearch(e.target.value)
+                  setReserveData({
+                    ...reserveData,
+                    listing_id: "",
+                  })
+                }}
+                placeholder="Search unit, project, or lot type"
+              />
 
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Input
-                    label="Available Listing"
-                    value={listingSearch}
-                    onChange={(e) => {
-                      setListingSearch(e.target.value)
-                      setReserveData({
-                        ...reserveData,
-                        listing_id: "",
-                      })
-                    }}
-                    placeholder="Search unit, project, or lot type"
-                    required
-                  />
+              <div className="max-h-64 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+                {filteredReserveListings.length > 0 ? (
+                  filteredReserveListings.map((listing) => {
+                    const isSelected =
+                      Number(reserveData.listing_id) === Number(listing.id)
+                    const label = `${listing.unit_id} - ${listing.project_name} - ${formatMoney(listing.total_contract_price)}`
 
-                  <div className="max-h-60 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-                    {filteredAvailableListings.length > 0 ? (
-                      filteredAvailableListings.map((listing) => {
-                        const isSelected =
-                          Number(reserveData.listing_id) === Number(listing.id)
-                        const label = `${listing.unit_id} - ${listing.project_name} - ${formatMoney(listing.total_contract_price)}`
-
-                        return (
-                          <button
-                            className={[
-                              "block w-full border-b border-slate-100 px-3 py-2 text-left text-sm last:border-b-0 hover:bg-slate-50",
-                              isSelected ? "bg-blue-50 text-blue-700" : "text-slate-700",
-                            ].join(" ")}
-                            key={listing.id}
-                            onClick={() => {
-                              setReserveData({
-                                ...reserveData,
-                                listing_id: listing.id,
-                              })
-                              setListingSearch(label)
-                            }}
-                            type="button"
-                          >
-                            <span className="font-semibold text-slate-900">
-                              {listing.unit_id}
-                            </span>
-                            <span className="block text-xs text-slate-500">
-                              {listing.project_name} • {formatText(listing.lot_type)} • {formatMoney(listing.total_contract_price)}
-                            </span>
-                          </button>
-                        )
-                      })
-                    ) : (
-                      <p className="px-3 py-3 text-sm text-slate-500">
-                        No available listings found.
-                      </p>
-                    )}
-                  </div>
-
-                  {reserveData.listing_id === "" ? (
-                    <p className="text-xs text-amber-600">
-                      Select one available listing before saving.
-                    </p>
-                  ) : null}
-                </div>
-
-                <Select
-                  label="Mode of Payment"
-                  value={reserveData.mode_of_payment}
-                  onChange={(e) =>
-                    setReserveData({
-                      ...reserveData,
-                      mode_of_payment: e.target.value as
-                        | "cash"
-                        | "installment",
-                    })
-                  }
-                >
-                  <option value="installment">Installment</option>
-                  <option value="cash">Cash</option>
-                </Select>
-
-                <Select
-                  label="Distributed / Direct"
-                  value={reserveData.sale_type}
-                  onChange={(e) => {
-                    const saleType = e.target.value as "distributed" | "direct"
-
-                    setReserveData({
-                      ...reserveData,
-                      sale_type: saleType,
-                      override_seller_id:
-                        saleType === "direct" ? "" : reserveData.override_seller_id,
-                      override_rate:
-                        saleType === "direct" ? "" : reserveData.override_rate,
-                      override_notes:
-                        saleType === "direct" ? "" : reserveData.override_notes,
-                    })
-                  }}
-                >
-                  <option value="distributed">Distributed</option>
-                  <option value="direct">Direct</option>
-                </Select>
-
-                <Select
-                  label="Unit Manager / Main Seller"
-                  value={reserveData.seller_id}
-                  onChange={(e) =>
-                    setReserveData({
-                      ...reserveData,
-                      seller_id: e.target.value ? Number(e.target.value) : "",
-                    })
-                  }
-                  required
-                >
-                  <option value="">Select seller</option>
-                  {sellers.map((seller) => (
-                    <option key={seller.id} value={seller.id}>
-                      {seller.full_name} - {formatText(seller.seller_role)}
-                    </option>
-                  ))}
-                </Select>
-
-                <Input
-                  label="Due Day"
-                  type="number"
-                  min={1}
-                  max={31}
-                  value={reserveData.due_day}
-                  onChange={(e) =>
-                    setReserveData({
-                      ...reserveData,
-                      due_day: e.target.value ? Number(e.target.value) : "",
-                    })
-                  }
-                  placeholder="Example: 28"
-                />
-
-                <Select
-                  label="Status"
-                  value={reserveData.status}
-                  onChange={(e) =>
-                    setReserveData({
-                      ...reserveData,
-                      status: e.target.value,
-                    })
-                  }
-                >
-                  <option value="reserved">Reserved</option>
-                  <option value="active">Active</option>
-                  <option value="cancelled">Cancelled</option>
-                </Select>
+                    return (
+                      <button
+                        className={[
+                          "block w-full border-b border-slate-100 px-3 py-2 text-left text-sm last:border-b-0 hover:bg-slate-50",
+                          isSelected ? "bg-blue-50 text-blue-700" : "text-slate-700",
+                        ].join(" ")}
+                        key={listing.id}
+                        onClick={() => {
+                          setReserveData({
+                            ...reserveData,
+                            listing_id: listing.id,
+                          })
+                          setListingSearch(label)
+                        }}
+                        type="button"
+                      >
+                        <span className="font-semibold">{listing.unit_id}</span>
+                        <span className="text-slate-500">
+                          {" "}
+                          · {listing.project_name} ·{" "}
+                          {formatMoney(listing.total_contract_price)}
+                        </span>
+                      </button>
+                    )
+                  })
+                ) : (
+                  <p className="px-3 py-3 text-sm text-slate-500">
+                    No available listing found.
+                  </p>
+                )}
               </div>
+            </div>
 
-              <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+            {selectedListing ? (
+              <div className="grid gap-4 rounded-xl border border-slate-200 bg-slate-50 p-4 md:grid-cols-4">
+                <MiniDetail label="Unit ID" value={selectedListing.unit_id} />
+                <MiniDetail label="Project" value={selectedListing.project_name} />
                 <MiniDetail
-                  label="Main Seller Rate"
-                  value={getSellerRateLabel(selectedMainSeller)}
+                  label="Area"
+                  value={`${formatNumber(selectedListing.lot_area_sqm)} sqm`}
                 />
                 <MiniDetail
-                  label="Selected Listing NSP"
-                  value={
-                    selectedListing
-                      ? formatMoney(selectedListing.net_selling_price)
-                      : "-"
-                  }
-                />
-                <MiniDetail
-                  label="Estimated Main Commission"
-                  value={
-                    selectedListing && selectedMainSeller
-                      ? formatMoney(
-                          Number(selectedListing.net_selling_price || 0) *
-                            (Number(selectedMainSeller.commission_rate || 0) / 100)
-                        )
-                      : "-"
-                  }
+                  label="TCP"
+                  value={formatMoney(selectedListing.total_contract_price)}
                 />
               </div>
-            </section>
-
-            {reserveData.sale_type === "distributed" ? (
-            <section className="rounded-xl border border-dashed border-slate-300 p-4">
-              <h3 className="mb-1 text-base font-bold text-slate-900">
-                Optional Agent / Override Commission
-              </h3>
-              <p className="mb-3 text-sm text-slate-500">
-                Use this only when another seller should receive a separate commission.
-              </p>
-
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <Select
-                  label="Agent / Override Seller"
-                  value={reserveData.override_seller_id}
-                  onChange={(e) =>
-                    setReserveData({
-                      ...reserveData,
-                      override_seller_id: e.target.value
-                        ? Number(e.target.value)
-                        : "",
-                    })
-                  }
-                >
-                  <option value="">No override commission</option>
-                  {sellers.map((seller) => (
-                    <option key={seller.id} value={seller.id}>
-                      {seller.full_name} - {formatText(seller.seller_role)}
-                    </option>
-                  ))}
-                </Select>
-
-                <Input
-                  label="Override Rate (%)"
-                  type="number"
-                  min={0}
-                  max={100}
-                  step="0.01"
-                  value={reserveData.override_rate}
-                  onChange={(e) =>
-                    setReserveData({
-                      ...reserveData,
-                      override_rate: e.target.value,
-                    })
-                  }
-                  placeholder="Required only if override seller is selected"
-                />
-
-                <Input
-                  label="Override Notes"
-                  value={reserveData.override_notes}
-                  onChange={(e) =>
-                    setReserveData({
-                      ...reserveData,
-                      override_notes: e.target.value,
-                    })
-                  }
-                  placeholder="Optional"
-                />
-
-                <MiniDetail
-                  label="Override Seller Default Rate"
-                  value={getSellerRateLabel(selectedOverrideSeller)}
-                />
-              </div>
-            </section>
             ) : null}
 
-            <section className="rounded-xl border border-dashed border-slate-300 p-4">
-              <h3 className="mb-1 text-base font-bold text-slate-900">
-                Optional Cash Kaliwaan
-              </h3>
-              <p className="mb-3 text-sm text-slate-500">
-                This is outside listing price and TCP. It is only displayed in the
-                commission tracker.
-              </p>
+            <div className="grid gap-4 md:grid-cols-2">
+              <Select
+                label="Assigned Seller / Unit Manager"
+                value={reserveData.seller_id}
+                onChange={(e) =>
+                  setReserveData({
+                    ...reserveData,
+                    seller_id: e.target.value ? Number(e.target.value) : "",
+                  })
+                }
+              >
+                <option value="">No seller selected</option>
+                {sellers.map((seller) => (
+                  <option key={seller.id} value={seller.id}>
+                    {seller.full_name} - {formatText(seller.seller_role)}
+                  </option>
+                ))}
+              </Select>
 
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-                <Input
-                  label="Cash Kaliwaan Amount"
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  value={reserveData.cash_kaliwaan_amount}
-                  onChange={(e) =>
-                    setReserveData({
-                      ...reserveData,
-                      cash_kaliwaan_amount: e.target.value,
-                    })
-                  }
-                  placeholder="Optional"
-                />
+              <Select
+                label="Mode of Payment"
+                value={reserveData.mode_of_payment}
+                onChange={(e) =>
+                  setReserveData({
+                    ...reserveData,
+                    mode_of_payment: e.target.value as "cash" | "installment",
+                  })
+                }
+              >
+                <option value="installment">Installment</option>
+                <option value="cash">Cash</option>
+              </Select>
 
-                <Input
-                  label="Cash Kaliwaan Date"
-                  type="date"
-                  value={reserveData.cash_kaliwaan_date}
-                  onChange={(e) =>
-                    setReserveData({
-                      ...reserveData,
-                      cash_kaliwaan_date: e.target.value,
-                    })
-                  }
-                />
+              <Input
+                label="Due Day"
+                type="number"
+                min={1}
+                max={31}
+                value={reserveData.due_day}
+                onChange={(e) =>
+                  setReserveData({
+                    ...reserveData,
+                    due_day: e.target.value ? Number(e.target.value) : "",
+                  })
+                }
+              />
 
-                <Input
-                  label="Cash Kaliwaan Notes"
-                  value={reserveData.cash_kaliwaan_notes}
-                  onChange={(e) =>
-                    setReserveData({
-                      ...reserveData,
-                      cash_kaliwaan_notes: e.target.value,
-                    })
-                  }
-                  placeholder="Optional"
-                />
+              <Select
+                label="Status"
+                value={reserveData.status}
+                onChange={(e) =>
+                  setReserveData({
+                    ...reserveData,
+                    status: e.target.value,
+                  })
+                }
+              >
+                <option value="reserved">Reserved</option>
+                <option value="active">Active</option>
+              </Select>
+
+              <Select
+                label="Sale Type"
+                value={reserveData.sale_type}
+                onChange={(e) => {
+                  const saleType = e.target.value as "distributed" | "direct"
+
+                  setReserveData({
+                    ...reserveData,
+                    sale_type: saleType,
+                    override_seller_id:
+                      saleType === "direct" ? "" : reserveData.override_seller_id,
+                    override_rate:
+                      saleType === "direct" ? "" : reserveData.override_rate,
+                    override_notes:
+                      saleType === "direct" ? "" : reserveData.override_notes,
+                  })
+                }}
+              >
+                <option value="distributed">Distributed</option>
+                <option value="direct">Direct</option>
+              </Select>
+            </div>
+
+            {selectedMainSeller ? (
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <h3 className="text-sm font-bold text-slate-900">
+                  Main Seller Commission
+                </h3>
+                <div className="mt-3 grid gap-4 md:grid-cols-3">
+                  <MiniDetail label="Seller" value={selectedMainSeller.full_name} />
+                  <MiniDetail
+                    label="Role"
+                    value={formatText(selectedMainSeller.seller_role)}
+                  />
+                  <MiniDetail
+                    label="Rate"
+                    value={
+                      selectedMainSeller.commission_rate
+                        ? `${formatNumber(selectedMainSeller.commission_rate)}%`
+                        : "-"
+                    }
+                  />
+                </div>
               </div>
-            </section>
+            ) : null}
+
+            {reserveData.sale_type === "distributed" ? (
+              <div className="rounded-xl border border-blue-100 bg-blue-50 p-4">
+                <h3 className="text-sm font-bold text-slate-900">
+                  Optional Agent / Override Commission
+                </h3>
+
+                <p className="mt-1 text-xs text-slate-600">
+                  Use this if another seller or agent should receive a separate
+                  commission for this unit.
+                </p>
+
+                <div className="mt-4 grid gap-4 md:grid-cols-2">
+                  <Select
+                    label="Optional Agent / Override Seller"
+                    value={reserveData.override_seller_id}
+                    onChange={(e) =>
+                      setReserveData({
+                        ...reserveData,
+                        override_seller_id: e.target.value
+                          ? Number(e.target.value)
+                          : "",
+                      })
+                    }
+                  >
+                    <option value="">No override seller</option>
+                    {sellers
+                      .filter((seller) => Number(seller.id) !== Number(reserveData.seller_id))
+                      .map((seller) => (
+                        <option key={seller.id} value={seller.id}>
+                          {seller.full_name} - {formatText(seller.seller_role)}
+                        </option>
+                      ))}
+                  </Select>
+
+                  <Input
+                    label="Override Rate (%)"
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={reserveData.override_rate}
+                    onChange={(e) =>
+                      setReserveData({
+                        ...reserveData,
+                        override_rate: e.target.value,
+                      })
+                    }
+                    placeholder="Example: 2"
+                  />
+
+                  <label className="block md:col-span-2">
+                    <span className="mb-1.5 block text-sm font-semibold text-slate-700">
+                      Override Notes
+                    </span>
+                    <textarea
+                      className="min-h-24 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                      value={reserveData.override_notes}
+                      onChange={(e) =>
+                        setReserveData({
+                          ...reserveData,
+                          override_notes: e.target.value,
+                        })
+                      }
+                      placeholder="Reason for override commission"
+                    />
+                  </label>
+                </div>
+
+                {selectedOverrideSeller ? (
+                  <div className="mt-4 rounded-lg border border-blue-100 bg-white p-3">
+                    <p className="text-xs font-semibold uppercase text-slate-400">
+                      Selected Override Seller
+                    </p>
+                    <p className="mt-1 text-sm font-bold text-slate-900">
+                      {selectedOverrideSeller.full_name}
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      {formatText(selectedOverrideSeller.seller_role)}
+                    </p>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            {reserveData.mode_of_payment === "cash" ? (
+              <div className="rounded-xl border border-amber-100 bg-amber-50 p-4">
+                <h3 className="text-sm font-bold text-slate-900">
+                  Cash Kaliwaan
+                </h3>
+
+                <div className="mt-4 grid gap-4 md:grid-cols-2">
+                  <Input
+                    label="Cash Kaliwaan Amount"
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={reserveData.cash_kaliwaan_amount}
+                    onChange={(e) =>
+                      setReserveData({
+                        ...reserveData,
+                        cash_kaliwaan_amount: e.target.value,
+                      })
+                    }
+                  />
+
+                  <Input
+                    label="Cash Kaliwaan Date"
+                    type="date"
+                    value={reserveData.cash_kaliwaan_date}
+                    onChange={(e) =>
+                      setReserveData({
+                        ...reserveData,
+                        cash_kaliwaan_date: e.target.value,
+                      })
+                    }
+                  />
+
+                  <label className="block md:col-span-2">
+                    <span className="mb-1.5 block text-sm font-semibold text-slate-700">
+                      Notes
+                    </span>
+                    <textarea
+                      className="min-h-24 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                      value={reserveData.cash_kaliwaan_notes}
+                      onChange={(e) =>
+                        setReserveData({
+                          ...reserveData,
+                          cash_kaliwaan_notes: e.target.value,
+                        })
+                      }
+                    />
+                  </label>
+                </div>
+              </div>
+            ) : null}
           </div>
         </Modal>
       ) : null}
@@ -1156,9 +1459,9 @@ const ClientProfile = () => {
             </div>
           }
         >
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div className="grid gap-4 md:grid-cols-2">
             <Select
-              label="Seller"
+              label="Assigned Seller / Unit Manager"
               value={editUnitData.seller_id}
               onChange={(e) =>
                 setEditUnitData({
@@ -1223,12 +1526,20 @@ const ClientProfile = () => {
             <Select
               label="Sale Type"
               value={editUnitData.sale_type}
-              onChange={(e) =>
+              onChange={(e) => {
+                const saleType = e.target.value as "distributed" | "direct"
+
                 setEditUnitData({
                   ...editUnitData,
-                  sale_type: e.target.value as "distributed" | "direct",
+                  sale_type: saleType,
+                  override_seller_id:
+                    saleType === "direct" ? "" : editUnitData.override_seller_id,
+                  override_rate:
+                    saleType === "direct" ? "" : editUnitData.override_rate,
+                  override_notes:
+                    saleType === "direct" ? "" : editUnitData.override_notes,
                 })
-              }
+              }}
             >
               <option value="distributed">Distributed</option>
               <option value="direct">Direct</option>
@@ -1245,13 +1556,285 @@ const ClientProfile = () => {
                   })
                 }
               />
-              Regenerate commission if seller changed
+              Regenerate commission
             </label>
           </div>
+
+          {editUnitData.sale_type === "distributed" ? (
+            <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-4">
+              <h3 className="text-sm font-bold text-slate-900">
+                Optional Agent / Override Commission
+              </h3>
+
+              <p className="mt-1 text-xs text-slate-600">
+                Use this only when the commission should be assigned to another seller or agent.
+              </p>
+
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                <Select
+                  label="Optional Agent / Override Seller"
+                  value={editUnitData.override_seller_id}
+                  onChange={(e) =>
+                    setEditUnitData({
+                      ...editUnitData,
+                      override_seller_id: e.target.value,
+                    })
+                  }
+                >
+                  <option value="">No override seller</option>
+                  {sellers
+                    .filter((seller) => String(seller.id) !== editUnitData.seller_id)
+                    .map((seller) => (
+                      <option key={seller.id} value={seller.id}>
+                        {seller.full_name} - {formatText(seller.seller_role)}
+                      </option>
+                    ))}
+                </Select>
+
+                <Input
+                  label="Override Rate (%)"
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={editUnitData.override_rate}
+                  onChange={(e) =>
+                    setEditUnitData({
+                      ...editUnitData,
+                      override_rate: e.target.value,
+                    })
+                  }
+                  placeholder="Example: 2"
+                />
+
+                <label className="block md:col-span-2">
+                  <span className="mb-1.5 block text-sm font-semibold text-slate-700">
+                    Override Notes
+                  </span>
+                  <textarea
+                    className="min-h-24 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    value={editUnitData.override_notes}
+                    onChange={(e) =>
+                      setEditUnitData({
+                        ...editUnitData,
+                        override_notes: e.target.value,
+                      })
+                    }
+                    placeholder="Reason for override commission"
+                  />
+                </label>
+              </div>
+            </div>
+          ) : null}
 
           <p className="mt-3 text-sm text-slate-500">
             Seller/rate cannot be changed if a commission release was already paid.
           </p>
+        </Modal>
+      ) : null}
+
+      {changeUnit ? (
+        <Modal
+          title={`Change Unit - ${changeUnit.unit_id}`}
+          onClose={() => setChangeUnit(null)}
+          size="lg"
+          footer={
+            <div className="flex justify-end gap-2">
+              <Button onClick={() => setChangeUnit(null)}>Cancel</Button>
+              <Button
+                disabled={changeUnitMutation.isPending || changeUnitData.new_listing_id === ""}
+                onClick={handleChangeUnit}
+                variant="primary"
+              >
+                {changeUnitMutation.isPending ? "Saving..." : "Change Unit"}
+              </Button>
+            </div>
+          }
+        >
+          <div className="space-y-4">
+            <Alert
+              variant="warning"
+              title="Use this when the same client changes to another available unit. Payments and document checklist stay on the account."
+            />
+
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <MiniDetail label="Current Unit" value={changeUnit.unit_id} />
+              <MiniDetail label="Current Project" value={changeUnit.project_name} />
+            </div>
+
+            <div className="space-y-2">
+              <Input
+                label="New Available Listing"
+                value={changeListingSearch}
+                onChange={(e) => {
+                  setChangeListingSearch(e.target.value)
+                  setChangeUnitData({
+                    ...changeUnitData,
+                    new_listing_id: "",
+                  })
+                }}
+                placeholder="Search unit, project, or lot type"
+              />
+
+              <div className="max-h-60 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+                {filteredChangeListings.length > 0 ? (
+                  filteredChangeListings.map((listing) => {
+                    const isSelected =
+                      Number(changeUnitData.new_listing_id) === Number(listing.id)
+                    const label = `${listing.unit_id} - ${listing.project_name} - ${formatMoney(listing.total_contract_price)}`
+
+                    return (
+                      <button
+                        className={[
+                          "block w-full border-b border-slate-100 px-3 py-2 text-left text-sm last:border-b-0 hover:bg-slate-50",
+                          isSelected ? "bg-blue-50 text-blue-700" : "text-slate-700",
+                        ].join(" ")}
+                        key={listing.id}
+                        onClick={() => {
+                          setChangeUnitData({
+                            ...changeUnitData,
+                            new_listing_id: listing.id,
+                          })
+                          setChangeListingSearch(label)
+                        }}
+                        type="button"
+                      >
+                        <span className="font-semibold">{listing.unit_id}</span>
+                        <span className="text-slate-500">
+                          {" "}
+                          · {listing.project_name} ·{" "}
+                          {formatMoney(listing.total_contract_price)}
+                        </span>
+                      </button>
+                    )
+                  })
+                ) : (
+                  <p className="px-3 py-3 text-sm text-slate-500">
+                    No available listing found.
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <Select
+                label="New Account Status"
+                value={changeUnitData.status}
+                onChange={(e) =>
+                  setChangeUnitData({
+                    ...changeUnitData,
+                    status: e.target.value,
+                  })
+                }
+              >
+                <option value="reserved">Reserved</option>
+                <option value="active">Active</option>
+              </Select>
+
+              <label className="flex items-center gap-2 rounded-xl border border-slate-200 p-3 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={changeUnitData.regenerate_commission}
+                  onChange={(e) =>
+                    setChangeUnitData({
+                      ...changeUnitData,
+                      regenerate_commission: e.target.checked,
+                    })
+                  }
+                />
+                Cancel old pending commissions and regenerate commission
+              </label>
+            </div>
+
+            <Input
+              label="Reason"
+              value={changeUnitData.reason}
+              onChange={(e) =>
+                setChangeUnitData({
+                  ...changeUnitData,
+                  reason: e.target.value,
+                })
+              }
+              placeholder="Example: Client requested transfer"
+            />
+          </div>
+        </Modal>
+      ) : null}
+
+      {cancelUnit ? (
+        <Modal
+          title={`Cancel Unit - ${cancelUnit.unit_id}`}
+          onClose={() => setCancelUnit(null)}
+          size="md"
+          footer={
+            <div className="flex justify-end gap-2">
+              <Button onClick={() => setCancelUnit(null)}>Close</Button>
+              <Button
+                disabled={cancelUnitMutation.isPending}
+                onClick={handleCancelUnit}
+                variant="danger"
+              >
+                {cancelUnitMutation.isPending ? "Cancelling..." : "Cancel Unit"}
+              </Button>
+            </div>
+          }
+        >
+          <div className="space-y-4">
+            <Alert
+              variant="warning"
+              title="Cancelling keeps payment history but cancels the active account and pending commissions."
+            />
+
+            <label className="flex items-center gap-2 rounded-xl border border-slate-200 p-3 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={cancelUnitData.release_listing}
+                onChange={(e) =>
+                  setCancelUnitData({
+                    ...cancelUnitData,
+                    release_listing: e.target.checked,
+                  })
+                }
+              />
+              Return listing to available. Uncheck to keep it on hold.
+            </label>
+
+            <Input
+              label="Reason"
+              value={cancelUnitData.reason}
+              onChange={(e) =>
+                setCancelUnitData({
+                  ...cancelUnitData,
+                  reason: e.target.value,
+                })
+              }
+              placeholder="Example: Client cancelled reservation"
+            />
+          </div>
+        </Modal>
+      ) : null}
+
+      {deleteUnit ? (
+        <Modal
+          title={`Delete Unit - ${deleteUnit.unit_id}`}
+          onClose={() => setDeleteUnit(null)}
+          size="md"
+          footer={
+            <div className="flex justify-end gap-2">
+              <Button onClick={() => setDeleteUnit(null)}>Close</Button>
+              <Button
+                disabled={deleteUnitMutation.isPending}
+                onClick={handleDeleteUnit}
+                variant="danger"
+              >
+                {deleteUnitMutation.isPending ? "Deleting..." : "Delete Unit"}
+              </Button>
+            </div>
+          }
+        >
+          <Alert
+            variant="error"
+            title="Only wrong inputs with no payments, no commissions, and no submitted documents can be deleted. Otherwise, cancel it instead."
+          />
         </Modal>
       ) : null}
 

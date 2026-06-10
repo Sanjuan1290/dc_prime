@@ -98,6 +98,7 @@ const recomputeClientUnitBalance = async (connectionOrDb, clientUnitId) => {
     SELECT
       cu.id,
       cu.status,
+      cu.listing_id,
       l.reservation_fee,
       COALESCE(
         NULLIF(l.total_contract_price, 0),
@@ -121,7 +122,10 @@ const recomputeClientUnitBalance = async (connectionOrDb, clientUnitId) => {
 
   const [paymentRows] = await connectionOrDb.query(
     `
-    SELECT COALESCE(SUM(amount), 0) AS paid_amount
+    SELECT
+      COALESCE(SUM(amount), 0) AS paid_amount,
+      COALESCE(SUM(CASE WHEN payment_type = 'reservation' THEN amount ELSE 0 END), 0) AS reservation_paid,
+      COALESCE(SUM(CASE WHEN payment_type IN ('downpayment', 'monthly', 'legal_misc', 'full_payment', 'other') THEN amount ELSE 0 END), 0) AS active_payment_paid
     FROM payments
     WHERE client_unit_id = ?
       AND status = 'verified'
@@ -131,25 +135,25 @@ const recomputeClientUnitBalance = async (connectionOrDb, clientUnitId) => {
 
   const totalContractPrice = normalizeMoney(clientUnit.total_contract_price)
   const paidAmount = normalizeMoney(paymentRows[0]?.paid_amount)
+  const reservationPaid = normalizeMoney(paymentRows[0]?.reservation_paid)
+  const activePaymentPaid = normalizeMoney(paymentRows[0]?.active_payment_paid)
+  const reservationFee = normalizeMoney(clientUnit.reservation_fee)
   const balance = Math.max(normalizeMoney(totalContractPrice - paidAmount), 0)
 
   let nextStatus = clientUnit.status
+  let nextListingStatus = null
 
-  if (
-    clientUnit.status === 'reserved' &&
-    totalContractPrice > 0 &&
-    paidAmount >= normalizeMoney(clientUnit.reservation_fee) &&
-    paidAmount < totalContractPrice
-  ) {
-    nextStatus = 'active'
-  }
-
-  if (
-    totalContractPrice > 0 &&
-    paidAmount >= totalContractPrice &&
-    !['cancelled', 'closed'].includes(clientUnit.status)
-  ) {
-    nextStatus = 'fully_paid'
+  if (!['cancelled', 'closed'].includes(clientUnit.status)) {
+    if (totalContractPrice > 0 && paidAmount >= totalContractPrice) {
+      nextStatus = 'fully_paid'
+      nextListingStatus = 'sold'
+    } else if (activePaymentPaid > 0) {
+      nextStatus = 'active'
+      nextListingStatus = 'active'
+    } else if (reservationPaid > 0 || paidAmount >= reservationFee) {
+      nextStatus = 'reserved'
+      nextListingStatus = 'reserved'
+    }
   }
 
   await connectionOrDb.query(
@@ -163,13 +167,27 @@ const recomputeClientUnitBalance = async (connectionOrDb, clientUnitId) => {
     [balance, nextStatus, clientUnitId]
   )
 
+  if (nextListingStatus) {
+    await connectionOrDb.query(
+      `
+      UPDATE listings
+      SET status = ?
+      WHERE id = ?
+      `,
+      [nextListingStatus, clientUnit.listing_id]
+    )
+  }
+
   await refreshCommissionEligibility(clientUnitId, connectionOrDb)
 
   return {
     totalContractPrice,
     paidAmount,
+    reservationPaid,
+    activePaymentPaid,
     balance,
     status: nextStatus,
+    listingStatus: nextListingStatus,
   }
 }
 

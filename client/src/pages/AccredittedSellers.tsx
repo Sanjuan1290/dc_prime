@@ -20,7 +20,7 @@ import { paginateRows } from "../utils/pagination";
 
 type SellerStatus = "active" | "inactive" | string;
 
-type SellerRole = "broker_network_manager" | "broker" | "agent" | string;
+type SellerRole = "broker_network_manager" | "broker" | "manager" | "agent" | string;
 
 type ReportsUnderMode = "none" | "seller" | "custom";
 
@@ -77,7 +77,7 @@ const emptyFormData: SellerFormData = {
   commission_rate: "",
 };
 
-const sellerRoles = ["broker_network_manager", "broker", "agent"];
+const sellerRoles = ["broker_network_manager", "broker", "manager", "agent"];
 const sellerStatuses = ["active", "inactive"];
 
 const fetchSellers = async (): Promise<AccreditedSeller[]> => {
