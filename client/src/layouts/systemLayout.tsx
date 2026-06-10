@@ -1,5 +1,11 @@
 import { useMemo, useState } from "react"
-import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom"
+import {
+  Navigate,
+  NavLink,
+  Outlet,
+  useLocation,
+  useNavigate,
+} from "react-router-dom"
 import type { IconType } from "react-icons"
 import {
   FiActivity,
@@ -14,6 +20,7 @@ import {
   FiMap,
   FiMenu,
   FiSettings,
+  FiShield,
   FiUserCheck,
   FiUsers,
   FiX,
@@ -22,17 +29,7 @@ import { useQueryClient } from "@tanstack/react-query"
 import Button from "../components/ui/Button"
 import { API_URL } from "../utils/api"
 import useCurrentUser from "../utils/useCurrentUser"
-
-const getRoleLabel = (role?: string) => {
-  if (!role) return "Authorized user"
-
-  return role
-    .replaceAll("_", " ")
-    .split(" ")
-    .filter(Boolean)
-    .map((word) => word[0]?.toUpperCase() + word.slice(1))
-    .join(" ")
-}
+import { formatText } from "../utils/formatters"
 
 type CurrentUserResponse = {
   user?: {
@@ -48,137 +45,181 @@ type NavItem = {
   label: string
   to: string
   icon: IconType
-  tone: NavTone
 }
 
 type NavGroup = {
   title: string
-  description: string
   tone: NavTone
   items: NavItem[]
-}
-
-const toneClasses: Record<
-  NavTone,
-  {
-    active: string
-    icon: string
-    pill: string
-    strip: string
-  }
-> = {
-  blue: {
-    active: "border-blue-200 bg-blue-50 text-blue-700 shadow-blue-100",
-    icon: "bg-blue-100 text-blue-700",
-    pill: "bg-blue-100 text-blue-700",
-    strip: "bg-blue-500",
-  },
-  emerald: {
-    active: "border-emerald-200 bg-emerald-50 text-emerald-700 shadow-emerald-100",
-    icon: "bg-emerald-100 text-emerald-700",
-    pill: "bg-emerald-100 text-emerald-700",
-    strip: "bg-emerald-500",
-  },
-  amber: {
-    active: "border-amber-200 bg-amber-50 text-amber-700 shadow-amber-100",
-    icon: "bg-amber-100 text-amber-700",
-    pill: "bg-amber-100 text-amber-700",
-    strip: "bg-amber-500",
-  },
-  purple: {
-    active: "border-purple-200 bg-purple-50 text-purple-700 shadow-purple-100",
-    icon: "bg-purple-100 text-purple-700",
-    pill: "bg-purple-100 text-purple-700",
-    strip: "bg-purple-500",
-  },
-  rose: {
-    active: "border-rose-200 bg-rose-50 text-rose-700 shadow-rose-100",
-    icon: "bg-rose-100 text-rose-700",
-    pill: "bg-rose-100 text-rose-700",
-    strip: "bg-rose-500",
-  },
-  slate: {
-    active: "border-slate-200 bg-slate-100 text-slate-900 shadow-slate-100",
-    icon: "bg-slate-200 text-slate-700",
-    pill: "bg-slate-200 text-slate-700",
-    strip: "bg-slate-500",
-  },
 }
 
 const navGroups: NavGroup[] = [
   {
     title: "Overview",
-    description: "Main summary",
     tone: "blue",
-    items: [{ label: "Dashboard", to: "/dashboard", icon: FiHome, tone: "blue" }],
+    items: [{ label: "Dashboard", to: "/dashboard", icon: FiHome }],
   },
   {
     title: "Management",
-    description: "Projects, units, and buyers",
     tone: "emerald",
     items: [
-      { label: "Projects", to: "/projects", icon: FiMap, tone: "emerald" },
-      { label: "Listings", to: "/listings", icon: FiGrid, tone: "emerald" },
-      { label: "Clients", to: "/clients", icon: FiUsers, tone: "emerald" },
+      { label: "Projects", to: "/projects", icon: FiMap },
+      { label: "Listings", to: "/listings", icon: FiGrid },
+      { label: "Clients", to: "/clients", icon: FiUsers },
       {
         label: "Accredited Sellers",
         to: "/accreditted_sellers",
         icon: FiUserCheck,
-        tone: "emerald",
       },
     ],
   },
   {
     title: "Finance",
-    description: "Payments and payouts",
     tone: "amber",
     items: [
-      { label: "Payments", to: "/payments", icon: FiCreditCard, tone: "amber" },
-      { label: "Commissions", to: "/commissions", icon: FiDollarSign, tone: "amber" },
-      { label: "Cash Advances", to: "/cash-advances", icon: FiDollarSign, tone: "amber" },
+      { label: "Payments", to: "/payments", icon: FiCreditCard },
+      { label: "Commissions", to: "/commissions", icon: FiDollarSign },
+      { label: "Cash Advances", to: "/cash-advances", icon: FiActivity },
     ],
   },
   {
     title: "Compliance",
-    description: "Documents and audit trail",
     tone: "purple",
     items: [
-      { label: "Documents", to: "/documents", icon: FiFileText, tone: "purple" },
-      { label: "Audit Logs", to: "/audit-logs", icon: FiActivity, tone: "purple" },
+      { label: "Documents", to: "/documents", icon: FiFileText },
+      { label: "Audit Logs", to: "/audit-logs", icon: FiShield },
     ],
   },
   {
     title: "Records",
-    description: "Reports and staff records",
     tone: "rose",
     items: [
-      { label: "Reports", to: "/reports", icon: FiBarChart2, tone: "rose" },
-      { label: "Employees", to: "/employees", icon: FiUsers, tone: "rose" },
-      { label: "Attendance", to: "/attendance", icon: FiClock, tone: "rose" },
+      { label: "Reports", to: "/reports", icon: FiBarChart2 },
+      { label: "Employees", to: "/employees", icon: FiUsers },
+      { label: "Attendance", to: "/attendance", icon: FiClock },
     ],
   },
   {
     title: "Administration",
-    description: "System controls",
     tone: "slate",
-    items: [{ label: "Settings", to: "/settings", icon: FiSettings, tone: "slate" }],
+    items: [{ label: "Settings", to: "/settings", icon: FiSettings }],
   },
 ]
 
+const toneClasses: Record<
+  NavTone,
+  {
+    active: string
+    activeIcon: string
+    dot: string
+    group: string
+    sectionCard: string
+  }
+> = {
+  blue: {
+    active: "bg-blue-50 text-blue-700 ring-1 ring-blue-100",
+    activeIcon: "bg-blue-600 text-white",
+    dot: "bg-blue-600",
+    group: "text-blue-700",
+    sectionCard: "border-blue-100 bg-blue-50 text-blue-700",
+  },
+  emerald: {
+    active: "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100",
+    activeIcon: "bg-emerald-600 text-white",
+    dot: "bg-emerald-600",
+    group: "text-emerald-700",
+    sectionCard: "border-emerald-100 bg-emerald-50 text-emerald-700",
+  },
+  amber: {
+    active: "bg-amber-50 text-amber-700 ring-1 ring-amber-100",
+    activeIcon: "bg-amber-500 text-white",
+    dot: "bg-amber-500",
+    group: "text-amber-700",
+    sectionCard: "border-amber-100 bg-amber-50 text-amber-700",
+  },
+  purple: {
+    active: "bg-purple-50 text-purple-700 ring-1 ring-purple-100",
+    activeIcon: "bg-purple-600 text-white",
+    dot: "bg-purple-600",
+    group: "text-purple-700",
+    sectionCard: "border-purple-100 bg-purple-50 text-purple-700",
+  },
+  rose: {
+    active: "bg-rose-50 text-rose-700 ring-1 ring-rose-100",
+    activeIcon: "bg-rose-600 text-white",
+    dot: "bg-rose-600",
+    group: "text-rose-700",
+    sectionCard: "border-rose-100 bg-rose-50 text-rose-700",
+  },
+  slate: {
+    active: "bg-slate-100 text-slate-900 ring-1 ring-slate-200",
+    activeIcon: "bg-slate-900 text-white",
+    dot: "bg-slate-900",
+    group: "text-slate-700",
+    sectionCard: "border-slate-200 bg-slate-100 text-slate-800",
+  },
+}
+
+const getActiveItem = (pathname: string) => {
+  for (const group of navGroups) {
+    const item = group.items.find((navItem) => {
+      if (navItem.to === "/dashboard") {
+        return pathname === "/dashboard"
+      }
+
+      return pathname === navItem.to || pathname.startsWith(`${navItem.to}/`)
+    })
+
+    if (item) {
+      return {
+        group,
+        item,
+      }
+    }
+  }
+
+  return {
+    group: navGroups[0],
+    item: navGroups[0].items[0],
+  }
+}
+
 const SystemLayout = () => {
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const navigate = useNavigate()
   const location = useLocation()
   const queryClient = useQueryClient()
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
 
-  const { data } = useCurrentUser()
-  const currentUser = (data as CurrentUserResponse | null)?.user
+  const {
+    data: currentUserData,
+    isLoading: isCurrentUserLoading,
+  } = useCurrentUser()
 
-  const activeItem = useMemo(() => {
-    return navGroups
-      .flatMap((group) => group.items.map((item) => ({ ...item, groupTitle: group.title })))
-      .find((item) => location.pathname === item.to || location.pathname.startsWith(`${item.to}/`))
-  }, [location.pathname])
+  const currentUser = (currentUserData as CurrentUserResponse | null)?.user
+
+  const activeNav = useMemo(
+    () => getActiveItem(location.pathname),
+    [location.pathname]
+  )
+
+  if (isCurrentUserLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
+        <div className="rounded-2xl border border-slate-200 bg-white px-6 py-5 text-center shadow-sm">
+          <p className="text-sm font-semibold text-slate-900">
+            Checking session...
+          </p>
+          <p className="mt-1 text-xs text-slate-500">
+            Please wait while we verify your login.
+          </p>
+        </div>
+      </div>
+    )
+  }
+
+  if (!currentUser) {
+    return <Navigate to="/" replace state={{ from: location.pathname }} />
+  }
 
   const handleLogout = async () => {
     await fetch(`${API_URL}/logout`, {
@@ -187,94 +228,61 @@ const SystemLayout = () => {
     })
 
     queryClient.clear()
-    navigate("/")
+    navigate("/", { replace: true })
   }
 
-  const sidebar = (
-    <aside className="flex h-full w-72 flex-col border-r border-slate-200 bg-white shadow-sm lg:w-64">
-      <div className="border-b border-slate-200 bg-gradient-to-br from-blue-50 via-white to-emerald-50 px-5 py-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <img
-              src="/logo2.png"
-              alt="D&C Prime logo"
-              className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white bg-white object-cover shadow-sm"
-            />
+  const renderNav = () => (
+    <nav className="space-y-5">
+      {navGroups.map((group) => {
+        const tone = toneClasses[group.tone]
 
-            <div>
-              <p className="text-sm font-bold text-slate-900">D&C Prime</p>
-              <p className="text-xs text-slate-500">Realty management</p>
-            </div>
-          </div>
-
-          <Button
-            className="lg:hidden"
-            icon={<FiX />}
-            onClick={() => setIsSidebarOpen(false)}
-            variant="ghost"
-          />
-        </div>
-
-        <div className="mt-4 rounded-2xl border border-white/80 bg-white/80 p-3 shadow-sm">
-          <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-            Current section
-          </p>
-          <div className="mt-2 flex items-center gap-2">
-            {activeItem ? (
-              <span className={`h-2.5 w-2.5 rounded-full ${toneClasses[activeItem.tone].strip}`} />
-            ) : null}
-            <p className="truncate text-sm font-bold text-slate-900">
-              {activeItem?.label || "Dashboard"}
+        return (
+          <div key={group.title}>
+            <p
+              className={`mb-2 px-3 text-[11px] font-bold uppercase tracking-[0.18em] ${tone.group}`}
+            >
+              {group.title}
             </p>
-          </div>
-        </div>
-      </div>
-
-      <nav className="flex-1 overflow-y-auto p-3">
-        {navGroups.map((group) => (
-          <div key={group.title} className="mb-4">
-            <div className="mb-2 flex items-center justify-between gap-2 px-3">
-              <div className="min-w-0">
-                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                  {group.title}
-                </p>
-                <p className="truncate text-[11px] text-slate-400">{group.description}</p>
-              </div>
-              <span className={`h-2 w-2 shrink-0 rounded-full ${toneClasses[group.tone].strip}`} />
-            </div>
 
             <div className="space-y-1">
               {group.items.map((item) => {
                 const Icon = item.icon
-                const tone = toneClasses[item.tone]
 
                 return (
                   <NavLink
+                    key={item.to}
+                    to={item.to}
+                    onClick={() => setIsSidebarOpen(false)}
                     className={({ isActive }) =>
                       [
-                        "group relative flex items-center gap-3 rounded-xl border px-2.5 py-2.5 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-blue-100",
+                        "group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition",
                         isActive
-                          ? `${tone.active} shadow-sm`
-                          : "border-transparent text-slate-600 hover:border-slate-200 hover:bg-slate-50 hover:text-slate-900",
+                          ? tone.active
+                          : "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
                       ].join(" ")
                     }
-                    key={item.to}
-                    onClick={() => setIsSidebarOpen(false)}
-                    to={item.to}
                   >
                     {({ isActive }) => (
                       <>
                         <span
                           className={[
                             "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition",
-                            isActive ? tone.icon : "bg-slate-100 text-slate-500 group-hover:bg-white",
+                            isActive
+                              ? tone.activeIcon
+                              : "bg-slate-100 text-slate-500 group-hover:bg-white group-hover:text-slate-700",
                           ].join(" ")}
                         >
                           <Icon className="h-4 w-4" />
                         </span>
-                        <span className="truncate">{item.label}</span>
+
+                        <span className="min-w-0 flex-1 truncate">
+                          {item.label}
+                        </span>
+
                         {isActive ? (
-                          <span className={`ml-auto h-2 w-2 shrink-0 rounded-full ${tone.strip}`} />
+                          <span
+                            className={`h-2 w-2 rounded-full ${tone.dot}`}
+                          />
                         ) : null}
                       </>
                     )}
@@ -283,97 +291,135 @@ const SystemLayout = () => {
               })}
             </div>
           </div>
-        ))}
-      </nav>
-
-      <div className="border-t border-slate-200 bg-slate-50/70 p-4">
-        <div className="mb-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-slate-900">
-                {currentUser?.full_name || "Signed in user"}
-              </p>
-
-              <p className="truncate text-xs text-slate-500">
-                {currentUser?.email || "Secure session"}
-              </p>
-            </div>
-            <span className="shrink-0 rounded-full bg-blue-50 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-blue-700">
-              {getRoleLabel(currentUser?.role)}
-            </span>
-          </div>
-        </div>
-
-        <Button
-          className="w-full"
-          icon={<FiLogOut />}
-          onClick={handleLogout}
-          variant="secondary"
-        >
-          Logout
-        </Button>
-      </div>
-    </aside>
+        )
+      })}
+    </nav>
   )
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
-      <div className="hidden lg:fixed lg:inset-y-0 lg:left-0 lg:block">
-        {sidebar}
-      </div>
-
-      {isSidebarOpen ? (
-        <div className="fixed inset-0 z-50 lg:hidden">
+    <div className="min-h-screen bg-slate-50">
+      <div className="lg:hidden">
+        {isSidebarOpen ? (
           <button
-            aria-label="Close sidebar"
-            className="absolute inset-0 bg-slate-950/50"
+            aria-label="Close sidebar overlay"
+            className="fixed inset-0 z-40 bg-slate-950/40"
             onClick={() => setIsSidebarOpen(false)}
             type="button"
           />
+        ) : null}
 
-          <div className="relative h-full">{sidebar}</div>
-        </div>
-      ) : null}
-
-      <div className="lg:pl-64">
-        <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/90 px-4 py-3 backdrop-blur sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between gap-3">
-            <Button
-              className="lg:hidden"
-              icon={<FiMenu />}
-              onClick={() => setIsSidebarOpen(true)}
-              variant="secondary"
-            >
-              Menu
-            </Button>
-
-            <div className="hidden min-w-0 lg:block">
-              <div className="flex items-center gap-2">
-                {activeItem ? (
-                  <span className={`h-2.5 w-2.5 rounded-full ${toneClasses[activeItem.tone].strip}`} />
-                ) : null}
-                <p className="truncate text-sm font-semibold text-slate-900">
-                  {activeItem?.label || "Internal admin system"}
-                </p>
-              </div>
-              <p className="mt-0.5 text-xs text-slate-500">
-                {activeItem?.groupTitle || "Connected to live MySQL data"}
+        <aside
+          className={[
+            "fixed inset-y-0 left-0 z-50 flex w-80 max-w-[85vw] flex-col border-r border-slate-200 bg-white transition-transform duration-200",
+            isSidebarOpen ? "translate-x-0" : "-translate-x-full",
+          ].join(" ")}
+        >
+          <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+            <div>
+              <p className="text-sm font-bold text-slate-900">
+                D&C Prime Realty
               </p>
+              <p className="text-xs text-slate-500">Management System</p>
             </div>
 
-            <div className="min-w-0 text-right">
-              <p className="truncate text-sm font-semibold text-slate-900">
-                {currentUser?.full_name || "D&C Prime"}
-              </p>
+            <button
+              className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+              onClick={() => setIsSidebarOpen(false)}
+              type="button"
+            >
+              <FiX className="h-5 w-5" />
+            </button>
+          </div>
 
-              <p className="truncate text-xs text-slate-500">
-                {getRoleLabel(currentUser?.role)}
+          <div className="flex-1 overflow-y-auto px-4 py-5">{renderNav()}</div>
+        </aside>
+      </div>
+
+      <aside className="fixed inset-y-0 left-0 hidden w-72 flex-col border-r border-slate-200 bg-white lg:flex">
+        <div className="border-b border-slate-200 px-5 py-5">
+          <div className="flex items-center gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-slate-900 text-sm font-bold text-white">
+              DC
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-bold text-slate-900">
+                D&C Prime Realty
               </p>
+              <p className="truncate text-xs text-slate-500">
+                Management System
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-4 py-5">{renderNav()}</div>
+
+        <div className="border-t border-slate-200 p-4">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+            <p className="truncate text-sm font-bold text-slate-900">
+              {currentUser.full_name || "User"}
+            </p>
+            <p className="mt-0.5 truncate text-xs text-slate-500">
+              {currentUser.email || "-"}
+            </p>
+            <span className="mt-2 inline-flex rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700">
+              {formatText(currentUser.role)}
+            </span>
+          </div>
+
+          <Button
+            className="mt-3 w-full justify-center"
+            onClick={handleLogout}
+            variant="secondary"
+          >
+            <FiLogOut className="mr-2" />
+            Logout
+          </Button>
+        </div>
+      </aside>
+
+      <div className="lg:pl-72">
+        <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur sm:px-6">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <button
+                className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900 lg:hidden"
+                onClick={() => setIsSidebarOpen(true)}
+                type="button"
+              >
+                <FiMenu className="h-5 w-5" />
+              </button>
+
+              <div className="min-w-0">
+                <div
+                  className={[
+                    "inline-flex rounded-full border px-2.5 py-1 text-xs font-bold",
+                    toneClasses[activeNav.group.tone].sectionCard,
+                  ].join(" ")}
+                >
+                  {activeNav.group.title}
+                </div>
+
+                <h1 className="mt-1 truncate text-lg font-bold text-slate-900 sm:text-xl">
+                  {activeNav.item.label}
+                </h1>
+              </div>
+            </div>
+
+            <div className="hidden items-center gap-3 sm:flex">
+              <div className="text-right">
+                <p className="text-sm font-semibold text-slate-900">
+                  {currentUser.full_name || "User"}
+                </p>
+                <p className="text-xs text-slate-500">
+                  {formatText(currentUser.role)}
+                </p>
+              </div>
             </div>
           </div>
         </header>
 
-        <main className="px-4 py-6 sm:px-6 lg:px-8">
+        <main className="px-4 py-6 sm:px-6">
           <Outlet />
         </main>
       </div>
