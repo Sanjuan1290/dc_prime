@@ -1,27 +1,35 @@
-import { useMemo, useState } from "react"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts"
-import { FiEdit2, FiEye, FiGrid, FiPlus, FiSearch } from "react-icons/fi"
-import Alert from "../components/ui/Alert"
-import Button from "../components/ui/Button"
-import EmptyState from "../components/ui/EmptyState"
-import Input from "../components/ui/Input"
-import LoadingState from "../components/ui/LoadingState"
-import Modal from "../components/ui/Modal"
-import PageHeader from "../components/ui/PageHeader"
-import Pagination from "../components/ui/Pagination"
-import Select from "../components/ui/Select"
-import StatCard from "../components/ui/StatCard"
-import StatusBadge from "../components/ui/StatusBadge"
-import TableContainer from "../components/ui/TableContainer"
-import { API_URL, getErrorMessage } from "../utils/api"
+import { useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
+import {
+  FiEdit2,
+  FiEye,
+  FiGrid,
+  FiPlus,
+  FiSearch,
+  FiTrash2,
+} from "react-icons/fi";
+import Alert from "../components/ui/Alert";
+import Button from "../components/ui/Button";
+import ConfirmBox from "../components/ui/ConfirmBox";
+import EmptyState from "../components/ui/EmptyState";
+import Input from "../components/ui/Input";
+import LoadingState from "../components/ui/LoadingState";
+import Modal from "../components/ui/Modal";
+import PageHeader from "../components/ui/PageHeader";
+import Pagination from "../components/ui/Pagination";
+import Select from "../components/ui/Select";
+import StatCard from "../components/ui/StatCard";
+import StatusBadge from "../components/ui/StatusBadge";
+import TableContainer from "../components/ui/TableContainer";
+import { API_URL, getErrorMessage } from "../utils/api";
 import {
   formatDate,
   formatMoney,
   formatNumber,
   formatText,
-} from "../utils/formatters"
-import { paginateRows } from "../utils/pagination"
+} from "../utils/formatters";
+import { paginateRows } from "../utils/pagination";
 
 type ListingStatus =
   | "available"
@@ -29,117 +37,117 @@ type ListingStatus =
   | "hold"
   | "sold"
   | "inactive"
-  | string
+  | string;
 
 type Listing = {
-  id: number
-  project_id: number
-  project_name: string
-  project_location?: string | null
-  project_administrator?: string | null
-  cadastral_lot_no: string | null
-  unit_id: string
-  lot_type: string | null
-  reservation_fee: number | string
-  price_per_sqm: number | string
-  lot_area_sqm: number | string
-  legal_misc_rate: number | string
-  net_selling_price: number | string
-  legal_misc_fee: number | string
-  total_contract_price: number | string
-  thirty_percent?: number | string
-  spot_dp_discount?: number | string
-  spot_dp?: number | string
-  three_months?: number | string
-  seventy_five_percent?: number | string
-  twelve_months?: number | string
-  eighteen_months?: number | string
-  twenty_months?: number | string
-  status: ListingStatus
-  created_at: string
-  updated_at: string
-}
+  id: number;
+  project_id: number;
+  project_name: string;
+  project_location?: string | null;
+  project_administrator?: string | null;
+  cadastral_lot_no: string | null;
+  unit_id: string;
+  lot_type: string | null;
+  reservation_fee: number | string;
+  price_per_sqm: number | string;
+  lot_area_sqm: number | string;
+  legal_misc_rate: number | string;
+  net_selling_price: number | string;
+  legal_misc_fee: number | string;
+  total_contract_price: number | string;
+  thirty_percent?: number | string;
+  spot_dp_discount?: number | string;
+  spot_dp?: number | string;
+  three_months?: number | string;
+  seventy_five_percent?: number | string;
+  twelve_months?: number | string;
+  eighteen_months?: number | string;
+  twenty_months?: number | string;
+  status: ListingStatus;
+  created_at: string;
+  updated_at: string;
+};
 
 type Project = {
-  id: number
-  name: string
-}
+  id: number;
+  name: string;
+};
 
 type ClientUnitFullDetails = {
-  id: number
-  client_id: number
-  listing_id: number
-  assigned_user_id: number | null
-  assigned_user_name: string | null
-  status: string
-  balance: number | string
-  due_day: number | null
-  created_at: string
-  updated_at: string
-  client_name: string
-  spouse_co_owner_name: string | null
-  client_email: string | null
-  client_contact_no: string | null
-  client_address: string | null
-  client_region: string | null
-}
+  id: number;
+  client_id: number;
+  listing_id: number;
+  assigned_user_id: number | null;
+  assigned_user_name: string | null;
+  status: string;
+  balance: number | string;
+  due_day: number | null;
+  created_at: string;
+  updated_at: string;
+  client_name: string;
+  spouse_co_owner_name: string | null;
+  client_email: string | null;
+  client_contact_no: string | null;
+  client_address: string | null;
+  client_region: string | null;
+};
 
 type PaymentSummary = {
-  total_paid: number | string
-  payment_count: number
-  latest_payment_date: string | null
-  latest_payment_amount: number | string
-  payment_status: string
-  balance: number | string
-}
+  total_paid: number | string;
+  payment_count: number;
+  latest_payment_date: string | null;
+  latest_payment_amount: number | string;
+  payment_status: string;
+  balance: number | string;
+};
 
 type CommissionSummary = {
-  seller_name: string | null
-  seller_role: string | null
-  reports_under: string | null
-  rate: number | string
-  amount: number | string
-  released_amount: number | string
-  remaining_amount: number | string
-  status: string | null
-}
+  seller_name: string | null;
+  seller_role: string | null;
+  reports_under: string | null;
+  rate: number | string;
+  amount: number | string;
+  released_amount: number | string;
+  remaining_amount: number | string;
+  status: string | null;
+};
 
 type DocumentSummary = {
-  total_documents: number
-  required_documents: number
-  submitted_documents: number
-  approved_documents: number
-  missing_required_documents: number
-  document_status: string
-}
+  total_documents: number;
+  required_documents: number;
+  submitted_documents: number;
+  approved_documents: number;
+  missing_required_documents: number;
+  document_status: string;
+};
 
 type ListingFullDetails = {
-  listing: Listing
-  clientUnit: ClientUnitFullDetails | null
-  paymentSummary: PaymentSummary
-  commissionSummary: CommissionSummary
-  documentSummary: DocumentSummary
-}
+  listing: Listing;
+  clientUnit: ClientUnitFullDetails | null;
+  paymentSummary: PaymentSummary;
+  commissionSummary: CommissionSummary;
+  documentSummary: DocumentSummary;
+};
 
 type ListingFormData = {
-  project_id: number
-  cadastral_lot_no: string
-  unit_id: string
-  lot_type: string
-  reservation_fee: number
-  price_per_sqm: number
-  lot_area_sqm: number
-  legal_misc_rate: number
-  status: ListingStatus
-}
+  project_id: number;
+  cadastral_lot_no: string;
+  unit_id: string;
+  lot_type: string;
+  reservation_fee: number;
+  price_per_sqm: number;
+  lot_area_sqm: number;
+  legal_misc_rate: number;
+  status: ListingStatus;
+};
 
 type ListingsResponse = {
-  listings: Listing[]
-}
+  listings: Listing[];
+};
 
 type ProjectsResponse = {
-  projects: Project[]
-}
+  projects: Project[];
+};
 
 const defaultListingFormData: ListingFormData = {
   project_id: 0,
@@ -151,7 +159,7 @@ const defaultListingFormData: ListingFormData = {
   lot_area_sqm: 0,
   legal_misc_rate: 10,
   status: "available",
-}
+};
 
 const statusFilters = [
   { label: "All", value: "all" },
@@ -160,49 +168,52 @@ const statusFilters = [
   { label: "Hold", value: "hold" },
   { label: "Sold", value: "sold" },
   { label: "Inactive", value: "inactive" },
-]
+];
 
-const normalLotTypes = ["inner", "corner", "end"]
+const normalLotTypes = ["inner", "corner", "end"];
 
-const chartColors = ["#2563eb", "#f59e0b", "#8b5cf6", "#10b981", "#ef4444"]
+const chartColors = ["#2563eb", "#f59e0b", "#8b5cf6", "#10b981", "#ef4444"];
 
 const fetchListings = async () => {
   const response = await fetch(`${API_URL}/listings`, {
     credentials: "include",
-  })
+  });
 
   if (!response.ok) {
-    throw new Error(await getErrorMessage(response))
+    throw new Error(await getErrorMessage(response));
   }
 
-  const data = (await response.json()) as ListingsResponse
-  return data.listings
-}
+  const data = (await response.json()) as ListingsResponse;
+  return data.listings;
+};
 
 const fetchProjects = async () => {
   const response = await fetch(`${API_URL}/projects`, {
     credentials: "include",
-  })
+  });
 
   if (!response.ok) {
-    throw new Error(await getErrorMessage(response))
+    throw new Error(await getErrorMessage(response));
   }
 
-  const data = (await response.json()) as ProjectsResponse
-  return data.projects
-}
+  const data = (await response.json()) as ProjectsResponse;
+  return data.projects;
+};
 
 const fetchListingFullDetails = async (listingId: number) => {
-  const response = await fetch(`${API_URL}/listings/${listingId}/full-details`, {
-    credentials: "include",
-  })
+  const response = await fetch(
+    `${API_URL}/listings/${listingId}/full-details`,
+    {
+      credentials: "include",
+    },
+  );
 
   if (!response.ok) {
-    throw new Error(await getErrorMessage(response))
+    throw new Error(await getErrorMessage(response));
   }
 
-  return (await response.json()) as ListingFullDetails
-}
+  return (await response.json()) as ListingFullDetails;
+};
 
 const createListing = async (listingData: ListingFormData) => {
   const response = await fetch(`${API_URL}/listings`, {
@@ -212,21 +223,21 @@ const createListing = async (listingData: ListingFormData) => {
       "Content-Type": "application/json",
     },
     body: JSON.stringify(listingData),
-  })
+  });
 
   if (!response.ok) {
-    throw new Error(await getErrorMessage(response))
+    throw new Error(await getErrorMessage(response));
   }
 
-  return response.json()
-}
+  return response.json();
+};
 
 const updateListing = async ({
   id,
   listingData,
 }: {
-  id: number
-  listingData: ListingFormData
+  id: number;
+  listingData: ListingFormData;
 }) => {
   const response = await fetch(`${API_URL}/listings/${id}`, {
     method: "PATCH",
@@ -235,35 +246,46 @@ const updateListing = async ({
       "Content-Type": "application/json",
     },
     body: JSON.stringify(listingData),
-  })
+  });
 
   if (!response.ok) {
-    throw new Error(await getErrorMessage(response))
+    throw new Error(await getErrorMessage(response));
   }
 
-  return response.json()
-}
+  return response.json();
+};
 
 const setupLotTypeState = (lotType: string | null) => {
-  const value = lotType || "inner"
+  const value = lotType || "inner";
 
   if (normalLotTypes.includes(value)) {
     return {
       mode: value,
       custom: "",
-    }
+    };
   }
 
   return {
     mode: "custom",
     custom: value,
-  }
-}
+  };
+};
 
 const resolveLotType = (mode: string, customValue: string) => {
-  if (mode === "custom") return customValue.trim()
-  return mode
-}
+  if (mode === "custom") return customValue.trim();
+  return mode;
+};
+
+const deleteListing = async (id: number) => {
+  const response = await fetch(`${API_URL}/listings/${id}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+
+  if (!response.ok) {
+    throw new Error(await getErrorMessage(response));
+  }
+};
 
 const listingToFormData = (listing: Listing): ListingFormData => ({
   project_id: listing.project_id,
@@ -275,33 +297,36 @@ const listingToFormData = (listing: Listing): ListingFormData => ({
   lot_area_sqm: Number(listing.lot_area_sqm || 0),
   legal_misc_rate: Number(listing.legal_misc_rate || 10),
   status: listing.status,
-})
+});
 
 const Listings = () => {
-  const queryClient = useQueryClient()
+  const queryClient = useQueryClient();
 
-  const [searchInput, setSearchInput] = useState("")
-  const [statusFilter, setStatusFilter] = useState("all")
-  const [projectFilter, setProjectFilter] = useState("all")
-  const [lotTypeFilter, setLotTypeFilter] = useState("all")
+  const [searchInput, setSearchInput] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [projectFilter, setProjectFilter] = useState("all");
+  const [lotTypeFilter, setLotTypeFilter] = useState("all");
 
-  const [isAddOpen, setIsAddOpen] = useState(false)
-  const [viewListingId, setViewListingId] = useState<number | null>(null)
-  const [editListing, setEditListing] = useState<Listing | null>(null)
+  const [isAddOpen, setIsAddOpen] = useState(false);
+  const [viewListingId, setViewListingId] = useState<number | null>(null);
+  const [editListing, setEditListing] = useState<Listing | null>(null);
+  const [listingToDelete, setListingToDelete] = useState<Listing | null>(null);
 
-  const [formData, setFormData] =
-    useState<ListingFormData>(defaultListingFormData)
-  const [editFormData, setEditFormData] =
-    useState<ListingFormData>(defaultListingFormData)
+  const [formData, setFormData] = useState<ListingFormData>(
+    defaultListingFormData,
+  );
+  const [editFormData, setEditFormData] = useState<ListingFormData>(
+    defaultListingFormData,
+  );
 
-  const [lotTypeMode, setLotTypeMode] = useState("inner")
-  const [customLotType, setCustomLotType] = useState("")
-  const [editLotTypeMode, setEditLotTypeMode] = useState("inner")
-  const [editCustomLotType, setEditCustomLotType] = useState("")
+  const [lotTypeMode, setLotTypeMode] = useState("inner");
+  const [customLotType, setCustomLotType] = useState("");
+  const [editLotTypeMode, setEditLotTypeMode] = useState("inner");
+  const [editCustomLotType, setEditCustomLotType] = useState("");
 
-  const [page, setPage] = useState(1)
-  const [rowsPerPage, setRowsPerPage] = useState(10)
-  const [successMessage, setSuccessMessage] = useState("")
+  const [page, setPage] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [successMessage, setSuccessMessage] = useState("");
 
   const {
     data: listings = [],
@@ -310,12 +335,12 @@ const Listings = () => {
   } = useQuery({
     queryKey: ["listings"],
     queryFn: fetchListings,
-  })
+  });
 
   const { data: projects = [] } = useQuery({
     queryKey: ["projects"],
     queryFn: fetchProjects,
-  })
+  });
 
   const {
     data: listingFullDetails,
@@ -325,80 +350,90 @@ const Listings = () => {
     queryKey: ["listing-full-details", viewListingId],
     queryFn: () => fetchListingFullDetails(viewListingId || 0),
     enabled: Boolean(viewListingId),
-  })
+  });
 
   const createListingMutation = useMutation({
     mutationFn: createListing,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["listings"] })
-      queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] })
-      setIsAddOpen(false)
-      resetForm()
-      setSuccessMessage("Listing created successfully")
+      queryClient.invalidateQueries({ queryKey: ["listings"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
+      setIsAddOpen(false);
+      resetForm();
+      setSuccessMessage("Listing created successfully");
     },
-  })
+  });
 
   const updateListingMutation = useMutation({
     mutationFn: updateListing,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["listings"] })
-      queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] })
+      queryClient.invalidateQueries({ queryKey: ["listings"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
 
       if (viewListingId) {
         queryClient.invalidateQueries({
           queryKey: ["listing-full-details", viewListingId],
-        })
+        });
       }
 
-      setEditListing(null)
-      setSuccessMessage("Listing updated successfully")
+      setEditListing(null);
+      setSuccessMessage("Listing updated successfully");
     },
-  })
+  });
 
-  const projectFormDefault = () => projects[0]?.id ?? 0
+  const deleteListingMutation = useMutation({
+    mutationFn: deleteListing,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["listings"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
+      setListingToDelete(null);
+      setSuccessMessage("Listing deleted successfully");
+    },
+  });
+
+  const projectFormDefault = () => projects[0]?.id ?? 0;
 
   const resetForm = () => {
     setFormData({
       ...defaultListingFormData,
       project_id: projectFormDefault(),
-    })
-    setLotTypeMode("inner")
-    setCustomLotType("")
-  }
+    });
+    setLotTypeMode("inner");
+    setCustomLotType("");
+  };
 
   const openAddModal = () => {
     setFormData({
       ...defaultListingFormData,
       project_id: projectFormDefault(),
-    })
-    setLotTypeMode("inner")
-    setCustomLotType("")
-    setSuccessMessage("")
-    setIsAddOpen(true)
-  }
+    });
+    setLotTypeMode("inner");
+    setCustomLotType("");
+    setSuccessMessage("");
+    setIsAddOpen(true);
+  };
 
   const openEditModal = (listing: Listing) => {
-    setEditListing(listing)
-    setEditFormData(listingToFormData(listing))
+    setEditListing(listing);
+    setEditFormData(listingToFormData(listing));
 
-    const lotTypeState = setupLotTypeState(listing.lot_type)
-    setEditLotTypeMode(lotTypeState.mode)
-    setEditCustomLotType(lotTypeState.custom)
-  }
+    const lotTypeState = setupLotTypeState(listing.lot_type);
+    setEditLotTypeMode(lotTypeState.mode);
+    setEditCustomLotType(lotTypeState.custom);
+  };
 
   const handleAddListing = (e: { preventDefault: () => void }) => {
-    e.preventDefault()
+    e.preventDefault();
 
     createListingMutation.mutate({
       ...formData,
       lot_type: resolveLotType(lotTypeMode, customLotType),
-    })
-  }
+    });
+  };
 
   const handleUpdateListing = (e: { preventDefault: () => void }) => {
-    e.preventDefault()
+    e.preventDefault();
 
-    if (!editListing) return
+    if (!editListing) return;
 
     updateListingMutation.mutate({
       id: editListing.id,
@@ -406,42 +441,42 @@ const Listings = () => {
         ...editFormData,
         lot_type: resolveLotType(editLotTypeMode, editCustomLotType),
       },
-    })
-  }
+    });
+  };
 
   const filteredListings = listings.filter((listing) => {
-    const search = searchInput.toLowerCase().trim()
+    const search = searchInput.toLowerCase().trim();
 
     const matchesSearch =
       search === "" ||
       listing.project_name.toLowerCase().includes(search) ||
       (listing.cadastral_lot_no || "").toLowerCase().includes(search) ||
       listing.unit_id.toLowerCase().includes(search) ||
-      (listing.lot_type || "").toLowerCase().includes(search)
+      (listing.lot_type || "").toLowerCase().includes(search);
 
     const matchesStatus =
-      statusFilter === "all" || listing.status === statusFilter
+      statusFilter === "all" || listing.status === statusFilter;
 
     const matchesProject =
-      projectFilter === "all" || String(listing.project_id) === projectFilter
+      projectFilter === "all" || String(listing.project_id) === projectFilter;
 
     const matchesLotType =
-      lotTypeFilter === "all" || listing.lot_type === lotTypeFilter
+      lotTypeFilter === "all" || listing.lot_type === lotTypeFilter;
 
-    return matchesSearch && matchesStatus && matchesProject && matchesLotType
-  })
+    return matchesSearch && matchesStatus && matchesProject && matchesLotType;
+  });
 
-  const paginatedListings = paginateRows(filteredListings, page, rowsPerPage)
+  const paginatedListings = paginateRows(filteredListings, page, rowsPerPage);
 
   const allLotTypes = useMemo(() => {
     return [
       ...new Set(
         listings
           .map((listing) => listing.lot_type)
-          .filter((lotType): lotType is string => Boolean(lotType))
+          .filter((lotType): lotType is string => Boolean(lotType)),
       ),
-    ]
-  }, [listings])
+    ];
+  }, [listings]);
 
   const listingStatusData = statusFilters
     .filter((status) => status.value !== "all")
@@ -449,23 +484,23 @@ const Listings = () => {
       name: status.label,
       value: listings.filter((listing) => listing.status === status.value)
         .length,
-    }))
+    }));
 
   const totalValue = listings.reduce(
     (sum, listing) => sum + Number(listing.net_selling_price || 0),
-    0
-  )
+    0,
+  );
 
   const mutationError =
     createListingMutation.error?.message ||
-    updateListingMutation.error?.message
+    updateListingMutation.error?.message;
 
   if (isLoading) {
-    return <LoadingState label="Loading listings..." />
+    return <LoadingState label="Loading listings..." />;
   }
 
   if (error) {
-    return <Alert variant="error" title="Failed to load listings" />
+    return <Alert variant="error" title="Failed to load listings" />;
   }
 
   return (
@@ -481,7 +516,9 @@ const Listings = () => {
         }
       />
 
-      {successMessage ? <Alert variant="success" title={successMessage} /> : null}
+      {successMessage ? (
+        <Alert variant="success" title={successMessage} />
+      ) : null}
       {mutationError ? <Alert variant="error" title={mutationError} /> : null}
 
       <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3 xl:grid-cols-6">
@@ -539,16 +576,16 @@ const Listings = () => {
           placeholder="Search unit, project, cadastral lot no..."
           value={searchInput}
           onChange={(e) => {
-            setSearchInput(e.target.value)
-            setPage(1)
+            setSearchInput(e.target.value);
+            setPage(1);
           }}
         />
 
         <Select
           value={projectFilter}
           onChange={(e) => {
-            setProjectFilter(e.target.value)
-            setPage(1)
+            setProjectFilter(e.target.value);
+            setPage(1);
           }}
         >
           <option value="all">All Projects</option>
@@ -562,8 +599,8 @@ const Listings = () => {
         <Select
           value={lotTypeFilter}
           onChange={(e) => {
-            setLotTypeFilter(e.target.value)
-            setPage(1)
+            setLotTypeFilter(e.target.value);
+            setPage(1);
           }}
         >
           <option value="all">All Lot Types</option>
@@ -577,8 +614,8 @@ const Listings = () => {
         <Select
           value={statusFilter}
           onChange={(e) => {
-            setStatusFilter(e.target.value)
-            setPage(1)
+            setStatusFilter(e.target.value);
+            setPage(1);
           }}
         >
           {statusFilters.map((status) => (
@@ -590,11 +627,11 @@ const Listings = () => {
 
         <Button
           onClick={() => {
-            setSearchInput("")
-            setProjectFilter("all")
-            setLotTypeFilter("all")
-            setStatusFilter("all")
-            setPage(1)
+            setSearchInput("");
+            setProjectFilter("all");
+            setLotTypeFilter("all");
+            setStatusFilter("all");
+            setPage(1);
           }}
         >
           Reset
@@ -715,6 +752,15 @@ const Listings = () => {
                     >
                       Edit
                     </Button>
+
+                    <Button
+                      disabled={!["available", "hold"].includes(listing.status)}
+                      icon={<FiTrash2 />}
+                      onClick={() => setListingToDelete(listing)}
+                      variant="danger"
+                    >
+                      Delete
+                    </Button>
                   </div>
                 </td>
               </tr>
@@ -756,6 +802,19 @@ const Listings = () => {
         />
       ) : null}
 
+      {listingToDelete ? (
+        <Modal onClose={() => setListingToDelete(null)} title="Delete Listing">
+          <ConfirmBox
+            message={`Are you sure you want to delete listing ${listingToDelete.unit_id}? This cannot be undone.`}
+            onCancel={() => setListingToDelete(null)}
+            onConfirm={() => deleteListingMutation.mutate(listingToDelete.id)}
+            confirmLabel={
+              deleteListingMutation.isPending ? "Deleting..." : "Delete"
+            }
+          />
+        </Modal>
+      ) : null}
+
       {editListing ? (
         <ListingFormModal
           title="Edit Listing"
@@ -782,23 +841,23 @@ const Listings = () => {
         />
       ) : null}
     </div>
-  )
-}
+  );
+};
 
 type ListingFormModalProps = {
-  title: string
-  projects: Project[]
-  formData: ListingFormData
-  setFormData: (data: ListingFormData) => void
-  lotTypeMode: string
-  setLotTypeMode: (value: string) => void
-  customLotType: string
-  setCustomLotType: (value: string) => void
-  onSubmit: (e: { preventDefault: () => void }) => void
-  onClose: () => void
-  isPending: boolean
-  submitLabel: string
-}
+  title: string;
+  projects: Project[];
+  formData: ListingFormData;
+  setFormData: (data: ListingFormData) => void;
+  lotTypeMode: string;
+  setLotTypeMode: (value: string) => void;
+  customLotType: string;
+  setCustomLotType: (value: string) => void;
+  onSubmit: (e: { preventDefault: () => void }) => void;
+  onClose: () => void;
+  isPending: boolean;
+  submitLabel: string;
+};
 
 const ListingFormModal = ({
   title,
@@ -814,7 +873,7 @@ const ListingFormModal = ({
   isPending,
   submitLabel,
 }: ListingFormModalProps) => {
-  const formId = `${title.replaceAll(" ", "-").toLowerCase()}-form`
+  const formId = `${title.replaceAll(" ", "-").toLowerCase()}-form`;
 
   return (
     <Modal
@@ -886,13 +945,13 @@ const ListingFormModal = ({
           label="Lot Type"
           value={lotTypeMode}
           onChange={(e) => {
-            setLotTypeMode(e.target.value)
+            setLotTypeMode(e.target.value);
 
             if (e.target.value !== "custom") {
               setFormData({
                 ...formData,
                 lot_type: e.target.value,
-              })
+              });
             }
           }}
         >
@@ -991,15 +1050,15 @@ const ListingFormModal = ({
         </Select>
       </form>
     </Modal>
-  )
-}
+  );
+};
 
 type ListingDetailsModalProps = {
-  details?: ListingFullDetails
-  error: unknown
-  isLoading: boolean
-  onClose: () => void
-}
+  details?: ListingFullDetails;
+  error: unknown;
+  isLoading: boolean;
+  onClose: () => void;
+};
 
 const ListingDetailsModal = ({
   details,
@@ -1274,13 +1333,13 @@ const ListingDetailsModal = ({
         </div>
       ) : null}
     </Modal>
-  )
-}
+  );
+};
 
 type DetailsSectionProps = {
-  children: React.ReactNode
-  title: string
-}
+  children: React.ReactNode;
+  title: string;
+};
 
 const DetailsSection = ({ children, title }: DetailsSectionProps) => {
   return (
@@ -1290,15 +1349,15 @@ const DetailsSection = ({ children, title }: DetailsSectionProps) => {
         {children}
       </div>
     </section>
-  )
-}
+  );
+};
 
 const Detail = ({
   label,
   value,
 }: {
-  label: string
-  value: string | number | null | undefined
+  label: string;
+  value: string | number | null | undefined;
 }) => {
   return (
     <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
@@ -1309,7 +1368,7 @@ const Detail = ({
         {value === null || value === undefined || value === "" ? "-" : value}
       </p>
     </div>
-  )
-}
+  );
+};
 
-export default Listings
+export default Listings;

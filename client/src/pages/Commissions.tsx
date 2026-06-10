@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react"
+import { useState, type ReactNode } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   FiDollarSign,
@@ -1352,7 +1352,7 @@ const Commissions = () => {
 
           <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
             <ComputedBox
-              label="TCP Base"
+              label="Net Selling Price (Commission Base)"
               value={formatMoney(editCommission.commission_base)}
             />
             <ComputedBox
@@ -1408,7 +1408,7 @@ const Commissions = () => {
                   value={formatText(commissionDetails.sale_type)}
                 />
                 <Detail
-                  label="TCP"
+                  label="Net Selling Price"
                   value={formatMoney(commissionDetails.commission_base)}
                 />
                 <Detail

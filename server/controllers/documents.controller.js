@@ -624,3 +624,42 @@ export const getClientUnitDocumentStatus = async (req, res) => {
     },
   })
 }
+
+
+export const deleteDocument = async (req, res) => {
+  const { id } = req.params
+
+  const [documentRows] = await db.query(
+    `SELECT id, name FROM documents WHERE id = ? LIMIT 1`,
+    [id]
+  )
+
+  const document = documentRows[0]
+
+  if (!document) {
+    return res.status(404).json({ message: 'Document not found' })
+  }
+
+  const [usageRows] = await db.query(
+    `SELECT id FROM client_document_list WHERE document_id = ? LIMIT 1`,
+    [id]
+  )
+
+  if (usageRows.length > 0) {
+    return res.status(400).json({
+      message: 'Cannot delete a document that is already in use. Set it to inactive instead.'
+    })
+  }
+
+  await db.query(`DELETE FROM documents WHERE id = ?`, [id])
+
+  await createAuditLog({
+    userId: req.user.id,
+    action: 'delete',
+    module: 'Documents',
+    description: `Deleted document ${document.name}`,
+    ipAddress: getClientIp(req)
+  })
+
+  res.status(200).json({ message: 'Document deleted successfully' })
+}

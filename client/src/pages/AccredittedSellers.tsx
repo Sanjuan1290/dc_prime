@@ -1,66 +1,67 @@
-import { useMemo, useState } from "react"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { FiEdit2, FiPlus, FiSearch, FiUsers } from "react-icons/fi"
-import Alert from "../components/ui/Alert"
-import Button from "../components/ui/Button"
-import EmptyState from "../components/ui/EmptyState"
-import Input from "../components/ui/Input"
-import LoadingState from "../components/ui/LoadingState"
-import Modal from "../components/ui/Modal"
-import PageHeader from "../components/ui/PageHeader"
-import Pagination from "../components/ui/Pagination"
-import Select from "../components/ui/Select"
-import StatCard from "../components/ui/StatCard"
-import StatusBadge from "../components/ui/StatusBadge"
-import TableContainer from "../components/ui/TableContainer"
-import { API_URL, getErrorMessage } from "../utils/api"
-import { formatDate, formatNumber, formatText } from "../utils/formatters"
-import { paginateRows } from "../utils/pagination"
+import { useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { FiEdit2, FiPlus, FiSearch, FiTrash2, FiUsers } from "react-icons/fi";
+import Alert from "../components/ui/Alert";
+import Button from "../components/ui/Button";
+import ConfirmBox from "../components/ui/ConfirmBox";
+import EmptyState from "../components/ui/EmptyState";
+import Input from "../components/ui/Input";
+import LoadingState from "../components/ui/LoadingState";
+import Modal from "../components/ui/Modal";
+import PageHeader from "../components/ui/PageHeader";
+import Pagination from "../components/ui/Pagination";
+import Select from "../components/ui/Select";
+import StatCard from "../components/ui/StatCard";
+import StatusBadge from "../components/ui/StatusBadge";
+import TableContainer from "../components/ui/TableContainer";
+import { API_URL, getErrorMessage } from "../utils/api";
+import { formatDate, formatNumber, formatText } from "../utils/formatters";
+import { paginateRows } from "../utils/pagination";
 
-type SellerStatus = "active" | "inactive" | string
+type SellerStatus = "active" | "inactive" | string;
 
-type SellerRole = "broker_network_manager" | "broker" | "agent" | string
+type SellerRole = "broker_network_manager" | "broker" | "agent" | string;
 
-type ReportsUnderMode = "none" | "seller" | "custom"
+type ReportsUnderMode = "none" | "seller" | "custom";
 
 type AccreditedSeller = {
-  id: number
-  user_id: number | null
-  user_full_name?: string | null
-  full_name: string
-  email: string | null
-  contact_no: string | null
-  seller_role: SellerRole
-  parent_seller_id: number | null
-  parent_seller_name: string | null
-  custom_reports_under: string | null
-  reports_under_display: string | null
-  status: SellerStatus
-  accreditation_date: string | null
-  commission_rate: number | string | null
-  created_at: string
-  updated_at: string
-}
+  id: number;
+  user_id: number | null;
+  user_full_name?: string | null;
+  full_name: string;
+  email: string | null;
+  contact_no: string | null;
+  seller_role: SellerRole;
+  parent_seller_id: number | null;
+  parent_seller_name: string | null;
+  custom_reports_under: string | null;
+  reports_under_display: string | null;
+  status: SellerStatus;
+  accreditation_date: string | null;
+  commission_rate: number | string | null;
+  created_at: string;
+  updated_at: string;
+};
 
 type SellerFormData = {
-  user_id: string
-  full_name: string
-  email: string
-  contact_no: string
-  seller_role: SellerRole
-  parent_seller_id: string
-  custom_reports_under: string
-  reports_under_mode: ReportsUnderMode
-  status: SellerStatus
-  accreditation_date: string
-  commission_rate: string
-}
+  user_id: string;
+  full_name: string;
+  email: string;
+  contact_no: string;
+  seller_role: SellerRole;
+  parent_seller_id: string;
+  custom_reports_under: string;
+  reports_under_mode: ReportsUnderMode;
+  status: SellerStatus;
+  accreditation_date: string;
+  commission_rate: string;
+};
 
 type SellersResponse = {
-  accreditedSellers?: AccreditedSeller[]
-  sellers?: AccreditedSeller[]
-  data?: AccreditedSeller[]
-}
+  accreditedSellers?: AccreditedSeller[];
+  sellers?: AccreditedSeller[];
+  data?: AccreditedSeller[];
+};
 
 const emptyFormData: SellerFormData = {
   user_id: "",
@@ -74,46 +75,46 @@ const emptyFormData: SellerFormData = {
   status: "active",
   accreditation_date: "",
   commission_rate: "",
-}
+};
 
-const sellerRoles = ["broker_network_manager", "broker", "agent"]
-const sellerStatuses = ["active", "inactive"]
+const sellerRoles = ["broker_network_manager", "broker", "agent"];
+const sellerStatuses = ["active", "inactive"];
 
 const fetchSellers = async (): Promise<AccreditedSeller[]> => {
   const response = await fetch(`${API_URL}/accredited-sellers`, {
     credentials: "include",
-  })
+  });
 
   if (!response.ok) {
-    throw new Error(await getErrorMessage(response))
+    throw new Error(await getErrorMessage(response));
   }
 
-  const data = (await response.json()) as SellersResponse
-  return data.accreditedSellers || data.sellers || data.data || []
-}
+  const data = (await response.json()) as SellersResponse;
+  return data.accreditedSellers || data.sellers || data.data || [];
+};
 
 const fetchPossibleParentSellers = async (
-  excludeId: number | null
+  excludeId: number | null,
 ): Promise<AccreditedSeller[]> => {
   const url = excludeId
     ? `${API_URL}/accredited-sellers/possible-parents?exclude_id=${excludeId}`
-    : `${API_URL}/accredited-sellers/possible-parents`
+    : `${API_URL}/accredited-sellers/possible-parents`;
 
   const response = await fetch(url, {
     credentials: "include",
-  })
+  });
 
   if (!response.ok) {
-    throw new Error(await getErrorMessage(response))
+    throw new Error(await getErrorMessage(response));
   }
 
   const data = (await response.json()) as {
-    possibleParentSellers?: AccreditedSeller[]
-    data?: AccreditedSeller[]
-  }
+    possibleParentSellers?: AccreditedSeller[];
+    data?: AccreditedSeller[];
+  };
 
-  return data.possibleParentSellers || data.data || []
-}
+  return data.possibleParentSellers || data.data || [];
+};
 
 const createSeller = async (sellerData: SellerFormData) => {
   const response = await fetch(`${API_URL}/accredited-sellers`, {
@@ -123,21 +124,21 @@ const createSeller = async (sellerData: SellerFormData) => {
       "Content-Type": "application/json",
     },
     body: JSON.stringify(formatSellerPayload(sellerData)),
-  })
+  });
 
   if (!response.ok) {
-    throw new Error(await getErrorMessage(response))
+    throw new Error(await getErrorMessage(response));
   }
 
-  return response.json()
-}
+  return response.json();
+};
 
 const updateSeller = async ({
   id,
   sellerData,
 }: {
-  id: number
-  sellerData: SellerFormData
+  id: number;
+  sellerData: SellerFormData;
 }) => {
   const response = await fetch(`${API_URL}/accredited-sellers/${id}`, {
     method: "PATCH",
@@ -146,25 +147,25 @@ const updateSeller = async ({
       "Content-Type": "application/json",
     },
     body: JSON.stringify(formatSellerPayload(sellerData)),
-  })
+  });
 
   if (!response.ok) {
-    throw new Error(await getErrorMessage(response))
+    throw new Error(await getErrorMessage(response));
   }
 
-  return response.json()
-}
+  return response.json();
+};
 
 const formatSellerPayload = (sellerData: SellerFormData) => {
   const parentSellerId =
     sellerData.reports_under_mode === "seller" && sellerData.parent_seller_id
       ? Number(sellerData.parent_seller_id)
-      : null
+      : null;
 
   const customReportsUnder =
     sellerData.reports_under_mode === "custom"
       ? sellerData.custom_reports_under.trim()
-      : null
+      : null;
 
   return {
     user_id: sellerData.user_id ? Number(sellerData.user_id) : null,
@@ -180,14 +181,25 @@ const formatSellerPayload = (sellerData: SellerFormData) => {
       sellerData.commission_rate === ""
         ? null
         : Number(sellerData.commission_rate),
-  }
-}
+  };
+};
 
 const getReportsUnderMode = (seller: AccreditedSeller): ReportsUnderMode => {
-  if (seller.parent_seller_id) return "seller"
-  if (seller.custom_reports_under) return "custom"
-  return "none"
-}
+  if (seller.parent_seller_id) return "seller";
+  if (seller.custom_reports_under) return "custom";
+  return "none";
+};
+
+const deleteSeller = async (id: number) => {
+  const response = await fetch(`${API_URL}/accredited-sellers/${id}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+
+  if (!response.ok) {
+    throw new Error(await getErrorMessage(response));
+  }
+};
 
 const sellerToFormData = (seller: AccreditedSeller): SellerFormData => {
   return {
@@ -209,31 +221,34 @@ const sellerToFormData = (seller: AccreditedSeller): SellerFormData => {
       seller.commission_rate === null || seller.commission_rate === undefined
         ? ""
         : String(seller.commission_rate),
-  }
-}
+  };
+};
 
 const getCommissionRateDisplay = (rate: number | string | null) => {
-  if (rate === null || rate === undefined || rate === "") return "-"
-  return `${formatNumber(rate)}%`
-}
+  if (rate === null || rate === undefined || rate === "") return "-";
+  return `${formatNumber(rate)}%`;
+};
 
 const AccredittedSellers = () => {
-  const queryClient = useQueryClient()
+  const queryClient = useQueryClient();
 
-  const [searchInput, setSearchInput] = useState("")
-  const [roleFilter, setRoleFilter] = useState("all")
-  const [statusFilter, setStatusFilter] = useState("all")
+  const [searchInput, setSearchInput] = useState("");
+  const [roleFilter, setRoleFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
 
-  const [isAddOpen, setIsAddOpen] = useState(false)
-  const [editSeller, setEditSeller] = useState<AccreditedSeller | null>(null)
+  const [isAddOpen, setIsAddOpen] = useState(false);
+  const [editSeller, setEditSeller] = useState<AccreditedSeller | null>(null);
+  const [sellerToDelete, setSellerToDelete] = useState<AccreditedSeller | null>(
+    null,
+  );
 
-  const [formData, setFormData] = useState<SellerFormData>(emptyFormData)
+  const [formData, setFormData] = useState<SellerFormData>(emptyFormData);
   const [editFormData, setEditFormData] =
-    useState<SellerFormData>(emptyFormData)
+    useState<SellerFormData>(emptyFormData);
 
-  const [page, setPage] = useState(1)
-  const [rowsPerPage, setRowsPerPage] = useState(10)
-  const [successMessage, setSuccessMessage] = useState("")
+  const [page, setPage] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [successMessage, setSuccessMessage] = useState("");
 
   const {
     data: sellers = [],
@@ -242,47 +257,56 @@ const AccredittedSellers = () => {
   } = useQuery<AccreditedSeller[]>({
     queryKey: ["accredited-sellers"],
     queryFn: fetchSellers,
-  })
+  });
 
   const { data: possibleParentSellers = [] } = useQuery<AccreditedSeller[]>({
     queryKey: ["accredited-sellers-possible-parents", editSeller?.id || null],
     queryFn: () => fetchPossibleParentSellers(editSeller?.id || null),
-  })
+  });
 
   const invalidateSellerAndCommissionQueries = () => {
-    queryClient.invalidateQueries({ queryKey: ["accredited-sellers"] })
+    queryClient.invalidateQueries({ queryKey: ["accredited-sellers"] });
     queryClient.invalidateQueries({
       queryKey: ["accredited-sellers-possible-parents"],
-    })
-    queryClient.invalidateQueries({ queryKey: ["commissions"] })
-    queryClient.invalidateQueries({ queryKey: ["commission-summary"] })
-    queryClient.invalidateQueries({ queryKey: ["commission-releases"] })
-    queryClient.invalidateQueries({ queryKey: ["client-units"] })
-    queryClient.invalidateQueries({ queryKey: ["reports"] })
-  }
+    });
+    queryClient.invalidateQueries({ queryKey: ["commissions"] });
+    queryClient.invalidateQueries({ queryKey: ["commission-summary"] });
+    queryClient.invalidateQueries({ queryKey: ["commission-releases"] });
+    queryClient.invalidateQueries({ queryKey: ["client-units"] });
+    queryClient.invalidateQueries({ queryKey: ["reports"] });
+  };
 
   const createSellerMutation = useMutation({
     mutationFn: createSeller,
     onSuccess: () => {
-      invalidateSellerAndCommissionQueries()
-      setIsAddOpen(false)
-      setFormData(emptyFormData)
-      setSuccessMessage("Seller added successfully")
+      invalidateSellerAndCommissionQueries();
+      setIsAddOpen(false);
+      setFormData(emptyFormData);
+      setSuccessMessage("Seller added successfully");
     },
-  })
+  });
 
   const updateSellerMutation = useMutation({
     mutationFn: updateSeller,
     onSuccess: () => {
-      invalidateSellerAndCommissionQueries()
-      setEditSeller(null)
-      setEditFormData(emptyFormData)
-      setSuccessMessage("Seller updated successfully")
+      invalidateSellerAndCommissionQueries();
+      setEditSeller(null);
+      setEditFormData(emptyFormData);
+      setSuccessMessage("Seller updated successfully");
     },
-  })
+  });
+
+  const deleteSellerMutation = useMutation({
+    mutationFn: deleteSeller,
+    onSuccess: () => {
+      invalidateSellerAndCommissionQueries();
+      setSellerToDelete(null);
+      setSuccessMessage("Seller deleted successfully");
+    },
+  });
 
   const filteredSellers = sellers.filter((seller) => {
-    const search = searchInput.toLowerCase().trim()
+    const search = searchInput.toLowerCase().trim();
 
     const matchesSearch =
       search === "" ||
@@ -293,71 +317,72 @@ const AccredittedSellers = () => {
       seller.status.toLowerCase().includes(search) ||
       (seller.parent_seller_name || "").toLowerCase().includes(search) ||
       (seller.custom_reports_under || "").toLowerCase().includes(search) ||
-      (seller.reports_under_display || "").toLowerCase().includes(search)
+      (seller.reports_under_display || "").toLowerCase().includes(search);
 
     const matchesRole =
-      roleFilter === "all" || seller.seller_role === roleFilter
+      roleFilter === "all" || seller.seller_role === roleFilter;
 
     const matchesStatus =
-      statusFilter === "all" || seller.status === statusFilter
+      statusFilter === "all" || seller.status === statusFilter;
 
-    return matchesSearch && matchesRole && matchesStatus
-  })
+    return matchesSearch && matchesRole && matchesStatus;
+  });
 
-  const paginatedSellers = paginateRows(filteredSellers, page, rowsPerPage)
+  const paginatedSellers = paginateRows(filteredSellers, page, rowsPerPage);
 
   const activeCount = useMemo(() => {
-    return sellers.filter((seller) => seller.status === "active").length
-  }, [sellers])
+    return sellers.filter((seller) => seller.status === "active").length;
+  }, [sellers]);
 
   const inactiveCount = useMemo(() => {
-    return sellers.filter((seller) => seller.status === "inactive").length
-  }, [sellers])
+    return sellers.filter((seller) => seller.status === "inactive").length;
+  }, [sellers]);
 
   const withRateCount = useMemo(() => {
     return sellers.filter(
       (seller) =>
         seller.commission_rate !== null &&
         seller.commission_rate !== undefined &&
-        seller.commission_rate !== ""
-    ).length
-  }, [sellers])
+        seller.commission_rate !== "",
+    ).length;
+  }, [sellers]);
 
   const openAddModal = () => {
-    setFormData(emptyFormData)
-    setSuccessMessage("")
-    setIsAddOpen(true)
-  }
+    setFormData(emptyFormData);
+    setSuccessMessage("");
+    setIsAddOpen(true);
+  };
 
   const openEditModal = (seller: AccreditedSeller) => {
-    setEditSeller(seller)
-    setEditFormData(sellerToFormData(seller))
-    setSuccessMessage("")
-  }
+    setEditSeller(seller);
+    setEditFormData(sellerToFormData(seller));
+    setSuccessMessage("");
+  };
 
   const handleCreateSeller = () => {
-    createSellerMutation.mutate(formData)
-  }
+    createSellerMutation.mutate(formData);
+  };
 
   const handleUpdateSeller = () => {
-    if (!editSeller) return
+    if (!editSeller) return;
 
     updateSellerMutation.mutate({
       id: editSeller.id,
       sellerData: editFormData,
-    })
-  }
+    });
+  };
 
   const mutationError =
     createSellerMutation.error?.message ||
-    updateSellerMutation.error?.message
+    updateSellerMutation.error?.message ||
+    deleteSellerMutation.error?.message;
 
   if (isLoading) {
-    return <LoadingState label="Loading accredited sellers..." />
+    return <LoadingState label="Loading accredited sellers..." />;
   }
 
   if (error) {
-    return <Alert variant="error" title="Failed to load accredited sellers" />
+    return <Alert variant="error" title="Failed to load accredited sellers" />;
   }
 
   return (
@@ -373,7 +398,9 @@ const AccredittedSellers = () => {
         }
       />
 
-      {successMessage ? <Alert variant="success" title={successMessage} /> : null}
+      {successMessage ? (
+        <Alert variant="success" title={successMessage} />
+      ) : null}
       {mutationError ? <Alert variant="error" title={mutationError} /> : null}
 
       <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-4">
@@ -389,16 +416,16 @@ const AccredittedSellers = () => {
           placeholder="Search sellers..."
           value={searchInput}
           onChange={(event) => {
-            setSearchInput(event.target.value)
-            setPage(1)
+            setSearchInput(event.target.value);
+            setPage(1);
           }}
         />
 
         <Select
           value={roleFilter}
           onChange={(event) => {
-            setRoleFilter(event.target.value)
-            setPage(1)
+            setRoleFilter(event.target.value);
+            setPage(1);
           }}
         >
           <option value="all">All Roles</option>
@@ -412,8 +439,8 @@ const AccredittedSellers = () => {
         <Select
           value={statusFilter}
           onChange={(event) => {
-            setStatusFilter(event.target.value)
-            setPage(1)
+            setStatusFilter(event.target.value);
+            setPage(1);
           }}
         >
           <option value="all">All Statuses</option>
@@ -426,10 +453,10 @@ const AccredittedSellers = () => {
 
         <Button
           onClick={() => {
-            setSearchInput("")
-            setRoleFilter("all")
-            setStatusFilter("all")
-            setPage(1)
+            setSearchInput("");
+            setRoleFilter("all");
+            setStatusFilter("all");
+            setPage(1);
           }}
         >
           Reset
@@ -496,12 +523,21 @@ const AccredittedSellers = () => {
                 </td>
 
                 <td className="px-4 py-3">
-                  <Button
-                    icon={<FiEdit2 />}
-                    onClick={() => openEditModal(seller)}
-                  >
-                    Edit
-                  </Button>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      icon={<FiEdit2 />}
+                      onClick={() => openEditModal(seller)}
+                    >
+                      Edit
+                    </Button>
+                    <Button
+                      icon={<FiTrash2 />}
+                      onClick={() => setSellerToDelete(seller)}
+                      variant="danger"
+                    >
+                      Delete
+                    </Button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -541,6 +577,19 @@ const AccredittedSellers = () => {
         />
       ) : null}
 
+      {sellerToDelete ? (
+        <Modal onClose={() => setSellerToDelete(null)} title="Delete Seller">
+          <ConfirmBox
+            message={`Are you sure you want to delete seller ${sellerToDelete.full_name}? This cannot be undone.`}
+            onCancel={() => setSellerToDelete(null)}
+            onConfirm={() => deleteSellerMutation.mutate(sellerToDelete.id)}
+            confirmLabel={
+              deleteSellerMutation.isPending ? "Deleting..." : "Delete"
+            }
+          />
+        </Modal>
+      ) : null}
+
       {editSeller ? (
         <SellerFormModal
           title={`Edit Seller - ${editSeller.full_name}`}
@@ -554,19 +603,19 @@ const AccredittedSellers = () => {
         />
       ) : null}
     </div>
-  )
-}
+  );
+};
 
 type SellerFormModalProps = {
-  title: string
-  formData: SellerFormData
-  setFormData: (data: SellerFormData) => void
-  possibleParentSellers: AccreditedSeller[]
-  onClose: () => void
-  onSave: () => void
-  isPending: boolean
-  submitLabel: string
-}
+  title: string;
+  formData: SellerFormData;
+  setFormData: (data: SellerFormData) => void;
+  possibleParentSellers: AccreditedSeller[];
+  onClose: () => void;
+  onSave: () => void;
+  isPending: boolean;
+  submitLabel: string;
+};
 
 const SellerFormModal = ({
   title,
@@ -706,9 +755,7 @@ const SellerFormModal = ({
       </div>
 
       <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
-        <h3 className="mb-3 text-sm font-bold text-slate-900">
-          Reports Under
-        </h3>
+        <h3 className="mb-3 text-sm font-bold text-slate-900">Reports Under</h3>
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <Select
@@ -769,7 +816,7 @@ const SellerFormModal = ({
         </p>
       </div>
     </Modal>
-  )
-}
+  );
+};
 
-export default AccredittedSellers
+export default AccredittedSellers;

@@ -23,7 +23,15 @@ const clientFields = `
   seller.full_name AS default_seller_name,
   seller.seller_role AS default_seller_role,
   COALESCE(COUNT(DISTINCT cu.id), 0) AS units_count,
-  COALESCE(SUM(cu.balance), 0) AS balance,
+  COALESCE(
+    SUM(
+      GREATEST(
+        COALESCE(l.total_contract_price, 0) - COALESCE(payment_totals.total_paid, 0),
+        0
+      )
+    ),
+    0
+  ) AS balance,
   c.created_at,
   c.updated_at
 `
@@ -34,6 +42,14 @@ const clientJoins = `
     ON seller.id = c.default_seller_id
   LEFT JOIN client_units cu
     ON cu.client_id = c.id
+  LEFT JOIN listings l
+    ON l.id = cu.listing_id
+  LEFT JOIN (
+    SELECT client_unit_id, SUM(amount) AS total_paid
+    FROM payments
+    WHERE status = 'verified'
+    GROUP BY client_unit_id
+  ) payment_totals ON payment_totals.client_unit_id = cu.id
 `
 
 const getClientById = async (id) => {
@@ -320,5 +336,48 @@ export const updateClient = async (req, res) => {
 
   res.status(200).json({
     message: 'Client updated successfully',
+  })
+}
+
+
+export const deleteClient = async (req, res) => {
+  const { id } = req.params
+
+  const existingClient = await getClientById(id)
+
+  if (!existingClient) {
+    return res.status(404).json({
+      message: 'Client not found',
+    })
+  }
+
+  const [unitRows] = await db.query(
+    `
+    SELECT id
+    FROM client_units
+    WHERE client_id = ?
+    LIMIT 1
+    `,
+    [id]
+  )
+
+  if (unitRows.length > 0) {
+    return res.status(400).json({
+      message: 'Cannot delete a client that has active or historical reservations.',
+    })
+  }
+
+  await db.query(`DELETE FROM clients WHERE id = ?`, [id])
+
+  await createAuditLog({
+    userId: req.user.id,
+    action: 'delete',
+    module: 'Clients',
+    description: `Deleted client ${existingClient.full_name}`,
+    ipAddress: getClientIp(req),
+  })
+
+  res.status(200).json({
+    message: 'Client deleted successfully',
   })
 }

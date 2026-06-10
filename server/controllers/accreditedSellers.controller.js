@@ -604,3 +604,70 @@ export const getPossibleParentSellers = async (req, res) => {
     data: sellers,
   })
 }
+
+
+export const deleteAccreditedSeller = async (req, res) => {
+  const { id } = req.params
+
+  const seller = await getSellerById(id)
+
+  if (!seller) {
+    return res.status(404).json({ message: 'Accredited seller not found' })
+  }
+
+  const [commissionRows] = await db.query(
+    `SELECT id FROM commissions WHERE seller_id = ? LIMIT 1`,
+    [id]
+  )
+
+  if (commissionRows.length > 0) {
+    return res.status(400).json({
+      message: 'Cannot delete a seller with existing commissions. Set them to inactive instead.'
+    })
+  }
+
+  const [unitRows] = await db.query(
+    `SELECT id FROM client_units WHERE seller_id = ? LIMIT 1`,
+    [id]
+  )
+
+  if (unitRows.length > 0) {
+    return res.status(400).json({
+      message: 'Cannot delete a seller assigned to a client unit. Reassign or set inactive instead.'
+    })
+  }
+
+  const [childRows] = await db.query(
+    `SELECT id FROM accredited_sellers WHERE parent_seller_id = ? LIMIT 1`,
+    [id]
+  )
+
+  if (childRows.length > 0) {
+    return res.status(400).json({
+      message: 'Cannot delete a seller that has sub-sellers reporting under them.'
+    })
+  }
+
+  const [clientRows] = await db.query(
+    `SELECT id FROM clients WHERE default_seller_id = ? LIMIT 1`,
+    [id]
+  )
+
+  if (clientRows.length > 0) {
+    return res.status(400).json({
+      message: 'Cannot delete a seller used as the default seller for existing clients. Reassign or set inactive instead.'
+    })
+  }
+
+  await db.query(`DELETE FROM accredited_sellers WHERE id = ?`, [id])
+
+  await createAuditLog({
+    userId: req.user.id,
+    action: 'delete',
+    module: 'Accredited Sellers',
+    description: `Deleted accredited seller ${seller.full_name}`,
+    ipAddress: getClientIp(req)
+  })
+
+  res.status(200).json({ message: 'Accredited seller deleted successfully' })
+}

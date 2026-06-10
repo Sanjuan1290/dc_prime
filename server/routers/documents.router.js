@@ -4,6 +4,7 @@ import {
   getDocument,
   createDocument,
   updateDocument,
+  deleteDocument,
   getClientUnitDocuments,
   createChecklistForClientUnit,
   updateClientDocumentStatus,
@@ -25,5 +26,7 @@ router.post('/client-units/:clientUnitId/documents/checklist', auth, createCheck
 router.post('/client-units/:clientUnitId/documents/apply-existing', auth, applyExistingReusableDocuments)
 
 router.patch('/client-documents/:id/status', auth, updateClientDocumentStatus)
+
+router.delete('/documents/:id', auth, deleteDocument)
 
 export default router

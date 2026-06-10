@@ -4,6 +4,7 @@ import {
   getAccreditedSeller,
   createAccreditedSeller,
   updateAccreditedSeller,
+  deleteAccreditedSeller,
   getSellerHierarchy,
   getPossibleParentSellers,
 } from '../controllers/accreditedSellers.controller.js'
@@ -17,5 +18,7 @@ router.get('/accredited-sellers/possible-parents', auth, getPossibleParentSeller
 router.get('/accredited-sellers/:id', auth, getAccreditedSeller)
 router.post('/accredited-sellers', auth, createAccreditedSeller)
 router.patch('/accredited-sellers/:id', auth, updateAccreditedSeller)
+
+router.delete('/accredited-sellers/:id', auth, deleteAccreditedSeller)
 
 export default router

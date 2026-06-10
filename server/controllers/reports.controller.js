@@ -94,6 +94,7 @@ export const getSalesReport = async (req, res) => {
         client_unit_id,
         SUM(amount) AS total_paid
       FROM payments
+      WHERE status = 'verified'
       GROUP BY client_unit_id
     ) payment_summary ON payment_summary.client_unit_id = cu.id
     ${whereClause}
@@ -124,7 +125,7 @@ export const getCollectionsReport = async (req, res) => {
     payment_method,
   } = req.query
 
-  const conditions = []
+  const conditions = ["py.status = 'verified'"]
   const params = []
 
   if (!isMissing(date_from)) {
@@ -238,7 +239,6 @@ export const getInventoryReport = async (req, res) => {
       l.lot_type,
       l.lot_area_sqm,
       l.price_per_sqm,
-      l.promo_discount,
       l.net_selling_price,
       l.legal_misc_rate,
       l.legal_misc_fee,
@@ -258,7 +258,6 @@ export const getInventoryReport = async (req, res) => {
       ...row,
       lot_area_sqm: formatDecimal(row.lot_area_sqm),
       price_per_sqm: formatDecimal(row.price_per_sqm),
-      promo_discount: formatDecimal(row.promo_discount),
       net_selling_price: formatDecimal(row.net_selling_price),
       legal_misc_rate: formatDecimal(row.legal_misc_rate),
       legal_misc_fee: formatDecimal(row.legal_misc_fee),

@@ -211,9 +211,7 @@ const getClientUnitCommissionBase = async (connectionOrDb, clientUnitId) => {
       client.full_name AS client_name,
       listing.unit_id,
       COALESCE(
-        NULLIF(listing.total_contract_price, 0),
-        listing.net_selling_price + listing.legal_misc_fee,
-        listing.net_selling_price,
+        NULLIF(listing.net_selling_price, 0),
         0
       ) AS commission_base
     FROM client_units cu

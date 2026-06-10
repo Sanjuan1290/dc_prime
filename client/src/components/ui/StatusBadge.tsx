@@ -17,6 +17,7 @@ const colorForStatus = (status: string | null | undefined) => {
     case "reserved":
     case "payable":
     case "late":
+    case "on_hold":
       return "border-amber-200 bg-amber-50 text-amber-700"
     case "cancelled":
     case "inactive":
@@ -27,6 +28,7 @@ const colorForStatus = (status: string | null | undefined) => {
     case "sold":
     case "released":
     case "fully_paid":
+    case "eligible":
       return "border-blue-200 bg-blue-50 text-blue-700"
     default:
       return "border-slate-200 bg-slate-50 text-slate-600"

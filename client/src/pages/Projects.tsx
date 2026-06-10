@@ -1,47 +1,55 @@
-import { useState } from "react"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { FiEdit2, FiEye, FiMap, FiPlus, FiSearch } from "react-icons/fi"
-import Alert from "../components/ui/Alert"
-import Button from "../components/ui/Button"
-import EmptyState from "../components/ui/EmptyState"
-import Input from "../components/ui/Input"
-import LoadingState from "../components/ui/LoadingState"
-import Modal from "../components/ui/Modal"
-import PageHeader from "../components/ui/PageHeader"
-import Pagination from "../components/ui/Pagination"
-import Select from "../components/ui/Select"
-import StatCard from "../components/ui/StatCard"
-import StatusBadge from "../components/ui/StatusBadge"
-import TableContainer from "../components/ui/TableContainer"
-import { API_URL, getErrorMessage } from "../utils/api"
-import { formatDate } from "../utils/formatters"
-import { paginateRows } from "../utils/pagination"
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  FiEdit2,
+  FiEye,
+  FiMap,
+  FiPlus,
+  FiSearch,
+  FiTrash2,
+} from "react-icons/fi";
+import Alert from "../components/ui/Alert";
+import Button from "../components/ui/Button";
+import ConfirmBox from "../components/ui/ConfirmBox";
+import EmptyState from "../components/ui/EmptyState";
+import Input from "../components/ui/Input";
+import LoadingState from "../components/ui/LoadingState";
+import Modal from "../components/ui/Modal";
+import PageHeader from "../components/ui/PageHeader";
+import Pagination from "../components/ui/Pagination";
+import Select from "../components/ui/Select";
+import StatCard from "../components/ui/StatCard";
+import StatusBadge from "../components/ui/StatusBadge";
+import TableContainer from "../components/ui/TableContainer";
+import { API_URL, getErrorMessage } from "../utils/api";
+import { formatDate } from "../utils/formatters";
+import { paginateRows } from "../utils/pagination";
 
 type Project = {
-  id: number
-  name: string
-  location: string | null
-  administrator: string | null
-  tax_declaration_no: string | null
-  pin: string | null
-  status: "active" | "inactive" | string
-  ended_at: string | null
-  created_at: string
-  updated_at: string
-}
+  id: number;
+  name: string;
+  location: string | null;
+  administrator: string | null;
+  tax_declaration_no: string | null;
+  pin: string | null;
+  status: "active" | "inactive" | string;
+  ended_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
 
 type ProjectFormData = {
-  name: string
-  location: string
-  administrator: string
-  tax_declaration_no: string
-  pin: string
-  status: "active" | "inactive"
-}
+  name: string;
+  location: string;
+  administrator: string;
+  tax_declaration_no: string;
+  pin: string;
+  status: "active" | "inactive";
+};
 
 type ProjectsResponse = {
-  projects: Project[]
-}
+  projects: Project[];
+};
 
 const emptyFormData: ProjectFormData = {
   name: "",
@@ -50,21 +58,21 @@ const emptyFormData: ProjectFormData = {
   tax_declaration_no: "",
   pin: "",
   status: "active",
-}
+};
 
 const fetchProjects = async () => {
   const response = await fetch(`${API_URL}/projects`, {
     credentials: "include",
-  })
+  });
 
   if (!response.ok) {
-    throw new Error(await getErrorMessage(response))
+    throw new Error(await getErrorMessage(response));
   }
 
-  const data = (await response.json()) as ProjectsResponse
+  const data = (await response.json()) as ProjectsResponse;
 
-  return data.projects
-}
+  return data.projects;
+};
 
 const createProject = async (projectData: ProjectFormData) => {
   const response = await fetch(`${API_URL}/projects`, {
@@ -74,19 +82,19 @@ const createProject = async (projectData: ProjectFormData) => {
       "Content-Type": "application/json",
     },
     body: JSON.stringify(projectData),
-  })
+  });
 
   if (!response.ok) {
-    throw new Error(await getErrorMessage(response))
+    throw new Error(await getErrorMessage(response));
   }
-}
+};
 
 const updateProject = async ({
   id,
   projectData,
 }: {
-  id: number
-  projectData: ProjectFormData
+  id: number;
+  projectData: ProjectFormData;
 }) => {
   const response = await fetch(`${API_URL}/projects/${id}`, {
     method: "PATCH",
@@ -95,12 +103,23 @@ const updateProject = async ({
       "Content-Type": "application/json",
     },
     body: JSON.stringify(projectData),
-  })
+  });
 
   if (!response.ok) {
-    throw new Error(await getErrorMessage(response))
+    throw new Error(await getErrorMessage(response));
   }
-}
+};
+
+const deleteProject = async (id: number) => {
+  const response = await fetch(`${API_URL}/projects/${id}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+
+  if (!response.ok) {
+    throw new Error(await getErrorMessage(response));
+  }
+};
 
 const projectToFormData = (project: Project): ProjectFormData => ({
   name: project.name,
@@ -109,20 +128,22 @@ const projectToFormData = (project: Project): ProjectFormData => ({
   tax_declaration_no: project.tax_declaration_no ?? "",
   pin: project.pin ?? "",
   status: project.status === "inactive" ? "inactive" : "active",
-})
+});
 
 const Projects = () => {
-  const queryClient = useQueryClient()
-  const [searchInput, setSearchInput] = useState("")
-  const [statusFilter, setStatusFilter] = useState("all")
-  const [isAddOpen, setIsAddOpen] = useState(false)
-  const [viewProject, setViewProject] = useState<Project | null>(null)
-  const [editProject, setEditProject] = useState<Project | null>(null)
-  const [formData, setFormData] = useState<ProjectFormData>(emptyFormData)
-  const [editFormData, setEditFormData] = useState<ProjectFormData>(emptyFormData)
-  const [page, setPage] = useState(1)
-  const [rowsPerPage, setRowsPerPage] = useState(10)
-  const [successMessage, setSuccessMessage] = useState("")
+  const queryClient = useQueryClient();
+  const [searchInput, setSearchInput] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [isAddOpen, setIsAddOpen] = useState(false);
+  const [viewProject, setViewProject] = useState<Project | null>(null);
+  const [editProject, setEditProject] = useState<Project | null>(null);
+  const [formData, setFormData] = useState<ProjectFormData>(emptyFormData);
+  const [editFormData, setEditFormData] =
+    useState<ProjectFormData>(emptyFormData);
+  const [page, setPage] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [successMessage, setSuccessMessage] = useState("");
+  const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
 
   const {
     data: projects = [],
@@ -131,54 +152,63 @@ const Projects = () => {
   } = useQuery({
     queryKey: ["projects"],
     queryFn: fetchProjects,
-  })
+  });
 
   const resetForm = () => {
-    setFormData(emptyFormData)
-  }
+    setFormData(emptyFormData);
+  };
 
   const createProjectMutation = useMutation({
     mutationFn: createProject,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["projects"] })
-      setIsAddOpen(false)
-      resetForm()
-      setSuccessMessage("Project created successfully")
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+      setIsAddOpen(false);
+      resetForm();
+      setSuccessMessage("Project created successfully");
     },
-  })
+  });
 
   const updateProjectMutation = useMutation({
     mutationFn: updateProject,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["projects"] })
-      setEditProject(null)
-      setSuccessMessage("Project updated successfully")
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+      setEditProject(null);
+      setSuccessMessage("Project updated successfully");
     },
-  })
+  });
 
   const openEditModal = (project: Project) => {
-    setEditProject(project)
-    setEditFormData(projectToFormData(project))
-  }
+    setEditProject(project);
+    setEditFormData(projectToFormData(project));
+  };
 
   const handleAddProject = (e: { preventDefault: () => void }) => {
-    e.preventDefault()
-    createProjectMutation.mutate(formData)
-  }
+    e.preventDefault();
+    createProjectMutation.mutate(formData);
+  };
 
   const handleUpdateProject = (e: { preventDefault: () => void }) => {
-    e.preventDefault()
+    e.preventDefault();
 
-    if (!editProject) return
+    if (!editProject) return;
 
     updateProjectMutation.mutate({
       id: editProject.id,
       projectData: editFormData,
-    })
-  }
+    });
+  };
+
+  const deleteProjectMutation = useMutation({
+    mutationFn: deleteProject,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+      setProjectToDelete(null);
+      setSuccessMessage("Project deleted successfully");
+    },
+  });
 
   const filteredProjects = projects.filter((project) => {
-    const search = searchInput.toLowerCase().trim()
+    const search = searchInput.toLowerCase().trim();
     const matchesSearch =
       search === "" ||
       project.name.toLowerCase().includes(search) ||
@@ -186,21 +216,25 @@ const Projects = () => {
       (project.administrator ?? "").toLowerCase().includes(search) ||
       (project.tax_declaration_no ?? "").toLowerCase().includes(search) ||
       (project.pin ?? "").toLowerCase().includes(search) ||
-      project.status.toLowerCase().includes(search)
+      project.status.toLowerCase().includes(search);
 
     const matchesStatus =
-      statusFilter === "all" || project.status === statusFilter
+      statusFilter === "all" || project.status === statusFilter;
 
-    return matchesSearch && matchesStatus
-  })
+    return matchesSearch && matchesStatus;
+  });
 
-  const paginatedProjects = paginateRows(filteredProjects, page, rowsPerPage)
-  const activeCount = projects.filter((project) => project.status === "active").length
-  const inactiveCount = projects.filter((project) => project.status === "inactive").length
+  const paginatedProjects = paginateRows(filteredProjects, page, rowsPerPage);
+  const activeCount = projects.filter(
+    (project) => project.status === "active",
+  ).length;
+  const inactiveCount = projects.filter(
+    (project) => project.status === "inactive",
+  ).length;
 
   const formFields = (
     data: ProjectFormData,
-    setData: (data: ProjectFormData) => void
+    setData: (data: ProjectFormData) => void,
   ) => (
     <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
       <Input
@@ -234,7 +268,10 @@ const Projects = () => {
       <Select
         label="Status"
         onChange={(e) =>
-          setData({ ...data, status: e.target.value as ProjectFormData["status"] })
+          setData({
+            ...data,
+            status: e.target.value as ProjectFormData["status"],
+          })
         }
         value={data.status}
       >
@@ -242,13 +279,17 @@ const Projects = () => {
         <option value="inactive">Inactive</option>
       </Select>
     </div>
-  )
+  );
 
   return (
     <div>
       <PageHeader
         actions={
-          <Button icon={<FiPlus />} onClick={() => setIsAddOpen(true)} variant="primary">
+          <Button
+            icon={<FiPlus />}
+            onClick={() => setIsAddOpen(true)}
+            variant="primary"
+          >
             Add Project
           </Button>
         }
@@ -273,16 +314,16 @@ const Projects = () => {
         <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_180px_auto]">
           <Input
             onChange={(e) => {
-              setSearchInput(e.target.value)
-              setPage(1)
+              setSearchInput(e.target.value);
+              setPage(1);
             }}
             placeholder="Search name, location, administrator, tax no, pin..."
             value={searchInput}
           />
           <Select
             onChange={(e) => {
-              setStatusFilter(e.target.value)
-              setPage(1)
+              setStatusFilter(e.target.value);
+              setPage(1);
             }}
             value={statusFilter}
           >
@@ -293,9 +334,9 @@ const Projects = () => {
           <Button
             icon={<FiSearch />}
             onClick={() => {
-              setSearchInput("")
-              setStatusFilter("all")
-              setPage(1)
+              setSearchInput("");
+              setStatusFilter("all");
+              setPage(1);
             }}
           >
             Reset
@@ -337,7 +378,10 @@ const Projects = () => {
                 </thead>
                 <tbody className="divide-y divide-slate-100 bg-white">
                   {paginatedProjects.map((project) => (
-                    <tr className="transition hover:bg-slate-50" key={project.id}>
+                    <tr
+                      className="transition hover:bg-slate-50"
+                      key={project.id}
+                    >
                       <td className="px-4 py-3 font-semibold text-slate-900">
                         {project.name}
                       </td>
@@ -369,6 +413,13 @@ const Projects = () => {
                             onClick={() => openEditModal(project)}
                           >
                             Edit
+                          </Button>
+                          <Button
+                            icon={<FiTrash2 />}
+                            onClick={() => setProjectToDelete(project)}
+                            variant="danger"
+                          >
+                            Delete
                           </Button>
                         </div>
                       </td>
@@ -412,23 +463,44 @@ const Projects = () => {
       {viewProject ? (
         <Modal onClose={() => setViewProject(null)} title="Project Details">
           <div className="grid grid-cols-1 gap-3 text-sm md:grid-cols-2">
-            <p><b>ID:</b> {viewProject.id}</p>
-            <p><b>Name:</b> {viewProject.name}</p>
-            <p><b>Location:</b> {viewProject.location || "-"}</p>
-            <p><b>Administrator:</b> {viewProject.administrator || "-"}</p>
-            <p><b>Tax Declaration No.:</b> {viewProject.tax_declaration_no || "-"}</p>
-            <p><b>PIN:</b> {viewProject.pin || "-"}</p>
-            <p><b>Status:</b> {viewProject.status}</p>
-            <p><b>Ended At:</b> {formatDate(viewProject.ended_at)}</p>
-            <p><b>Created At:</b> {formatDate(viewProject.created_at)}</p>
-            <p><b>Updated At:</b> {formatDate(viewProject.updated_at)}</p>
+            <p>
+              <b>ID:</b> {viewProject.id}
+            </p>
+            <p>
+              <b>Name:</b> {viewProject.name}
+            </p>
+            <p>
+              <b>Location:</b> {viewProject.location || "-"}
+            </p>
+            <p>
+              <b>Administrator:</b> {viewProject.administrator || "-"}
+            </p>
+            <p>
+              <b>Tax Declaration No.:</b>{" "}
+              {viewProject.tax_declaration_no || "-"}
+            </p>
+            <p>
+              <b>PIN:</b> {viewProject.pin || "-"}
+            </p>
+            <p>
+              <b>Status:</b> {viewProject.status}
+            </p>
+            <p>
+              <b>Ended At:</b> {formatDate(viewProject.ended_at)}
+            </p>
+            <p>
+              <b>Created At:</b> {formatDate(viewProject.created_at)}
+            </p>
+            <p>
+              <b>Updated At:</b> {formatDate(viewProject.updated_at)}
+            </p>
           </div>
           <div className="mt-5 flex justify-end gap-2">
             <Button
               icon={<FiEdit2 />}
               onClick={() => {
-                openEditModal(viewProject)
-                setViewProject(null)
+                openEditModal(viewProject);
+                setViewProject(null);
               }}
               variant="primary"
             >
@@ -436,6 +508,19 @@ const Projects = () => {
             </Button>
             <Button onClick={() => setViewProject(null)}>Close</Button>
           </div>
+        </Modal>
+      ) : null}
+
+      {projectToDelete ? (
+        <Modal onClose={() => setProjectToDelete(null)} title="Delete Project">
+          <ConfirmBox
+            message={`Are you sure you want to delete ${projectToDelete.name}? This cannot be undone.`}
+            onCancel={() => setProjectToDelete(null)}
+            onConfirm={() => deleteProjectMutation.mutate(projectToDelete.id)}
+            confirmLabel={
+              deleteProjectMutation.isPending ? "Deleting..." : "Delete"
+            }
+          />
         </Modal>
       ) : null}
 
@@ -460,7 +545,7 @@ const Projects = () => {
         </Modal>
       ) : null}
     </div>
-  )
-}
+  );
+};
 
-export default Projects
+export default Projects;

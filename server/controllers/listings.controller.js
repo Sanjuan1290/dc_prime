@@ -558,3 +558,48 @@ export const updateListing = async (req, res) => {
     message: 'Listing updated successfully'
   })
 }
+
+
+export const deleteListing = async (req, res) => {
+  const { id } = req.params
+
+  const [listingRows] = await db.query(
+    `SELECT id, unit_id, status FROM listings WHERE id = ? LIMIT 1`,
+    [id]
+  )
+
+  const listing = listingRows[0]
+
+  if (!listing) {
+    return res.status(404).json({ message: 'Listing not found' })
+  }
+
+  if (['reserved', 'sold'].includes(listing.status)) {
+    return res.status(400).json({
+      message: 'Cannot delete a listing that has been reserved or sold.'
+    })
+  }
+
+  const [unitRows] = await db.query(
+    `SELECT id FROM client_units WHERE listing_id = ? LIMIT 1`,
+    [id]
+  )
+
+  if (unitRows.length > 0) {
+    return res.status(400).json({
+      message: 'Cannot delete a listing that has been reserved or sold.'
+    })
+  }
+
+  await db.query(`DELETE FROM listings WHERE id = ?`, [id])
+
+  await createAuditLog({
+    userId: req.user.id,
+    action: 'delete',
+    module: 'Listings',
+    description: `Deleted listing ${listing.unit_id}`,
+    ipAddress: getClientIp(req)
+  })
+
+  return res.status(200).json({ message: 'Listing deleted successfully' })
+}

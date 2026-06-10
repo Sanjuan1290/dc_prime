@@ -281,9 +281,7 @@ export const createCashAdvance = async (req, res) => {
     client_unit_id,
     commission_id,
     amount,
-    status = 'pending',
     requested_at,
-    approved_at,
     notes,
   } = req.body
 
@@ -301,13 +299,7 @@ export const createCashAdvance = async (req, res) => {
     })
   }
 
-  const finalStatus = validateStatus(status)
-
-  if (!finalStatus) {
-    return res.status(400).json({
-      message: 'Invalid cash advance status',
-    })
-  }
+  const finalStatus = 'pending'
 
   const connection = await db.getConnection()
 
@@ -359,16 +351,8 @@ export const createCashAdvance = async (req, res) => {
       }
     }
 
-    const isApproved = ['approved', 'partially_deducted', 'deducted'].includes(
-      finalStatus
-    )
-
-    const finalApprovedAt = isApproved
-      ? approved_at || new Date()
-      : null
-
-    const finalApprovedBy = isApproved ? req.user.id : null
-
+    const finalApprovedAt = null
+    const finalApprovedBy = null
     const finalRequestedAt = requested_at || new Date()
 
     const [result] = await connection.query(

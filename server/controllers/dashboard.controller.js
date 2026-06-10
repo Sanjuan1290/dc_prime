@@ -82,6 +82,7 @@ export const getDashboardSummary = async (req, res) => {
       (
         SELECT COALESCE(SUM(amount), 0)
         FROM payments
+        WHERE status = 'verified'
       ) AS tracked_collections,
 
       (

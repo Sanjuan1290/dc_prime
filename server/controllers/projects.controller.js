@@ -1,5 +1,6 @@
 import { db } from '../db/connect.js'
 import { createAuditLog } from '../utils/createAuditLog.js'
+import { getClientIp } from '../utils/getClientIp.js'
 
 export const getProjects = async (req, res) => {
   const [projects] = await db.query(
@@ -173,4 +174,43 @@ export const updateProject = async (req, res) => {
   res.status(200).json({
     message: 'Project updated successfully'
   })
+}
+
+
+export const deleteProject = async (req, res) => {
+  const { id } = req.params
+
+  const [projectRows] = await db.query(
+    `SELECT id, name FROM projects WHERE id = ? LIMIT 1`,
+    [id]
+  )
+
+  const project = projectRows[0]
+
+  if (!project) {
+    return res.status(404).json({ message: 'Project not found' })
+  }
+
+  const [listingRows] = await db.query(
+    `SELECT id FROM listings WHERE project_id = ? LIMIT 1`,
+    [id]
+  )
+
+  if (listingRows.length > 0) {
+    return res.status(400).json({
+      message: 'Cannot delete a project that has listings. Remove all listings first.'
+    })
+  }
+
+  await db.query(`DELETE FROM projects WHERE id = ?`, [id])
+
+  await createAuditLog({
+    userId: req.user.id,
+    action: 'delete',
+    module: 'Projects',
+    description: `Deleted project ${project.name}`,
+    ipAddress: getClientIp(req)
+  })
+
+  res.status(200).json({ message: 'Project deleted successfully' })
 }
