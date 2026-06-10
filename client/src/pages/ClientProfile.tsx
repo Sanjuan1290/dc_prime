@@ -684,15 +684,6 @@ const ClientProfile = () => {
               label="Default Seller Role"
               value={formatText(client.default_seller_role)}
             />
-            <Detail
-              label="Default Seller Rate"
-              value={
-                client.default_seller_commission_rate === null ||
-                client.default_seller_commission_rate === undefined
-                  ? "-"
-                  : `${formatNumber(client.default_seller_commission_rate)}%`
-              }
-            />
             <Detail label="Created At" value={formatDate(client.created_at)} />
           </div>
         </section>
