@@ -258,6 +258,8 @@ const Employees = () => {
 
   const [exportStartDate, setExportStartDate] = useState(defaultExportRange.start)
   const [exportEndDate, setExportEndDate] = useState(defaultExportRange.end)
+  const [attendancePage, setAttendancePage] = useState(1)
+  const [attendanceRowsPerPage, setAttendanceRowsPerPage] = useState(10)
 
   const {
     data: employees = [],
@@ -358,6 +360,7 @@ const Employees = () => {
     const range = getCurrentExportRange()
     setExportStartDate(range.start)
     setExportEndDate(range.end)
+    setAttendancePage(1)
     setViewMoreEmployee(employee)
   }
 
@@ -833,6 +836,10 @@ const Employees = () => {
   )
   const withRestDays = employees.filter((employee) => employee.rest_days).length
 
+  const paginatedAttendanceLogs = attendanceSummary
+    ? paginateRows(attendanceSummary.logs, attendancePage, attendanceRowsPerPage)
+    : []
+
   if (isLoading) {
     return <LoadingState label="Loading employees..." />
   }
@@ -1112,13 +1119,19 @@ const Employees = () => {
                 label="Start Date"
                 type="date"
                 value={exportStartDate}
-                onChange={(e) => setExportStartDate(e.target.value)}
+                onChange={(e) => {
+                  setExportStartDate(e.target.value)
+                  setAttendancePage(1)
+                }}
               />
               <Input
                 label="End Date"
                 type="date"
                 value={exportEndDate}
-                onChange={(e) => setExportEndDate(e.target.value)}
+                onChange={(e) => {
+                  setExportEndDate(e.target.value)
+                  setAttendancePage(1)
+                }}
               />
               <Button
                 icon={<FiRefreshCw />}
@@ -1126,6 +1139,7 @@ const Employees = () => {
                   const range = getCurrentExportRange()
                   setExportStartDate(range.start)
                   setExportEndDate(range.end)
+                  setAttendancePage(1)
                 }}
               >
                 Default Range
@@ -1229,7 +1243,7 @@ const Employees = () => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 bg-white">
-                    {attendanceSummary.logs.map((log) => (
+                    {paginatedAttendanceLogs.map((log) => (
                       <tr key={log.id} className="hover:bg-slate-50">
                         <td className="px-4 py-3 text-slate-600">
                           {formatDateValue(log.attendance_date)}
@@ -1272,6 +1286,14 @@ const Employees = () => {
                   <EmptyState title="No attendance records found for this period" />
                 ) : null}
               </TableContainer>
+
+              <Pagination
+                page={attendancePage}
+                rowsPerPage={attendanceRowsPerPage}
+                totalRows={attendanceSummary.logs.length}
+                onPageChange={setAttendancePage}
+                onRowsPerPageChange={setAttendanceRowsPerPage}
+              />
             </>
           ) : null}
         </Modal>

@@ -61,6 +61,7 @@ const minutesToHours = (minutes) => {
   return Number((minutes / 60).toFixed(2))
 }
 
+
 const isAfterCutoff = () => {
   const currentMinutes = timeToMinutes(getCurrentTimeString())
   const cutoffMinutes = timeToMinutes(defaultSchedule.timeOut)
@@ -68,6 +69,178 @@ const isAfterCutoff = () => {
   if (currentMinutes === null || cutoffMinutes === null) return false
 
   return currentMinutes >= cutoffMinutes
+}
+
+const createMissingAttendanceForEmployees = async ({
+  employeeIds = null,
+  attendanceDate = getLocalDate(),
+  forceAbsent = false
+}) => {
+  const params = []
+  let employeeFilter = ''
+
+  if (Array.isArray(employeeIds) && employeeIds.length > 0) {
+    employeeFilter = `AND id IN (${employeeIds.map(() => '?').join(', ')})`
+    params.push(...employeeIds)
+  }
+
+  const [employees] = await db.query(
+    `
+    SELECT id, full_name
+    FROM employees
+    WHERE status = 'active'
+      ${employeeFilter}
+    ORDER BY full_name ASC
+    `,
+    params
+  )
+
+  const currentIsAfterCutoff = isAfterCutoff()
+  let createdPresent = 0
+  let createdRestDays = 0
+  let createdAbsents = 0
+  let skippedExisting = 0
+  let skippedBeforeCutoff = 0
+
+  for (const employee of employees) {
+    const alreadyExists = await hasDuplicateAttendance({
+      employeeId: employee.id,
+      attendanceDate
+    })
+
+    if (alreadyExists) {
+      skippedExisting += 1
+      continue
+    }
+
+    const isRestDay = await isEmployeeRestDay(employee.id, attendanceDate)
+
+    if (isRestDay) {
+      await db.query(
+        `
+        INSERT INTO attendance (
+          employee_id,
+          attendance_date,
+          day_status,
+          time_in,
+          time_out,
+          schedule_time_in,
+          schedule_time_out,
+          break_minutes
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        [
+          employee.id,
+          attendanceDate,
+          'rest_day',
+          null,
+          null,
+          defaultSchedule.timeIn,
+          defaultSchedule.timeOut,
+          defaultSchedule.breakMinutes
+        ]
+      )
+
+      createdRestDays += 1
+      continue
+    }
+
+    if (forceAbsent) {
+      await db.query(
+        `
+        INSERT INTO attendance (
+          employee_id,
+          attendance_date,
+          day_status,
+          time_in,
+          time_out,
+          schedule_time_in,
+          schedule_time_out,
+          break_minutes
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        [
+          employee.id,
+          attendanceDate,
+          'absent',
+          null,
+          null,
+          defaultSchedule.timeIn,
+          defaultSchedule.timeOut,
+          defaultSchedule.breakMinutes
+        ]
+      )
+
+      createdAbsents += 1
+      continue
+    }
+
+    if (!currentIsAfterCutoff) {
+      await db.query(
+        `
+        INSERT INTO attendance (
+          employee_id,
+          attendance_date,
+          day_status,
+          time_in,
+          time_out,
+          schedule_time_in,
+          schedule_time_out,
+          break_minutes
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        [
+          employee.id,
+          attendanceDate,
+          'present',
+          defaultSchedule.timeIn,
+          defaultSchedule.timeOut,
+          defaultSchedule.timeIn,
+          defaultSchedule.timeOut,
+          defaultSchedule.breakMinutes
+        ]
+      )
+
+      createdPresent += 1
+      continue
+    }
+
+    await db.query(
+      `
+      INSERT INTO attendance (
+        employee_id,
+        attendance_date,
+        day_status,
+        time_in,
+        time_out,
+        schedule_time_in,
+        schedule_time_out,
+        break_minutes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        employee.id,
+        attendanceDate,
+        'absent',
+        null,
+        null,
+        defaultSchedule.timeIn,
+        defaultSchedule.timeOut,
+        defaultSchedule.breakMinutes
+      ]
+    )
+
+    createdAbsents += 1
+  }
+
+  return {
+    totalEmployees: employees.length,
+    createdPresent,
+    createdRestDays,
+    createdAbsents,
+    skippedExisting,
+    skippedBeforeCutoff
+  }
 }
 
 const getWorkHours = (timeIn, timeOut, breakMinutes = 60) => {
@@ -241,6 +414,13 @@ export const getAttendance = async (req, res) => {
     date_to,
     day_status
   } = req.query
+
+  if (isAfterCutoff()) {
+    await createMissingAttendanceForEmployees({
+      attendanceDate: getLocalDate(),
+      forceAbsent: true
+    })
+  }
 
   const conditions = []
   const params = []
@@ -556,99 +736,11 @@ export const createDefaultAttendance = async (req, res) => {
 
 export const generateTodayAttendance = async (req, res) => {
   const today = getLocalDate()
-  const currentIsAfterCutoff = isAfterCutoff()
 
-  const [employees] = await db.query(
-    `
-    SELECT
-      id,
-      full_name
-    FROM employees
-    WHERE status = 'active'
-    ORDER BY full_name ASC
-    `
-  )
-
-  let createdRestDays = 0
-  let createdAbsents = 0
-  let skippedExisting = 0
-  let skippedBeforeCutoff = 0
-
-  for (const employee of employees) {
-    const alreadyExists = await hasDuplicateAttendance({
-      employeeId: employee.id,
-      attendanceDate: today
-    })
-
-    if (alreadyExists) {
-      skippedExisting += 1
-      continue
-    }
-
-    const isRestDay = await isEmployeeRestDay(employee.id, today)
-
-    if (isRestDay) {
-      await db.query(
-        `
-        INSERT INTO attendance (
-          employee_id,
-          attendance_date,
-          day_status,
-          time_in,
-          time_out,
-          schedule_time_in,
-          schedule_time_out,
-          break_minutes
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        `,
-        [
-          employee.id,
-          today,
-          'rest_day',
-          null,
-          null,
-          defaultSchedule.timeIn,
-          defaultSchedule.timeOut,
-          defaultSchedule.breakMinutes
-        ]
-      )
-
-      createdRestDays += 1
-      continue
-    }
-
-    if (!currentIsAfterCutoff) {
-      skippedBeforeCutoff += 1
-      continue
-    }
-
-    await db.query(
-      `
-      INSERT INTO attendance (
-        employee_id,
-        attendance_date,
-        day_status,
-        time_in,
-        time_out,
-        schedule_time_in,
-        schedule_time_out,
-        break_minutes
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `,
-      [
-        employee.id,
-        today,
-        'absent',
-        null,
-        null,
-        defaultSchedule.timeIn,
-        defaultSchedule.timeOut,
-        defaultSchedule.breakMinutes
-      ]
-    )
-
-    createdAbsents += 1
-  }
+  const result = await createMissingAttendanceForEmployees({
+    attendanceDate: today,
+    forceAbsent: true
+  })
 
   await createAuditLog({
     userId: req.user.id,
@@ -661,10 +753,46 @@ export const generateTodayAttendance = async (req, res) => {
   res.status(200).json({
     message: 'Today attendance generation finished',
     date: today,
-    createdRestDays,
-    createdAbsents,
-    skippedExisting,
-    skippedBeforeCutoff
+    ...result
+  })
+}
+
+export const createBulkDefaultAttendance = async (req, res) => {
+  const { employee_ids } = req.body
+  const today = getLocalDate()
+
+  if (!Array.isArray(employee_ids) || employee_ids.length === 0) {
+    return res.status(400).json({
+      message: 'Select at least one employee'
+    })
+  }
+
+  const uniqueEmployeeIds = [...new Set(employee_ids.map(Number))].filter(Boolean)
+
+  if (uniqueEmployeeIds.length === 0) {
+    return res.status(400).json({
+      message: 'Select at least one valid employee'
+    })
+  }
+
+  const result = await createMissingAttendanceForEmployees({
+    employeeIds: uniqueEmployeeIds,
+    attendanceDate: today,
+    forceAbsent: false
+  })
+
+  await createAuditLog({
+    userId: req.user.id,
+    action: 'create',
+    module: 'Attendance',
+    description: `Created quick attendance for ${uniqueEmployeeIds.length} employee(s) on ${today}`,
+    ipAddress: getClientIp(req)
+  })
+
+  res.status(201).json({
+    message: 'Quick attendance finished',
+    date: today,
+    ...result
   })
 }
 
