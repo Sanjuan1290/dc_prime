@@ -28,7 +28,7 @@ CREATE TABLE `accredited_sellers` (
   `full_name` varchar(255) NOT NULL,
   `email` varchar(255) DEFAULT NULL,
   `contact_no` varchar(50) DEFAULT NULL,
-  `seller_role` enum('agent','broker','manager') NOT NULL DEFAULT 'agent',
+  `seller_role` enum('broker_network_manager','broker','manager','agent') NOT NULL DEFAULT 'agent',
   `parent_seller_id` int DEFAULT NULL,
   `custom_reports_under` varchar(255) DEFAULT NULL,
   `status` varchar(50) NOT NULL DEFAULT 'active',
@@ -41,7 +41,7 @@ CREATE TABLE `accredited_sellers` (
   KEY `fk_accredited_sellers_parent` (`parent_seller_id`),
   CONSTRAINT `fk_accredited_sellers_parent` FOREIGN KEY (`parent_seller_id`) REFERENCES `accredited_sellers` (`id`),
   CONSTRAINT `fk_accredited_sellers_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -50,7 +50,7 @@ CREATE TABLE `accredited_sellers` (
 
 LOCK TABLES `accredited_sellers` WRITE;
 /*!40000 ALTER TABLE `accredited_sellers` DISABLE KEYS */;
-INSERT INTO `accredited_sellers` VALUES (1,NULL,'NEPOMUCENO, ERWIN','erwin@gmail.com','0991-995-8155','agent',NULL,NULL,'active','2025-06-06','2026-06-10 03:42:10','2026-06-10 03:42:10',5.00);
+INSERT INTO `accredited_sellers` VALUES (1,NULL,'NEPOMUCENO, ERWIN','erwin@gmail.com','0991-995-8155','agent',2,NULL,'active','2025-06-05','2026-06-10 03:42:10','2026-06-10 09:08:06',5.00),(2,NULL,'PARROCHO, JOSEPH E.','joseph@gmail.com','09075647345','manager',NULL,NULL,'active','2026-06-02','2026-06-10 08:04:18','2026-06-10 09:07:55',7.00);
 /*!40000 ALTER TABLE `accredited_sellers` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -76,7 +76,7 @@ CREATE TABLE `attendance` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_employee_attendance_date` (`employee_id`,`attendance_date`),
   CONSTRAINT `fk_attendance_employee` FOREIGN KEY (`employee_id`) REFERENCES `employees` (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=13 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=14 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -85,7 +85,7 @@ CREATE TABLE `attendance` (
 
 LOCK TABLES `attendance` WRITE;
 /*!40000 ALTER TABLE `attendance` DISABLE KEYS */;
-INSERT INTO `attendance` VALUES (1,1,'2026-06-10','present','09:00:00','18:00:00','09:00:00','18:00:00',60,'2026-06-10 05:13:24','2026-06-10 05:13:24'),(2,1,'2026-06-01','present','09:00:00','18:00:00','09:00:00','18:00:00',60,'2026-06-10 05:15:04','2026-06-10 05:16:41'),(3,1,'2026-06-02','rest_day',NULL,NULL,'09:00:00','18:00:00',60,'2026-06-10 05:15:07','2026-06-10 05:15:07'),(4,1,'2026-06-03','present','09:00:00','18:00:00','09:00:00','18:00:00',60,'2026-06-10 05:15:09','2026-06-10 05:15:09'),(5,1,'2026-06-04','rest_day',NULL,NULL,'09:00:00','18:00:00',60,'2026-06-10 05:15:11','2026-06-10 05:15:11'),(6,1,'2026-06-05','present','09:00:00','18:00:00','09:00:00','18:00:00',60,'2026-06-10 05:15:13','2026-06-10 05:15:13'),(7,1,'2026-06-06','present','09:00:00','18:00:00','09:00:00','18:00:00',60,'2026-06-10 05:15:15','2026-06-10 05:15:15'),(8,1,'2026-06-07','present','09:00:00','18:00:00','09:00:00','18:00:00',60,'2026-06-10 05:15:19','2026-06-10 05:15:19'),(9,1,'2026-06-08','present','09:00:00','18:00:00','09:00:00','18:00:00',60,'2026-06-10 05:15:20','2026-06-10 05:15:20'),(10,1,'2026-06-09','rest_day',NULL,NULL,'09:00:00','18:00:00',60,'2026-06-10 05:15:23','2026-06-10 05:15:23'),(11,1,'2026-06-11','rest_day',NULL,NULL,'09:00:00','18:00:00',60,'2026-06-10 05:15:26','2026-06-10 05:15:26'),(12,1,'2026-06-13','present','09:00:00','18:00:00','09:00:00','18:00:00',60,'2026-06-10 05:15:29','2026-06-10 05:17:59');
+INSERT INTO `attendance` VALUES (1,1,'2026-06-14','present','09:00:00','18:00:00','09:00:00','18:00:00',60,'2026-06-10 05:13:24','2026-06-10 07:37:02'),(2,1,'2026-06-01','present','09:00:00','18:00:00','09:00:00','18:00:00',60,'2026-06-10 05:15:04','2026-06-10 05:16:41'),(3,1,'2026-06-02','rest_day',NULL,NULL,'09:00:00','18:00:00',60,'2026-06-10 05:15:07','2026-06-10 05:15:07'),(4,1,'2026-06-03','present','09:00:00','18:00:00','09:00:00','18:00:00',60,'2026-06-10 05:15:09','2026-06-10 05:15:09'),(5,1,'2026-06-04','rest_day',NULL,NULL,'09:00:00','18:00:00',60,'2026-06-10 05:15:11','2026-06-10 05:15:11'),(6,1,'2026-06-05','present','09:00:00','18:00:00','09:00:00','18:00:00',60,'2026-06-10 05:15:13','2026-06-10 05:15:13'),(7,1,'2026-06-06','present','09:00:00','18:00:00','09:00:00','18:00:00',60,'2026-06-10 05:15:15','2026-06-10 05:15:15'),(8,1,'2026-06-07','present','09:00:00','18:00:00','09:00:00','18:00:00',60,'2026-06-10 05:15:19','2026-06-10 05:15:19'),(9,1,'2026-06-08','present','09:00:00','18:00:00','09:00:00','18:00:00',60,'2026-06-10 05:15:20','2026-06-10 05:15:20'),(10,1,'2026-06-09','rest_day',NULL,NULL,'09:00:00','18:00:00',60,'2026-06-10 05:15:23','2026-06-10 05:15:23'),(11,1,'2026-06-11','rest_day',NULL,NULL,'09:00:00','18:00:00',60,'2026-06-10 05:15:26','2026-06-10 05:15:26'),(12,1,'2026-06-13','present','09:00:00','18:00:00','09:00:00','18:00:00',60,'2026-06-10 05:15:29','2026-06-10 05:17:59'),(13,1,'2026-06-10','present','09:00:00','18:00:00','09:00:00','18:00:00',60,'2026-06-10 07:37:04','2026-06-10 07:37:04');
 /*!40000 ALTER TABLE `attendance` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -107,7 +107,7 @@ CREATE TABLE `audit_logs` (
   PRIMARY KEY (`id`),
   KEY `fk_audit_logs_user` (`user_id`),
   CONSTRAINT `fk_audit_logs_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=59 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=74 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -116,7 +116,7 @@ CREATE TABLE `audit_logs` (
 
 LOCK TABLES `audit_logs` WRITE;
 /*!40000 ALTER TABLE `audit_logs` DISABLE KEYS */;
-INSERT INTO `audit_logs` VALUES (1,1,'login','Auth','Admin User logged in','::1','2026-06-10 03:39:07'),(2,1,'create','Projects','Created project Bailen','::1','2026-06-10 03:40:00'),(3,1,'create','Listings','Created listing LA-0104','127.0.0.1','2026-06-10 03:41:10'),(4,1,'create','Accredited Sellers','Created accredited seller NEPOMUCENO, ERWIN','127.0.0.1','2026-06-10 03:42:10'),(5,1,'create','Clients','Created client SILVA, ISABEL LAYUG L.','127.0.0.1','2026-06-10 03:42:54'),(6,1,'update','Clients','Updated client SILVA, ISABEL LAYUG L.','127.0.0.1','2026-06-10 03:43:28'),(7,1,'reserve','Client Units','Reserved LA-0104 for SILVA, ISABEL LAYUG L.','127.0.0.1','2026-06-10 03:45:54'),(8,1,'create','Documents','Created document client registration form seller\'s copy','127.0.0.1','2026-06-10 03:46:31'),(9,1,'create','Documents','Created document client registration form administrator copy','127.0.0.1','2026-06-10 03:46:36'),(10,1,'create','Documents','Created document Marriage Certificate','127.0.0.1','2026-06-10 03:46:50'),(11,1,'payment','Payments','Added payment for client unit 1','127.0.0.1','2026-06-10 03:47:48'),(12,1,'update','Payments','Updated payment 1','127.0.0.1','2026-06-10 03:47:58'),(13,1,'create','Client Documents','Created document checklist for client unit 1','127.0.0.1','2026-06-10 03:48:10'),(14,1,'document_check','Client Documents','Applied reusable documents to client unit 1','127.0.0.1','2026-06-10 03:48:12'),(15,1,'document_check','Client Documents','Applied reusable documents to client unit 1','127.0.0.1','2026-06-10 03:48:12'),(16,1,'document_check','Client Documents','Applied reusable documents to client unit 1','127.0.0.1','2026-06-10 03:48:13'),(17,1,'document_check','Client Documents','Applied reusable documents to client unit 1','127.0.0.1','2026-06-10 03:48:13'),(18,1,'document_check','Client Documents','Applied reusable documents to client unit 1','127.0.0.1','2026-06-10 03:48:13'),(19,1,'document_check','Client Documents','Applied reusable documents to client unit 1','127.0.0.1','2026-06-10 03:48:13'),(20,1,'document_check','Client Documents','Applied reusable documents to client unit 1','127.0.0.1','2026-06-10 03:48:13'),(21,1,'document_check','Client Documents','Applied reusable documents to client unit 1','127.0.0.1','2026-06-10 03:48:14'),(22,1,'document_check','Client Documents','Applied reusable documents to client unit 1','127.0.0.1','2026-06-10 03:48:14'),(23,1,'document_check','Client Documents','Updated client document 3 to submitted','127.0.0.1','2026-06-10 03:48:15'),(24,1,'document_check','Client Documents','Updated client document 1 to submitted','127.0.0.1','2026-06-10 03:48:21'),(25,1,'document_check','Client Documents','Updated client document 2 to submitted','127.0.0.1','2026-06-10 03:48:26'),(26,1,'document_check','Client Documents','Updated client document 3 to not_submitted','127.0.0.1','2026-06-10 03:48:34'),(27,1,'document_check','Client Documents','Updated client document 3 to submitted','127.0.0.1','2026-06-10 03:48:36'),(28,1,'update','Documents','Updated document Marriage Certificate','127.0.0.1','2026-06-10 03:48:45'),(29,1,'document_check','Client Documents','Updated client document 3 to not_submitted','127.0.0.1','2026-06-10 03:48:56'),(30,1,'payment','Payments','Added payment for client unit 1','127.0.0.1','2026-06-10 03:49:19'),(31,1,'create','Employees','Created employee Robert Renby C. San Juan','::1','2026-06-10 05:12:42'),(32,1,'create','Attendance','Created default attendance for Robert Renby C. San Juan on 2026-06-10','127.0.0.1','2026-06-10 05:13:24'),(33,1,'create','Attendance','Generated today attendance for 2026-06-10','127.0.0.1','2026-06-10 05:13:40'),(34,1,'create','Attendance','Generated today attendance for 2026-06-10','127.0.0.1','2026-06-10 05:13:41'),(35,1,'create','Attendance','Generated today attendance for 2026-06-10','127.0.0.1','2026-06-10 05:13:41'),(36,1,'create','Attendance','Generated today attendance for 2026-06-10','127.0.0.1','2026-06-10 05:13:41'),(37,1,'create','Attendance','Created attendance for Robert Renby C. San Juan on 2026-06-01','127.0.0.1','2026-06-10 05:15:04'),(38,1,'create','Attendance','Created attendance for Robert Renby C. San Juan on 2026-06-02','127.0.0.1','2026-06-10 05:15:07'),(39,1,'create','Attendance','Created attendance for Robert Renby C. San Juan on 2026-06-03','127.0.0.1','2026-06-10 05:15:09'),(40,1,'create','Attendance','Created attendance for Robert Renby C. San Juan on 2026-06-04','127.0.0.1','2026-06-10 05:15:11'),(41,1,'create','Attendance','Created attendance for Robert Renby C. San Juan on 2026-06-05','127.0.0.1','2026-06-10 05:15:13'),(42,1,'create','Attendance','Created attendance for Robert Renby C. San Juan on 2026-06-06','127.0.0.1','2026-06-10 05:15:15'),(43,1,'create','Attendance','Created attendance for Robert Renby C. San Juan on 2026-06-07','127.0.0.1','2026-06-10 05:15:19'),(44,1,'create','Attendance','Created attendance for Robert Renby C. San Juan on 2026-06-08','127.0.0.1','2026-06-10 05:15:20'),(45,1,'create','Attendance','Created attendance for Robert Renby C. San Juan on 2026-06-09','127.0.0.1','2026-06-10 05:15:23'),(46,1,'create','Attendance','Created attendance for Robert Renby C. San Juan on 2026-06-11','127.0.0.1','2026-06-10 05:15:26'),(47,1,'create','Attendance','Created attendance for Robert Renby C. San Juan on 2026-06-13','127.0.0.1','2026-06-10 05:15:29'),(48,1,'update','Attendance','Updated attendance 2','127.0.0.1','2026-06-10 05:16:11'),(49,1,'update','Attendance','Updated attendance 2','127.0.0.1','2026-06-10 05:16:41'),(50,1,'update','Attendance','Updated attendance 12','127.0.0.1','2026-06-10 05:17:04'),(51,1,'update','Attendance','Updated attendance 12','127.0.0.1','2026-06-10 05:17:59'),(52,1,'create','Attendance','Created quick attendance for 1 employee(s) on 2026-06-10','127.0.0.1','2026-06-10 05:32:45'),(53,1,'create','Attendance','Created quick attendance for 1 employee(s) on 2026-06-10','127.0.0.1','2026-06-10 05:32:49'),(54,1,'create','Attendance','Created quick attendance for 1 employee(s) on 2026-06-10','127.0.0.1','2026-06-10 05:33:07'),(55,1,'create','Attendance','Created quick attendance for 1 employee(s) on 2026-06-10','127.0.0.1','2026-06-10 05:33:13'),(56,1,'create','Attendance','Created quick attendance for 1 employee(s) on 2026-06-10','127.0.0.1','2026-06-10 05:33:28'),(57,1,'create','Attendance','Generated today attendance for 2026-06-10','127.0.0.1','2026-06-10 05:33:47'),(58,1,'create','Attendance','Created quick attendance for 1 employee(s) on 2026-06-10','127.0.0.1','2026-06-10 05:34:22');
+INSERT INTO `audit_logs` VALUES (1,1,'login','Auth','Admin User logged in','::1','2026-06-10 03:39:07'),(2,1,'create','Projects','Created project Bailen','::1','2026-06-10 03:40:00'),(3,1,'create','Listings','Created listing LA-0104','127.0.0.1','2026-06-10 03:41:10'),(4,1,'create','Accredited Sellers','Created accredited seller NEPOMUCENO, ERWIN','127.0.0.1','2026-06-10 03:42:10'),(5,1,'create','Clients','Created client SILVA, ISABEL LAYUG L.','127.0.0.1','2026-06-10 03:42:54'),(6,1,'update','Clients','Updated client SILVA, ISABEL LAYUG L.','127.0.0.1','2026-06-10 03:43:28'),(7,1,'reserve','Client Units','Reserved LA-0104 for SILVA, ISABEL LAYUG L.','127.0.0.1','2026-06-10 03:45:54'),(8,1,'create','Documents','Created document client registration form seller\'s copy','127.0.0.1','2026-06-10 03:46:31'),(9,1,'create','Documents','Created document client registration form administrator copy','127.0.0.1','2026-06-10 03:46:36'),(10,1,'create','Documents','Created document Marriage Certificate','127.0.0.1','2026-06-10 03:46:50'),(11,1,'payment','Payments','Added payment for client unit 1','127.0.0.1','2026-06-10 03:47:48'),(12,1,'update','Payments','Updated payment 1','127.0.0.1','2026-06-10 03:47:58'),(13,1,'create','Client Documents','Created document checklist for client unit 1','127.0.0.1','2026-06-10 03:48:10'),(14,1,'document_check','Client Documents','Applied reusable documents to client unit 1','127.0.0.1','2026-06-10 03:48:12'),(15,1,'document_check','Client Documents','Applied reusable documents to client unit 1','127.0.0.1','2026-06-10 03:48:12'),(16,1,'document_check','Client Documents','Applied reusable documents to client unit 1','127.0.0.1','2026-06-10 03:48:13'),(17,1,'document_check','Client Documents','Applied reusable documents to client unit 1','127.0.0.1','2026-06-10 03:48:13'),(18,1,'document_check','Client Documents','Applied reusable documents to client unit 1','127.0.0.1','2026-06-10 03:48:13'),(19,1,'document_check','Client Documents','Applied reusable documents to client unit 1','127.0.0.1','2026-06-10 03:48:13'),(20,1,'document_check','Client Documents','Applied reusable documents to client unit 1','127.0.0.1','2026-06-10 03:48:13'),(21,1,'document_check','Client Documents','Applied reusable documents to client unit 1','127.0.0.1','2026-06-10 03:48:14'),(22,1,'document_check','Client Documents','Applied reusable documents to client unit 1','127.0.0.1','2026-06-10 03:48:14'),(23,1,'document_check','Client Documents','Updated client document 3 to submitted','127.0.0.1','2026-06-10 03:48:15'),(24,1,'document_check','Client Documents','Updated client document 1 to submitted','127.0.0.1','2026-06-10 03:48:21'),(25,1,'document_check','Client Documents','Updated client document 2 to submitted','127.0.0.1','2026-06-10 03:48:26'),(26,1,'document_check','Client Documents','Updated client document 3 to not_submitted','127.0.0.1','2026-06-10 03:48:34'),(27,1,'document_check','Client Documents','Updated client document 3 to submitted','127.0.0.1','2026-06-10 03:48:36'),(28,1,'update','Documents','Updated document Marriage Certificate','127.0.0.1','2026-06-10 03:48:45'),(29,1,'document_check','Client Documents','Updated client document 3 to not_submitted','127.0.0.1','2026-06-10 03:48:56'),(30,1,'payment','Payments','Added payment for client unit 1','127.0.0.1','2026-06-10 03:49:19'),(31,1,'create','Employees','Created employee Robert Renby C. San Juan','::1','2026-06-10 05:12:42'),(32,1,'create','Attendance','Created default attendance for Robert Renby C. San Juan on 2026-06-10','127.0.0.1','2026-06-10 05:13:24'),(33,1,'create','Attendance','Generated today attendance for 2026-06-10','127.0.0.1','2026-06-10 05:13:40'),(34,1,'create','Attendance','Generated today attendance for 2026-06-10','127.0.0.1','2026-06-10 05:13:41'),(35,1,'create','Attendance','Generated today attendance for 2026-06-10','127.0.0.1','2026-06-10 05:13:41'),(36,1,'create','Attendance','Generated today attendance for 2026-06-10','127.0.0.1','2026-06-10 05:13:41'),(37,1,'create','Attendance','Created attendance for Robert Renby C. San Juan on 2026-06-01','127.0.0.1','2026-06-10 05:15:04'),(38,1,'create','Attendance','Created attendance for Robert Renby C. San Juan on 2026-06-02','127.0.0.1','2026-06-10 05:15:07'),(39,1,'create','Attendance','Created attendance for Robert Renby C. San Juan on 2026-06-03','127.0.0.1','2026-06-10 05:15:09'),(40,1,'create','Attendance','Created attendance for Robert Renby C. San Juan on 2026-06-04','127.0.0.1','2026-06-10 05:15:11'),(41,1,'create','Attendance','Created attendance for Robert Renby C. San Juan on 2026-06-05','127.0.0.1','2026-06-10 05:15:13'),(42,1,'create','Attendance','Created attendance for Robert Renby C. San Juan on 2026-06-06','127.0.0.1','2026-06-10 05:15:15'),(43,1,'create','Attendance','Created attendance for Robert Renby C. San Juan on 2026-06-07','127.0.0.1','2026-06-10 05:15:19'),(44,1,'create','Attendance','Created attendance for Robert Renby C. San Juan on 2026-06-08','127.0.0.1','2026-06-10 05:15:20'),(45,1,'create','Attendance','Created attendance for Robert Renby C. San Juan on 2026-06-09','127.0.0.1','2026-06-10 05:15:23'),(46,1,'create','Attendance','Created attendance for Robert Renby C. San Juan on 2026-06-11','127.0.0.1','2026-06-10 05:15:26'),(47,1,'create','Attendance','Created attendance for Robert Renby C. San Juan on 2026-06-13','127.0.0.1','2026-06-10 05:15:29'),(48,1,'update','Attendance','Updated attendance 2','127.0.0.1','2026-06-10 05:16:11'),(49,1,'update','Attendance','Updated attendance 2','127.0.0.1','2026-06-10 05:16:41'),(50,1,'update','Attendance','Updated attendance 12','127.0.0.1','2026-06-10 05:17:04'),(51,1,'update','Attendance','Updated attendance 12','127.0.0.1','2026-06-10 05:17:59'),(52,1,'create','Attendance','Created quick attendance for 1 employee(s) on 2026-06-10','127.0.0.1','2026-06-10 05:32:45'),(53,1,'create','Attendance','Created quick attendance for 1 employee(s) on 2026-06-10','127.0.0.1','2026-06-10 05:32:49'),(54,1,'create','Attendance','Created quick attendance for 1 employee(s) on 2026-06-10','127.0.0.1','2026-06-10 05:33:07'),(55,1,'create','Attendance','Created quick attendance for 1 employee(s) on 2026-06-10','127.0.0.1','2026-06-10 05:33:13'),(56,1,'create','Attendance','Created quick attendance for 1 employee(s) on 2026-06-10','127.0.0.1','2026-06-10 05:33:28'),(57,1,'create','Attendance','Generated today attendance for 2026-06-10','127.0.0.1','2026-06-10 05:33:47'),(58,1,'create','Attendance','Created quick attendance for 1 employee(s) on 2026-06-10','127.0.0.1','2026-06-10 05:34:22'),(59,1,'create','Cash Advances','Created cash advance for NEPOMUCENO, ERWIN','127.0.0.1','2026-06-10 07:22:00'),(60,1,'approve','Cash Advances','Approved cash advance 1','127.0.0.1','2026-06-10 07:22:03'),(61,1,'deduct','Commission Releases','Deducted 2999 cash advance from release 3','127.0.0.1','2026-06-10 07:22:29'),(62,1,'update','Attendance','Updated attendance 1','127.0.0.1','2026-06-10 07:37:02'),(63,1,'create','Attendance','Created quick attendance for 1 employee(s) on 2026-06-10','127.0.0.1','2026-06-10 07:37:04'),(64,1,'create','Attendance','Generated today attendance for 2026-06-10','127.0.0.1','2026-06-10 07:38:42'),(65,1,'create','Listings','Created listing LA-0102','127.0.0.1','2026-06-10 07:59:02'),(66,1,'create','Accredited Sellers','Created accredited seller PARROCHO, JOSEPH E.','127.0.0.1','2026-06-10 08:04:18'),(67,1,'create','Projects','Created project Maragondon','::1','2026-06-10 08:04:49'),(68,1,'login','Auth','Admin User logged in','::1','2026-06-10 08:36:34'),(69,1,'create','Cash Advances','Created cash advance for NEPOMUCENO, ERWIN','127.0.0.1','2026-06-10 08:49:47'),(70,1,'reject','Cash Advances','Rejected cash advance 2','127.0.0.1','2026-06-10 08:50:23'),(71,1,'update','Accredited Sellers','Updated accredited seller PARROCHO, JOSEPH E.. Synced 0 open commission(s).','127.0.0.1','2026-06-10 09:07:55'),(72,1,'update','Accredited Sellers','Updated accredited seller NEPOMUCENO, ERWIN. Synced 0 open commission(s).','127.0.0.1','2026-06-10 09:08:06'),(73,1,'update','Client Units','Updated client unit 1','127.0.0.1','2026-06-10 09:19:13');
 /*!40000 ALTER TABLE `audit_logs` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -142,7 +142,7 @@ CREATE TABLE `cash_advance_deductions` (
   CONSTRAINT `fk_cash_advance_deductions_advance` FOREIGN KEY (`cash_advance_id`) REFERENCES `cash_advances` (`id`),
   CONSTRAINT `fk_cash_advance_deductions_created_by` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`),
   CONSTRAINT `fk_cash_advance_deductions_release` FOREIGN KEY (`commission_release_id`) REFERENCES `commission_releases` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -151,6 +151,7 @@ CREATE TABLE `cash_advance_deductions` (
 
 LOCK TABLES `cash_advance_deductions` WRITE;
 /*!40000 ALTER TABLE `cash_advance_deductions` DISABLE KEYS */;
+INSERT INTO `cash_advance_deductions` VALUES (1,1,3,2999.00,1,NULL,'2026-06-10 07:22:29');
 /*!40000 ALTER TABLE `cash_advance_deductions` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -185,7 +186,7 @@ CREATE TABLE `cash_advances` (
   CONSTRAINT `fk_cash_advances_client_unit` FOREIGN KEY (`client_unit_id`) REFERENCES `client_units` (`id`),
   CONSTRAINT `fk_cash_advances_commission` FOREIGN KEY (`commission_id`) REFERENCES `commissions` (`id`),
   CONSTRAINT `fk_cash_advances_seller` FOREIGN KEY (`seller_id`) REFERENCES `accredited_sellers` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -194,6 +195,7 @@ CREATE TABLE `cash_advances` (
 
 LOCK TABLES `cash_advances` WRITE;
 /*!40000 ALTER TABLE `cash_advances` DISABLE KEYS */;
+INSERT INTO `cash_advances` VALUES (1,1,1,1,2999.00,0.00,'deducted','2026-06-10 00:00:00','2026-06-10 15:22:03',1,NULL,'2026-06-10 07:22:00','2026-06-10 07:22:29'),(2,1,1,1,10000.00,10000.00,'rejected','2026-06-10 00:00:00',NULL,NULL,NULL,'2026-06-10 08:49:47','2026-06-10 08:50:23');
 /*!40000 ALTER TABLE `cash_advances` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -348,7 +350,7 @@ CREATE TABLE `commission_releases` (
 
 LOCK TABLES `commission_releases` WRITE;
 /*!40000 ALTER TABLE `commission_releases` DISABLE KEYS */;
-INSERT INTO `commission_releases` VALUES (1,1,'1st_release',20.00,20.00,20.00,4460.00,0.00,4460.00,'eligible',NULL,NULL,NULL,'2026-06-10 03:45:54','2026-06-10 03:49:19'),(2,1,'2nd_release',40.00,20.00,40.00,4460.00,0.00,4460.00,'eligible',NULL,NULL,NULL,'2026-06-10 03:45:54','2026-06-10 03:49:19'),(3,1,'3rd_release',60.00,20.00,60.00,4460.00,0.00,4460.00,'pending',NULL,NULL,NULL,'2026-06-10 03:45:54','2026-06-10 03:45:54'),(4,1,'4th_release',75.00,15.00,75.00,3345.00,0.00,3345.00,'pending',NULL,NULL,NULL,'2026-06-10 03:45:54','2026-06-10 03:45:54'),(5,1,'retention',NULL,25.00,100.00,5575.00,0.00,5575.00,'pending',NULL,NULL,NULL,'2026-06-10 03:45:54','2026-06-10 03:45:54');
+INSERT INTO `commission_releases` VALUES (1,1,'1st_release',20.00,20.00,20.00,4460.00,0.00,4460.00,'eligible',NULL,NULL,NULL,'2026-06-10 03:45:54','2026-06-10 03:49:19'),(2,1,'2nd_release',40.00,20.00,40.00,4460.00,0.00,4460.00,'eligible',NULL,NULL,NULL,'2026-06-10 03:45:54','2026-06-10 03:49:19'),(3,1,'3rd_release',60.00,20.00,60.00,4460.00,2999.00,1461.00,'pending',NULL,NULL,NULL,'2026-06-10 03:45:54','2026-06-10 07:22:29'),(4,1,'4th_release',75.00,15.00,75.00,3345.00,0.00,3345.00,'pending',NULL,NULL,NULL,'2026-06-10 03:45:54','2026-06-10 03:45:54'),(5,1,'retention',NULL,25.00,100.00,5575.00,0.00,5575.00,'pending',NULL,NULL,NULL,'2026-06-10 03:45:54','2026-06-10 03:45:54');
 /*!40000 ALTER TABLE `commission_releases` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -481,13 +483,13 @@ CREATE TABLE `listings` (
   `legal_misc_rate` decimal(5,2) NOT NULL DEFAULT '10.00',
   `legal_misc_fee` decimal(15,2) GENERATED ALWAYS AS (((`lot_area_sqm` * `price_per_sqm`) * (`legal_misc_rate` / 100))) VIRTUAL,
   `total_contract_price` decimal(15,2) GENERATED ALWAYS AS (((`lot_area_sqm` * `price_per_sqm`) + ((`lot_area_sqm` * `price_per_sqm`) * (`legal_misc_rate` / 100)))) VIRTUAL,
-  `status` enum('available','reserved','hold','sold','inactive') NOT NULL DEFAULT 'available',
+  `status` enum('available','reserved','active','hold','sold','inactive') NOT NULL DEFAULT 'available',
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_listing_project_unit` (`project_id`,`unit_id`),
   CONSTRAINT `fk_listings_project` FOREIGN KEY (`project_id`) REFERENCES `projects` (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -496,7 +498,7 @@ CREATE TABLE `listings` (
 
 LOCK TABLES `listings` WRITE;
 /*!40000 ALTER TABLE `listings` DISABLE KEYS */;
-INSERT INTO `listings` (`id`, `project_id`, `cadastral_lot_no`, `unit_id`, `lot_type`, `reservation_fee`, `price_per_sqm`, `lot_area_sqm`, `legal_misc_rate`, `status`, `created_at`, `updated_at`) VALUES (1,1,'1306','LA-0104','corner',50000.00,1000.00,446.00,10.00,'reserved','2026-06-10 03:41:10','2026-06-10 03:45:54');
+INSERT INTO `listings` (`id`, `project_id`, `cadastral_lot_no`, `unit_id`, `lot_type`, `reservation_fee`, `price_per_sqm`, `lot_area_sqm`, `legal_misc_rate`, `status`, `created_at`, `updated_at`) VALUES (1,1,'1306','LA-0104','corner',50000.00,1000.00,446.00,10.00,'active','2026-06-10 03:41:10','2026-06-10 09:19:13'),(2,1,'1306','LA-0102','inner',50000.00,1200.00,1200.00,10.00,'available','2026-06-10 07:59:02','2026-06-10 07:59:02');
 /*!40000 ALTER TABLE `listings` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -556,7 +558,7 @@ CREATE TABLE `projects` (
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -565,7 +567,7 @@ CREATE TABLE `projects` (
 
 LOCK TABLES `projects` WRITE;
 /*!40000 ALTER TABLE `projects` DISABLE KEYS */;
-INSERT INTO `projects` VALUES (1,'Bailen','Bailen, Cavite','IMELDA B. VILLALOBOS','AA-06-0005-00105','022-06-0005-003-04','active',NULL,'2026-06-10 03:40:00','2026-06-10 03:40:00');
+INSERT INTO `projects` VALUES (1,'Bailen','Bailen, Cavite','IMELDA B. VILLALOBOS','AA-06-0005-00105','022-06-0005-003-04','active',NULL,'2026-06-10 03:40:00','2026-06-10 03:40:00'),(2,'Maragondon','Maragondon, Cavite','n/a','n/a','n/a','active',NULL,'2026-06-10 08:04:49','2026-06-10 08:04:49');
 /*!40000 ALTER TABLE `projects` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -653,7 +655,7 @@ CREATE TABLE `users` (
 
 LOCK TABLES `users` WRITE;
 /*!40000 ALTER TABLE `users` DISABLE KEYS */;
-INSERT INTO `users` VALUES (1,'Admin User','admin@gmail.com','$2b$10$NctIePlPkOKirDJpOSR5PemQyFQydpwRSK2uE2oTj5e1dmbpPwGGy','admin','active','2026-06-10 11:39:07','2026-06-10 03:29:25','2026-06-10 03:39:07');
+INSERT INTO `users` VALUES (1,'Admin User','admin@gmail.com','$2b$10$NctIePlPkOKirDJpOSR5PemQyFQydpwRSK2uE2oTj5e1dmbpPwGGy','admin','active','2026-06-10 16:36:34','2026-06-10 03:29:25','2026-06-10 08:36:34');
 /*!40000 ALTER TABLE `users` ENABLE KEYS */;
 UNLOCK TABLES;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
@@ -666,4 +668,4 @@ UNLOCK TABLES;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2026-06-10 14:04:01
+-- Dump completed on 2026-06-10 17:29:51
