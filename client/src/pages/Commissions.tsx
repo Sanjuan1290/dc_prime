@@ -414,8 +414,8 @@ const addMissingOverrideCommission = async ({
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      seller_id: data.seller_id || null,
-      rate: data.rate === "" ? null : Number(data.rate),
+      override_seller_id: data.seller_id || null,
+      override_rate: data.rate === "" ? null : Number(data.rate),
       override_notes: data.override_notes || null,
       cash_kaliwaan_amount:
         data.cash_kaliwaan_amount === ""
@@ -525,30 +525,26 @@ const deductCashAdvance = async ({
 
 const getReleaseStageLabel = (stage: string | null | undefined) => {
   switch (stage) {
+    case "1st_release":
     case "first_20":
-      return "First 20%"
+      return "1st Release"
+    case "2nd_release":
     case "second_40":
-      return "Second 40%"
+      return "2nd Release"
+    case "3rd_release":
     case "third_60":
-      return "Third 60%"
+      return "3rd Release"
+    case "4th_release":
     case "fourth_75":
-      return "Fourth 75%"
+      return "4th Release"
+    case "retention":
     case "retention_25":
-      return "Retention 25%"
+      return "Retention"
     case "manual":
       return "Manual"
     default:
       return formatText(stage || "-")
   }
-}
-
-const getCommissionTitle = (commission: Commission) => {
-  const source =
-    commission.source_type === "override"
-      ? "Agent / Optional Override Commission"
-      : "Main Commission"
-
-  return `${source} - ${commission.seller_name || "No seller"}`
 }
 
 const getCommissionGroupKey = (commission: Commission) => {
@@ -567,8 +563,7 @@ const commissionToEditData = (
     seller_id: commission.seller_id || "",
     rate: commission.rate === null || commission.rate === undefined ? "" : String(commission.rate),
     commission_role: commission.commission_role || "agent",
-    source_type:
-      commission.source_type === "override" ? "override" : "main",
+    source_type: commission.source_type === "override" ? "override" : "main",
     sale_type: commission.sale_type === "direct" ? "direct" : "distributed",
     cash_kaliwaan_amount:
       commission.cash_kaliwaan_amount === null ||
@@ -984,7 +979,7 @@ const Commissions = () => {
         />
         <StatCard
           icon={<FiPause />}
-          title="Remaining"
+          title="Net Remaining"
           value={formatMoney(summary?.total_remaining || 0)}
         />
       </div>
@@ -1071,7 +1066,6 @@ const Commissions = () => {
 
                 <tbody>
                   {paginatedGroups.map(({ main, override, isOrphanOverride }) => {
-                    const hasOverride = Boolean(override)
                     const canAddMissingOverride =
                       main.source_type === "main" &&
                       main.sale_type === "distributed" &&
@@ -1159,7 +1153,7 @@ const Commissions = () => {
                             Released: {formatMoney(main.released_amount)}
                           </p>
                           <p className="text-xs text-slate-500">
-                            Remaining: {formatMoney(main.remaining_amount)}
+                            Net Remaining: {formatMoney(main.remaining_amount)}
                           </p>
                           <p className="text-xs text-slate-500">
                             Cash Advance:{" "}
@@ -1180,7 +1174,7 @@ const Commissions = () => {
                               icon={<FiEye />}
                               onClick={() => openDetailsModal(main)}
                             >
-                              View
+                              Details
                             </Button>
 
                             <Button
@@ -1204,7 +1198,7 @@ const Commissions = () => {
                               onClick={() => generateMutation.mutate(main.id)}
                               variant="secondary"
                             >
-                              Generate Releases
+                              Generate Release Schedule
                             </Button>
 
                             {override ? (
@@ -1213,7 +1207,7 @@ const Commissions = () => {
                                 onClick={() => generateMutation.mutate(override.id)}
                                 variant="secondary"
                               >
-                                Generate Agent Releases
+                                Generate Agent Schedule
                               </Button>
                             ) : null}
                           </div>
@@ -1792,6 +1786,14 @@ const Commissions = () => {
                   label="Released"
                   value={formatMoney(commissionDetails.released_amount)}
                 />
+                <Detail
+                  label="Net Remaining"
+                  value={formatMoney(commissionDetails.remaining_amount)}
+                />
+                <Detail
+                  label="Cash Advance Deduction"
+                  value={formatMoney(commissionDetails.cash_advance_deduction)}
+                />
               </DetailsSection>
 
               <DetailsSection title="Property / Payment">
@@ -1868,16 +1870,18 @@ const Commissions = () => {
                           </td>
                           <td className="px-4 py-3">
                             <div className="flex flex-wrap gap-2">
-                              {release.status === "eligible" ||
-                              release.status === "pending" ? (
+                              {release.status === "eligible" ? (
+                                <Button
+                                  disabled={markReleaseMutation.isPending}
+                                  onClick={() => markReleaseMutation.mutate(release.id)}
+                                  variant="primary"
+                                >
+                                  Release
+                                </Button>
+                              ) : null}
+
+                              {["pending", "eligible"].includes(release.status) ? (
                                 <>
-                                  <Button
-                                    disabled={markReleaseMutation.isPending}
-                                    onClick={() => markReleaseMutation.mutate(release.id)}
-                                    variant="primary"
-                                  >
-                                    Release
-                                  </Button>
                                   <Button
                                     disabled={holdReleaseMutation.isPending}
                                     onClick={() => holdReleaseMutation.mutate(release.id)}
