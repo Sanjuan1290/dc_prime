@@ -1176,9 +1176,13 @@ export const updateCommission = async (req, res) => {
   if (releasedCount === 0 && !isMissing(rate)) {
     await db.query(
       `
-      DELETE FROM commission_releases
-      WHERE commission_id = ?
-        AND status <> 'released'
+      DELETE cr
+      FROM commission_releases cr
+      LEFT JOIN cash_advance_deductions cad
+        ON cad.commission_release_id = cr.id
+      WHERE cr.commission_id = ?
+        AND cr.status <> 'released'
+        AND cad.id IS NULL
       `,
       [id]
     )
@@ -1328,6 +1332,153 @@ export const updateCommission = async (req, res) => {
       overrideCommission: syncedOverrideCommission,
     },
   })
+}
+
+
+export const addMissingOverrideCommission = async (req, res) => {
+  const { id } = req.params
+  const {
+    override_seller_id,
+    override_rate,
+    override_notes,
+    cash_kaliwaan_amount = 0,
+    cash_kaliwaan_date,
+    cash_kaliwaan_notes,
+    notes,
+  } = req.body
+
+  if (isMissing(override_seller_id)) {
+    return res.status(400).json({ message: 'Override seller is required' })
+  }
+
+  if (isMissing(override_rate)) {
+    return res.status(400).json({ message: 'Override rate is required' })
+  }
+
+  const connection = await db.getConnection()
+
+  try {
+    await connection.beginTransaction()
+
+    const [mainRows] = await connection.query(
+      `
+      SELECT *
+      FROM commissions
+      WHERE id = ?
+      LIMIT 1
+      `,
+      [id]
+    )
+
+    const mainCommission = mainRows[0]
+
+    if (!mainCommission) {
+      await connection.rollback()
+      return res.status(404).json({ message: 'Main commission not found' })
+    }
+
+    if (mainCommission.source_type !== 'main') {
+      await connection.rollback()
+      return res.status(400).json({
+        message: 'Missing override can only be added to a main commission',
+      })
+    }
+
+    if (mainCommission.status === 'cancelled') {
+      await connection.rollback()
+      return res.status(400).json({
+        message: 'Cannot add an override commission to a cancelled main commission',
+      })
+    }
+
+    if (Number(mainCommission.seller_id) === Number(override_seller_id)) {
+      await connection.rollback()
+      return res.status(400).json({
+        message: 'Override seller must be different from the main seller',
+      })
+    }
+
+    const [existingOverrideRows] = await connection.query(
+      `
+      SELECT id, status
+      FROM commissions
+      WHERE parent_commission_id = ?
+        AND source_type = 'override'
+        AND status <> 'cancelled'
+      ORDER BY id DESC
+      LIMIT 1
+      `,
+      [id]
+    )
+
+    if (existingOverrideRows.length > 0) {
+      await connection.rollback()
+      return res.status(400).json({
+        message: 'This main commission already has an active override commission. Edit the override row instead.',
+      })
+    }
+
+    const overrideSeller = await getSeller(connection, override_seller_id)
+
+    if (!overrideSeller) {
+      await connection.rollback()
+      return res.status(404).json({ message: 'Override seller not found' })
+    }
+
+    const finalOverrideRate = normalizeRate(override_rate)
+
+    const createdOverride = await createAutoCommissionForClientUnit({
+      connection,
+      clientUnitId: mainCommission.client_unit_id,
+      sellerId: override_seller_id,
+      rateOverride: finalOverrideRate,
+      commissionRole: overrideSeller.seller_role || 'agent',
+      sourceType: 'override',
+      parentCommissionId: Number(id),
+      saleType: 'distributed',
+      cashKaliwaanAmount: cash_kaliwaan_amount,
+      cashKaliwaanDate: cash_kaliwaan_date,
+      cashKaliwaanNotes: cash_kaliwaan_notes,
+      overrideNotes: override_notes,
+      notes: notes || `Missing override commission added for main commission ${id}`,
+    })
+
+    await connection.query(
+      `
+      UPDATE commissions
+      SET sale_type = 'distributed'
+      WHERE id = ?
+      `,
+      [id]
+    )
+
+    await refreshCommissionEligibility(mainCommission.client_unit_id)
+    await refreshCommissionStatus(connection, id)
+
+    if (createdOverride?.commissionId) {
+      await refreshCommissionStatus(connection, createdOverride.commissionId)
+    }
+
+    await connection.commit()
+
+    await createAuditLog({
+      userId: req.user.id,
+      action: 'create',
+      module: 'Commissions',
+      description: `Added missing override commission ${createdOverride?.commissionId || ''} to main commission ${id}`,
+      ipAddress: getClientIp(req),
+    })
+
+    return res.status(201).json({
+      message: 'Missing override commission added successfully',
+      data: createdOverride,
+    })
+  } catch (err) {
+    await connection.rollback()
+    throw err
+  } finally {
+    connection.release()
+  }
 }
 
 export const createHierarchyCommissions = async (req, res) => {

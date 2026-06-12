@@ -166,6 +166,7 @@ const statusFilters = [
   { label: "All", value: "all" },
   { label: "Available", value: "available" },
   { label: "Reserved", value: "reserved" },
+  { label: "Active", value: "active" },
   { label: "Hold", value: "hold" },
   { label: "Sold", value: "sold" },
   { label: "Inactive", value: "inactive" },
@@ -174,6 +175,60 @@ const statusFilters = [
 const normalLotTypes = ["inner", "corner", "end"];
 
 const chartColors = ["#2563eb", "#f59e0b", "#8b5cf6", "#10b981", "#ef4444"];
+
+const formulaTooltips: Record<string, string> = {
+  Installment:
+    "Lot/installment type. Value comes from listing.lot_type.",
+  "Unit ID":
+    "Unit identifier. Value comes from listing.unit_id.",
+  Area:
+    "Area = lot_area_sqm. This is the lot area in square meters.",
+  "Price per SQM":
+    "Price per SQM = price_per_sqm. This is the selling price per square meter.",
+  "Net Selling Price":
+    "Net Selling Price = Area × Price per SQM.",
+  LMF:
+    "LMF = Legal/Misc Fee rate. LMF Amount = Net Selling Price × LMF%.",
+  TCP:
+    "TCP = Net Selling Price + Legal/Misc Fee Amount.",
+  RS:
+    "RS = Reservation Fee. This is deducted from the 30% downpayment computation.",
+  "30%":
+    "30% Downpayment Balance = (TCP × 30%) - Reservation Fee.",
+  "7.5%":
+    "7.5% Discount = 30% Downpayment Balance × 7.5%.",
+  "SPOT DP":
+    "SPOT DP = 30% Downpayment Balance - 7.5% Discount.",
+  "3 Months":
+    "3 Months = 30% Downpayment Balance ÷ 3.",
+  "75%":
+    "75% Balance = TCP × 75%.",
+  "12 Months":
+    "12 Months = 75% Balance ÷ 12.",
+  "18 Months":
+    "18 Months = 75% Balance ÷ 18.",
+  "20 Months":
+    "20 Months = 75% Balance ÷ 20.",
+  Project:
+    "Project name. Value comes from listing.project_name.",
+  Status:
+    "Listing status. Example: available, reserved, active, hold, sold, inactive.",
+  Actions:
+    "Row actions: Details, Edit, Delete.",
+};
+
+const FormulaHeader = ({ label }: { label: string }) => {
+  return (
+    <th className="px-4 py-3 text-left">
+      <span
+        className="cursor-help border-b border-dotted border-slate-400"
+        title={formulaTooltips[label] || "No formula available."}
+      >
+        {label}
+      </span>
+    </th>
+  );
+};
 
 const fetchListings = async () => {
   const response = await fetch(`${API_URL}/listings`, {
@@ -533,12 +588,12 @@ const Listings = () => {
           value={listings.filter((item) => item.status === "reserved").length}
         />
         <StatCard
-          label="Hold"
-          value={listings.filter((item) => item.status === "hold").length}
+          label="Active"
+          value={listings.filter((item) => item.status === "active").length}
         />
         <StatCard
-          label="Sold"
-          value={listings.filter((item) => item.status === "sold").length}
+          label="Hold"
+          value={listings.filter((item) => item.status === "hold").length}
         />
         <StatCard label="Total Value" value={formatMoney(totalValue)} />
       </div>
@@ -643,25 +698,25 @@ const Listings = () => {
         <table className="w-full text-sm">
           <thead className="bg-slate-50">
             <tr className="border-b border-slate-200">
-              <th className="px-4 py-3 text-left">Installment</th>
-              <th className="px-4 py-3 text-left">Unit ID</th>
-              <th className="px-4 py-3 text-left">Area</th>
-              <th className="px-4 py-3 text-left">Price per SQM</th>
-              <th className="px-4 py-3 text-left">Net Selling Price</th>
-              <th className="px-4 py-3 text-left">LMF</th>
-              <th className="px-4 py-3 text-left">TCP</th>
-              <th className="px-4 py-3 text-left">RS</th>
-              <th className="px-4 py-3 text-left">30%</th>
-              <th className="px-4 py-3 text-left">7.5%</th>
-              <th className="px-4 py-3 text-left">SPOT DP</th>
-              <th className="px-4 py-3 text-left">3 Months</th>
-              <th className="px-4 py-3 text-left">75%</th>
-              <th className="px-4 py-3 text-left">12 Months</th>
-              <th className="px-4 py-3 text-left">18 Months</th>
-              <th className="px-4 py-3 text-left">20 Months</th>
-              <th className="px-4 py-3 text-left">Project</th>
-              <th className="px-4 py-3 text-left">Status</th>
-              <th className="px-4 py-3 text-left">Actions</th>
+              <FormulaHeader label="Installment" />
+              <FormulaHeader label="Unit ID" />
+              <FormulaHeader label="Area" />
+              <FormulaHeader label="Price per SQM" />
+              <FormulaHeader label="Net Selling Price" />
+              <FormulaHeader label="LMF" />
+              <FormulaHeader label="TCP" />
+              <FormulaHeader label="RS" />
+              <FormulaHeader label="30%" />
+              <FormulaHeader label="7.5%" />
+              <FormulaHeader label="SPOT DP" />
+              <FormulaHeader label="3 Months" />
+              <FormulaHeader label="75%" />
+              <FormulaHeader label="12 Months" />
+              <FormulaHeader label="18 Months" />
+              <FormulaHeader label="20 Months" />
+              <FormulaHeader label="Project" />
+              <FormulaHeader label="Status" />
+              <FormulaHeader label="Actions" />
             </tr>
           </thead>
 

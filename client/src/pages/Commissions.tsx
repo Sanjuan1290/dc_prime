@@ -1,3 +1,5 @@
+// client/src/pages/Commissions.tsx
+
 import { useState, type ReactNode } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
@@ -196,6 +198,16 @@ type CommissionEditData = {
   notes: string
 }
 
+type MissingOverrideData = {
+  seller_id: number | ""
+  rate: string
+  override_notes: string
+  cash_kaliwaan_amount: string
+  cash_kaliwaan_date: string
+  cash_kaliwaan_notes: string
+  notes: string
+}
+
 type DeductAdvanceData = {
   cash_advance_id: number | ""
   amount: string
@@ -242,6 +254,16 @@ const defaultCommissionEditData: CommissionEditData = {
   override_rate: "",
   override_notes_for_child: "",
   status: "active",
+  notes: "",
+}
+
+const defaultMissingOverrideData: MissingOverrideData = {
+  seller_id: "",
+  rate: "",
+  override_notes: "",
+  cash_kaliwaan_amount: "",
+  cash_kaliwaan_date: "",
+  cash_kaliwaan_notes: "",
   notes: "",
 }
 
@@ -378,6 +400,38 @@ const updateCommission = async ({
   return res.json()
 }
 
+const addMissingOverrideCommission = async ({
+  mainCommissionId,
+  data,
+}: {
+  mainCommissionId: number
+  data: MissingOverrideData
+}) => {
+  const res = await fetch(`${API_URL}/commissions/${mainCommissionId}/missing-override`, {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      seller_id: data.seller_id || null,
+      rate: data.rate === "" ? null : Number(data.rate),
+      override_notes: data.override_notes || null,
+      cash_kaliwaan_amount:
+        data.cash_kaliwaan_amount === ""
+          ? 0
+          : Number(data.cash_kaliwaan_amount),
+      cash_kaliwaan_date: data.cash_kaliwaan_date || null,
+      cash_kaliwaan_notes: data.cash_kaliwaan_notes || null,
+      notes: data.notes || null,
+    }),
+  })
+
+  if (!res.ok) throw new Error(await getErrorMessage(res))
+
+  return res.json()
+}
+
 const generateMilestones = async (commissionId: number) => {
   const res = await fetch(`${API_URL}/commissions/${commissionId}/releases/generate`, {
     method: "POST",
@@ -389,48 +443,8 @@ const generateMilestones = async (commissionId: number) => {
   return res.json()
 }
 
-const markRelease = async (releaseId: number) => {
+const markReleaseStage = async (releaseId: number) => {
   const res = await fetch(`${API_URL}/commission-releases/${releaseId}/mark-released`, {
-    method: "PATCH",
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({}),
-  })
-
-  if (!res.ok) throw new Error(await getErrorMessage(res))
-
-  return res.json()
-}
-
-const deductAdvance = async ({
-  releaseId,
-  deductData,
-}: {
-  releaseId: number
-  deductData: DeductAdvanceData
-}) => {
-  const res = await fetch(`${API_URL}/commission-releases/${releaseId}/deduct-advance`, {
-    method: "PATCH",
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      cash_advance_id: deductData.cash_advance_id || null,
-      amount: Number(deductData.amount || 0),
-      notes: deductData.notes || null,
-    }),
-  })
-
-  if (!res.ok) throw new Error(await getErrorMessage(res))
-
-  return res.json()
-}
-
-const cancelRelease = async (releaseId: number) => {
-  const res = await fetch(`${API_URL}/commission-releases/${releaseId}/cancel`, {
     method: "PATCH",
     credentials: "include",
   })
@@ -444,10 +458,6 @@ const holdRelease = async (releaseId: number) => {
   const res = await fetch(`${API_URL}/commission-releases/${releaseId}/hold`, {
     method: "PATCH",
     credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({}),
   })
 
   if (!res.ok) throw new Error(await getErrorMessage(res))
@@ -457,6 +467,17 @@ const holdRelease = async (releaseId: number) => {
 
 const unholdRelease = async (releaseId: number) => {
   const res = await fetch(`${API_URL}/commission-releases/${releaseId}/unhold`, {
+    method: "PATCH",
+    credentials: "include",
+  })
+
+  if (!res.ok) throw new Error(await getErrorMessage(res))
+
+  return res.json()
+}
+
+const cancelRelease = async (releaseId: number) => {
+  const res = await fetch(`${API_URL}/commission-releases/${releaseId}/cancel`, {
     method: "PATCH",
     credentials: "include",
   })
@@ -477,133 +498,141 @@ const restoreCancelledRelease = async (releaseId: number) => {
   return res.json()
 }
 
-const commissionToEditData = (
-  commission: Commission,
-  overrideCommission?: Commission
-): CommissionEditData => ({
-  seller_id: commission.seller_id,
-  rate:
-    commission.rate === null || commission.rate === undefined
-      ? ""
-      : String(commission.rate),
-  commission_role: commission.commission_role || "",
-  source_type: commission.source_type === "override" ? "override" : "main",
-  sale_type: commission.sale_type === "direct" ? "direct" : "distributed",
-  cash_kaliwaan_amount:
-    Number(commission.cash_kaliwaan_amount || 0) > 0
-      ? String(commission.cash_kaliwaan_amount)
-      : "",
-  cash_kaliwaan_date: commission.cash_kaliwaan_date
-    ? commission.cash_kaliwaan_date.slice(0, 10)
-    : "",
-  cash_kaliwaan_notes: commission.cash_kaliwaan_notes || "",
-  override_notes: commission.override_notes || "",
-  override_seller_id: overrideCommission?.seller_id || "",
-  override_rate:
-    overrideCommission?.rate === null || overrideCommission?.rate === undefined
-      ? ""
-      : String(overrideCommission?.rate || ""),
-  override_notes_for_child: overrideCommission?.override_notes || "",
-  status: commission.status || "active",
-  notes: commission.notes || "",
-})
+const deductCashAdvance = async ({
+  releaseId,
+  deductData,
+}: {
+  releaseId: number
+  deductData: DeductAdvanceData
+}) => {
+  const res = await fetch(`${API_URL}/commission-releases/${releaseId}/deduct-advance`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      cash_advance_id: deductData.cash_advance_id || null,
+      amount: deductData.amount === "" ? null : Number(deductData.amount),
+      notes: deductData.notes || null,
+    }),
+  })
 
-const formatReleaseCell = (
-  amount: number | string | null | undefined,
-  status: ReleaseStatus | null | undefined
-) => {
-  const formattedAmount = formatMoney(amount || 0)
-  const formattedStatus = status ? formatText(status) : "No milestone"
+  if (!res.ok) throw new Error(await getErrorMessage(res))
 
-  return `${formattedAmount} / ${formattedStatus}`
+  return res.json()
 }
 
-const getReleaseStageLabel = (stage: string) => {
+const getReleaseStageLabel = (stage: string | null | undefined) => {
   switch (stage) {
-    case "1st_release":
-      return "1st Release 20%"
-    case "2nd_release":
-      return "2nd Release 40%"
-    case "3rd_release":
-      return "3rd Release 60%"
-    case "4th_release":
-      return "4th Release 75%"
-    case "retention":
+    case "first_20":
+      return "First 20%"
+    case "second_40":
+      return "Second 40%"
+    case "third_60":
+      return "Third 60%"
+    case "fourth_75":
+      return "Fourth 75%"
+    case "retention_25":
       return "Retention 25%"
+    case "manual":
+      return "Manual"
     default:
-      return formatText(stage)
+      return formatText(stage || "-")
   }
 }
 
-const groupCommissionsByClientUnit = (commissions: Commission[]) => {
-  const groups = new Map<number, Commission[]>()
+const getCommissionTitle = (commission: Commission) => {
+  const source =
+    commission.source_type === "override"
+      ? "Agent / Optional Override Commission"
+      : "Main Commission"
 
-  commissions.forEach((commission) => {
-    const existing = groups.get(commission.client_unit_id) || []
-    existing.push(commission)
-    groups.set(commission.client_unit_id, existing)
-  })
-
-  return Array.from(groups.entries()).map(([client_unit_id, group]) => {
-    const main =
-      group.find((commission) => commission.source_type === "main") || group[0]
-    const override =
-      group.find((commission) => commission.source_type === "override") || null
-
-    return {
-      client_unit_id,
-      main,
-      override,
-      all: group,
-    }
-  })
+  return `${source} - ${commission.seller_name || "No seller"}`
 }
 
-const CashAdvanceCell = ({
-  amount,
-  remaining,
-  deducted,
-}: {
-  amount: number | string
-  remaining: number | string
-  deducted: number | string
-}) => {
-  const hasCashAdvance =
-    Number(amount || 0) > 0 ||
-    Number(remaining || 0) > 0 ||
-    Number(deducted || 0) > 0
+const getCommissionGroupKey = (commission: Commission) => {
+  if (commission.source_type === "override" && commission.parent_commission_id) {
+    return `main-${commission.parent_commission_id}`
+  }
 
-  if (!hasCashAdvance) return <span>-</span>
+  return `main-${commission.id}`
+}
 
-  return (
-    <>
-      <p>{formatMoney(amount || 0)}</p>
-      <p className="text-xs text-slate-500">
-        Rem: {formatMoney(remaining || 0)}
-      </p>
-      <p className="text-xs text-slate-500">
-        Deducted: {formatMoney(deducted || 0)}
-      </p>
-    </>
+const commissionToEditData = (
+  commission: Commission,
+  overrideCommission?: Commission
+): CommissionEditData => {
+  return {
+    seller_id: commission.seller_id || "",
+    rate: commission.rate === null || commission.rate === undefined ? "" : String(commission.rate),
+    commission_role: commission.commission_role || "agent",
+    source_type:
+      commission.source_type === "override" ? "override" : "main",
+    sale_type: commission.sale_type === "direct" ? "direct" : "distributed",
+    cash_kaliwaan_amount:
+      commission.cash_kaliwaan_amount === null ||
+      commission.cash_kaliwaan_amount === undefined
+        ? ""
+        : String(commission.cash_kaliwaan_amount),
+    cash_kaliwaan_date: commission.cash_kaliwaan_date
+      ? commission.cash_kaliwaan_date.slice(0, 10)
+      : "",
+    cash_kaliwaan_notes: commission.cash_kaliwaan_notes || "",
+    override_notes: commission.override_notes || "",
+    override_seller_id: overrideCommission?.seller_id || "",
+    override_rate:
+      overrideCommission?.rate === null ||
+      overrideCommission?.rate === undefined
+        ? ""
+        : overrideCommission
+          ? String(overrideCommission.rate)
+          : "",
+    override_notes_for_child: overrideCommission?.override_notes || "",
+    status: commission.status || "active",
+    notes: commission.notes || "",
+  }
+}
+
+const hasReleasedMilestone = (commission: Commission) => {
+  return Number(commission.released_amount || 0) > 0
+}
+
+const hasOverrideForMain = (main: Commission, commissions: Commission[]) => {
+  return commissions.some(
+    (commission) =>
+      commission.source_type === "override" &&
+      Number(commission.parent_commission_id || 0) === Number(main.id) &&
+      commission.status !== "cancelled"
   )
 }
 
 const Commissions = () => {
   const queryClient = useQueryClient()
 
-  const [searchInput, setSearchInput] = useState("")
+  const [search, setSearch] = useState("")
   const [statusFilter, setStatusFilter] = useState("all")
-  const [sourceTypeFilter, setSourceTypeFilter] = useState("all")
+  const [sourceFilter, setSourceFilter] = useState("all")
   const [saleTypeFilter, setSaleTypeFilter] = useState("all")
   const [page, setPage] = useState(1)
   const [rowsPerPage, setRowsPerPage] = useState(10)
-  const [viewCommissionId, setViewCommissionId] = useState<number | null>(null)
+
+  const [selectedCommissionId, setSelectedCommissionId] = useState<number | null>(null)
   const [editCommission, setEditCommission] = useState<Commission | null>(null)
-  const [editData, setEditData] =
-    useState<CommissionEditData>(defaultCommissionEditData)
+  const [editData, setEditData] = useState<CommissionEditData>(
+    defaultCommissionEditData
+  )
+
+  const [missingOverrideMain, setMissingOverrideMain] =
+    useState<Commission | null>(null)
+
+  const [missingOverrideData, setMissingOverrideData] =
+    useState<MissingOverrideData>(defaultMissingOverrideData)
+
   const [deductReleaseId, setDeductReleaseId] = useState<number | null>(null)
   const [deductData, setDeductData] =
     useState<DeductAdvanceData>(defaultDeductAdvanceData)
+
   const [cancelReleaseId, setCancelReleaseId] = useState<number | null>(null)
   const [successMessage, setSuccessMessage] = useState("")
 
@@ -631,38 +660,36 @@ const Commissions = () => {
     isLoading: isDetailsLoading,
     error: detailsError,
   } = useQuery({
-    queryKey: ["commission-details", viewCommissionId],
-    queryFn: () => fetchCommissionDetails(viewCommissionId || 0),
-    enabled: Boolean(viewCommissionId),
+    queryKey: ["commission-details", selectedCommissionId],
+    queryFn: () => fetchCommissionDetails(selectedCommissionId || 0),
+    enabled: Boolean(selectedCommissionId),
   })
 
+  const releaseForDeduction =
+    commissionDetails?.releases?.find(
+      (release) => Number(release.id) === Number(deductReleaseId)
+    ) || null
+
+  const releaseForCancellation =
+    commissionDetails?.releases?.find(
+      (release) => Number(release.id) === Number(cancelReleaseId)
+    ) || null
+
+  const selectedDeductionSellerId =
+    commissionDetails?.seller_id || editCommission?.seller_id || null
+
   const { data: approvedCashAdvances = [] } = useQuery({
-    queryKey: [
-      "approved-cash-advances",
-      commissionDetails?.seller_id || null,
-    ],
-    queryFn: () => fetchApprovedCashAdvances(commissionDetails?.seller_id || null),
-    enabled: Boolean(commissionDetails?.seller_id && deductReleaseId),
+    queryKey: ["approved-cash-advances", selectedDeductionSellerId],
+    queryFn: () => fetchApprovedCashAdvances(selectedDeductionSellerId),
+    enabled: Boolean(selectedDeductionSellerId && deductReleaseId),
   })
 
   const invalidateCommissionQueries = () => {
     queryClient.invalidateQueries({ queryKey: ["commissions"] })
     queryClient.invalidateQueries({ queryKey: ["commission-summary"] })
-    queryClient.invalidateQueries({ queryKey: ["commission-releases"] })
+    queryClient.invalidateQueries({ queryKey: ["commission-details"] })
     queryClient.invalidateQueries({ queryKey: ["cash-advances"] })
     queryClient.invalidateQueries({ queryKey: ["cash-advances-summary"] })
-
-    if (viewCommissionId) {
-      queryClient.invalidateQueries({
-        queryKey: ["commission-details", viewCommissionId],
-      })
-    }
-
-    if (commissionDetails?.seller_id) {
-      queryClient.invalidateQueries({
-        queryKey: ["approved-cash-advances", commissionDetails.seller_id],
-      })
-    }
   }
 
   const updateMutation = useMutation({
@@ -670,7 +697,18 @@ const Commissions = () => {
     onSuccess: () => {
       invalidateCommissionQueries()
       setEditCommission(null)
+      setEditData(defaultCommissionEditData)
       setSuccessMessage("Commission updated successfully")
+    },
+  })
+
+  const addMissingOverrideMutation = useMutation({
+    mutationFn: addMissingOverrideCommission,
+    onSuccess: () => {
+      invalidateCommissionQueries()
+      setMissingOverrideMain(null)
+      setMissingOverrideData(defaultMissingOverrideData)
+      setSuccessMessage("Missing override commission added successfully")
     },
   })
 
@@ -678,25 +716,31 @@ const Commissions = () => {
     mutationFn: generateMilestones,
     onSuccess: () => {
       invalidateCommissionQueries()
-      setSuccessMessage("Milestones generated successfully")
+      setSuccessMessage("Release milestones generated successfully")
     },
   })
 
   const markReleaseMutation = useMutation({
-    mutationFn: markRelease,
+    mutationFn: markReleaseStage,
     onSuccess: () => {
       invalidateCommissionQueries()
       setSuccessMessage("Release marked as released")
     },
   })
 
-  const deductMutation = useMutation({
-    mutationFn: deductAdvance,
+  const holdReleaseMutation = useMutation({
+    mutationFn: holdRelease,
     onSuccess: () => {
       invalidateCommissionQueries()
-      setDeductReleaseId(null)
-      setDeductData(defaultDeductAdvanceData)
-      setSuccessMessage("Cash advance deducted successfully")
+      setSuccessMessage("Release placed on hold")
+    },
+  })
+
+  const unholdReleaseMutation = useMutation({
+    mutationFn: unholdRelease,
+    onSuccess: () => {
+      invalidateCommissionQueries()
+      setSuccessMessage("Release removed from hold")
     },
   })
 
@@ -705,23 +749,7 @@ const Commissions = () => {
     onSuccess: () => {
       invalidateCommissionQueries()
       setCancelReleaseId(null)
-      setSuccessMessage("Release cancelled successfully")
-    },
-  })
-
-  const holdReleaseMutation = useMutation({
-    mutationFn: holdRelease,
-    onSuccess: () => {
-      invalidateCommissionQueries()
-      setSuccessMessage("Release put on hold")
-    },
-  })
-
-  const unholdReleaseMutation = useMutation({
-    mutationFn: unholdRelease,
-    onSuccess: () => {
-      invalidateCommissionQueries()
-      setSuccessMessage("Release restored")
+      setSuccessMessage("Release cancelled")
     },
   })
 
@@ -733,49 +761,114 @@ const Commissions = () => {
     },
   })
 
-  const filteredCommissions = commissions.filter((commission) => {
-    const search = searchInput.toLowerCase().trim()
-
-    const matchesSearch =
-      search === "" ||
-      commission.client_name.toLowerCase().includes(search) ||
-      commission.unit_id.toLowerCase().includes(search) ||
-      commission.project_name.toLowerCase().includes(search) ||
-      commission.seller_name.toLowerCase().includes(search) ||
-      (commission.commission_role || "").toLowerCase().includes(search) ||
-      (commission.reports_under || "").toLowerCase().includes(search) ||
-      (commission.mode_of_payment || "").toLowerCase().includes(search) ||
-      commission.sale_type.toLowerCase().includes(search) ||
-      commission.source_type.toLowerCase().includes(search)
-
-    const matchesStatus =
-      statusFilter === "all" || commission.status === statusFilter
-
-    const matchesSourceType =
-      sourceTypeFilter === "all" || commission.source_type === sourceTypeFilter
-
-    const matchesSaleType =
-      saleTypeFilter === "all" || commission.sale_type === saleTypeFilter
-
-    return matchesSearch && matchesStatus && matchesSourceType && matchesSaleType
+  const deductMutation = useMutation({
+    mutationFn: deductCashAdvance,
+    onSuccess: () => {
+      invalidateCommissionQueries()
+      setDeductReleaseId(null)
+      setDeductData(defaultDeductAdvanceData)
+      setSuccessMessage("Cash advance deducted successfully")
+    },
   })
 
-  const groupedRows = groupCommissionsByClientUnit(filteredCommissions)
-  const paginatedGroups = paginateRows(groupedRows, page, rowsPerPage)
+  const commissionGroups = commissions.reduce<
+    Record<string, { main: Commission | null; override: Commission | null }>
+  >((groups, commission) => {
+    const key = getCommissionGroupKey(commission)
 
-  const openEditModal = (commission: Commission) => {
+    if (!groups[key]) {
+      groups[key] = {
+        main: null,
+        override: null,
+      }
+    }
+
+    if (commission.source_type === "override") {
+      groups[key].override = commission
+    } else {
+      groups[key].main = commission
+    }
+
+    return groups
+  }, {})
+
+  const groupedCommissions = Object.values(commissionGroups)
+    .map((group) => {
+      if (!group.main && group.override) {
+        return {
+          main: group.override,
+          override: null,
+          isOrphanOverride: true,
+        }
+      }
+
+      return {
+        main: group.main,
+        override: group.override,
+        isOrphanOverride: false,
+      }
+    })
+    .filter((group): group is {
+      main: Commission
+      override: Commission | null
+      isOrphanOverride: boolean
+    } => Boolean(group.main))
+
+  const filteredGroups = groupedCommissions.filter(({ main, override }) => {
+    const searchText = [
+      main.seller_name,
+      main.client_name,
+      main.unit_id,
+      main.project_name,
+      main.seller_role,
+      override?.seller_name,
+      override?.seller_role,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+
+    const matchesSearch = searchText.includes(search.toLowerCase().trim())
+    const matchesStatus =
+      statusFilter === "all" ||
+      main.status === statusFilter ||
+      override?.status === statusFilter
+
+    const matchesSource =
+      sourceFilter === "all" ||
+      main.source_type === sourceFilter ||
+      override?.source_type === sourceFilter
+
+    const matchesSaleType =
+      saleTypeFilter === "all" ||
+      main.sale_type === saleTypeFilter ||
+      override?.sale_type === saleTypeFilter
+
+    return matchesSearch && matchesStatus && matchesSource && matchesSaleType
+  })
+
+  const paginatedGroups = paginateRows(filteredGroups, page, rowsPerPage)
+
+  const openEditModal = (commission: Commission, providedOverride?: Commission) => {
     const overrideCommission =
-      commission.source_type === "main"
+      providedOverride ||
+      (commission.source_type === "main"
         ? commissions.find(
             (item) =>
               item.source_type === "override" &&
               Number(item.parent_commission_id || 0) === Number(commission.id) &&
               item.status !== "cancelled"
           )
-        : undefined
+        : undefined)
 
     setEditCommission(commission)
     setEditData(commissionToEditData(commission, overrideCommission))
+    setSuccessMessage("")
+  }
+
+  const openMissingOverrideModal = (commission: Commission) => {
+    setMissingOverrideMain(commission)
+    setMissingOverrideData(defaultMissingOverrideData)
     setSuccessMessage("")
   }
 
@@ -788,8 +881,17 @@ const Commissions = () => {
     })
   }
 
+  const handleAddMissingOverride = () => {
+    if (!missingOverrideMain) return
+
+    addMissingOverrideMutation.mutate({
+      mainCommissionId: missingOverrideMain.id,
+      data: missingOverrideData,
+    })
+  }
+
   const handleDeduct = () => {
-    if (!deductReleaseId || !deductData.cash_advance_id) return
+    if (!deductReleaseId) return
 
     deductMutation.mutate({
       releaseId: deductReleaseId,
@@ -797,22 +899,21 @@ const Commissions = () => {
     })
   }
 
-  const mutationError =
-    updateMutation.error?.message ||
-    generateMutation.error?.message ||
-    markReleaseMutation.error?.message ||
-    deductMutation.error?.message ||
-    cancelReleaseMutation.error?.message ||
-    holdReleaseMutation.error?.message ||
-    unholdReleaseMutation.error?.message ||
-    restoreCancelledReleaseMutation.error?.message
+  const openDetailsModal = (commission: Commission) => {
+    setSelectedCommissionId(commission.id)
+    setSuccessMessage("")
+  }
 
-  const totalRows = groupedRows.length
-  const releaseForDeduction = (commissionDetails?.releases || []).find(
-    (release) => release.id === deductReleaseId
+  const selectedEditSeller = sellers.find(
+    (seller) => Number(seller.id) === Number(editData.seller_id)
   )
-  const releaseForCancellation = (commissionDetails?.releases || []).find(
-    (release) => release.id === cancelReleaseId
+
+  const selectedOverrideSeller = sellers.find(
+    (seller) => Number(seller.id) === Number(editData.override_seller_id)
+  )
+
+  const selectedMissingOverrideSeller = sellers.find(
+    (seller) => Number(seller.id) === Number(missingOverrideData.seller_id)
   )
 
   if (isLoading) {
@@ -820,443 +921,339 @@ const Commissions = () => {
   }
 
   if (error) {
-    return <Alert variant="error" title="Failed to load commissions" />
+    return (
+      <div className="p-6">
+        <Alert variant="error" title="Failed to load commissions" />
+      </div>
+    )
   }
 
   return (
-    <div>
+    <div className="p-6">
       <PageHeader
         icon={<FiDollarSign />}
         title="Commissions"
-        subtitle="Track auto-generated commissions, release milestones, cash advances, retention, and optional cash kaliwaan."
+        subtitle="Track main commissions, optional override commissions, release milestones, and cash advance deductions"
       />
 
       {successMessage ? <Alert variant="success" title={successMessage} /> : null}
-      {mutationError ? <Alert variant="error" title={mutationError} /> : null}
 
-      <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-4 xl:grid-cols-6">
+      {updateMutation.error ? (
+        <Alert variant="error" title={updateMutation.error.message} />
+      ) : null}
+
+      {addMissingOverrideMutation.error ? (
+        <Alert variant="error" title={addMissingOverrideMutation.error.message} />
+      ) : null}
+
+      {generateMutation.error ? (
+        <Alert variant="error" title={generateMutation.error.message} />
+      ) : null}
+
+      {markReleaseMutation.error ? (
+        <Alert variant="error" title={markReleaseMutation.error.message} />
+      ) : null}
+
+      {holdReleaseMutation.error ? (
+        <Alert variant="error" title={holdReleaseMutation.error.message} />
+      ) : null}
+
+      {unholdReleaseMutation.error ? (
+        <Alert variant="error" title={unholdReleaseMutation.error.message} />
+      ) : null}
+
+      {restoreCancelledReleaseMutation.error ? (
+        <Alert variant="error" title={restoreCancelledReleaseMutation.error.message} />
+      ) : null}
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <StatCard
-          label="Total Commissions"
-          value={formatNumber(summary?.total_commissions || 0)}
-        />
-        <StatCard
-          label="Gross Commission"
+          icon={<FiDollarSign />}
+          title="Total Commission"
           value={formatMoney(summary?.total_amount || 0)}
         />
         <StatCard
-          label="Eligible"
+          icon={<FiPlay />}
+          title="Eligible"
           value={formatMoney(summary?.total_eligible || 0)}
         />
         <StatCard
-          label="Released"
+          icon={<FiDollarSign />}
+          title="Released"
           value={formatMoney(summary?.total_released || 0)}
         />
         <StatCard
-          label="Remaining"
+          icon={<FiPause />}
+          title="Remaining"
           value={formatMoney(summary?.total_remaining || 0)}
         />
-        <StatCard
-          label="Cash Advance Deductions"
-          value={formatMoney(summary?.total_cash_advance_deduction || 0)}
-        />
       </div>
 
-      <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-5">
-        <Input
-          icon={<FiSearch />}
-          placeholder="Search buyer, unit, project, seller..."
-          value={searchInput}
-          onChange={(e) => {
-            setSearchInput(e.target.value)
-            setPage(1)
-          }}
-        />
+      <div className="mt-6 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="grid gap-4 md:grid-cols-4">
+          <Input
+            icon={<FiSearch />}
+            label="Search"
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value)
+              setPage(1)
+            }}
+            placeholder="Search seller, client, unit, project"
+          />
 
-        <Select
-          value={statusFilter}
-          onChange={(e) => {
-            setStatusFilter(e.target.value)
-            setPage(1)
-          }}
-        >
-          <option value="all">All Statuses</option>
-          <option value="active">Active</option>
-          <option value="partially_released">Partially Released</option>
-          <option value="released">Released</option>
-          <option value="cancelled">Cancelled</option>
-          <option value="on_hold">On Hold</option>
-        </Select>
+          <Select
+            label="Status"
+            value={statusFilter}
+            onChange={(e) => {
+              setStatusFilter(e.target.value)
+              setPage(1)
+            }}
+          >
+            <option value="all">All Status</option>
+            <option value="active">Active</option>
+            <option value="partially_released">Partially Released</option>
+            <option value="released">Released</option>
+            <option value="on_hold">On Hold</option>
+            <option value="cancelled">Cancelled</option>
+          </Select>
 
-        <Select
-          value={sourceTypeFilter}
-          onChange={(e) => {
-            setSourceTypeFilter(e.target.value)
-            setPage(1)
-          }}
-        >
-          <option value="all">All Types</option>
-          <option value="main">Main</option>
-          <option value="override">Override / Agent</option>
-        </Select>
+          <Select
+            label="Source"
+            value={sourceFilter}
+            onChange={(e) => {
+              setSourceFilter(e.target.value)
+              setPage(1)
+            }}
+          >
+            <option value="all">All Sources</option>
+            <option value="main">Main</option>
+            <option value="override">Override</option>
+          </Select>
 
-        <Select
-          value={saleTypeFilter}
-          onChange={(e) => {
-            setSaleTypeFilter(e.target.value)
-            setPage(1)
-          }}
-        >
-          <option value="all">Distributed / Direct</option>
-          <option value="distributed">Distributed</option>
-          <option value="direct">Direct</option>
-        </Select>
-
-        <Button
-          onClick={() => {
-            setSearchInput("")
-            setStatusFilter("all")
-            setSourceTypeFilter("all")
-            setSaleTypeFilter("all")
-            setPage(1)
-          }}
-        >
-          Reset
-        </Button>
+          <Select
+            label="Sale Type"
+            value={saleTypeFilter}
+            onChange={(e) => {
+              setSaleTypeFilter(e.target.value)
+              setPage(1)
+            }}
+          >
+            <option value="all">All Sale Types</option>
+            <option value="distributed">Distributed</option>
+            <option value="direct">Direct</option>
+          </Select>
+        </div>
       </div>
 
-      <TableContainer>
-        <div className="overflow-x-auto">
-          <table className="min-w-[3400px] text-sm">
-            <thead className="bg-slate-50">
-              <tr className="border-b border-slate-200">
-                <th
-                  colSpan={8}
-                  className="border-r border-slate-200 px-4 py-3 text-left text-slate-900"
-                >
-                  Sale Details
-                </th>
-                <th
-                  colSpan={12}
-                  className="border-r border-slate-200 px-4 py-3 text-left text-slate-900"
-                >
-                  Unit Manager / Main Seller Commission
-                </th>
-                <th
-                  colSpan={13}
-                  className="px-4 py-3 text-left text-slate-900"
-                >
-                  Agent / Optional Override Commission
-                </th>
-              </tr>
+      <div className="mt-6">
+        {filteredGroups.length === 0 ? (
+          <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+            <EmptyState title="No commissions found" />
+          </div>
+        ) : (
+          <>
+            <TableContainer>
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50">
+                  <tr className="border-b border-slate-200">
+                    <th className="px-4 py-3 text-left">Client / Unit</th>
+                    <th className="px-4 py-3 text-left">Main Commission</th>
+                    <th className="px-4 py-3 text-left">
+                      Agent / Optional Override Commission
+                    </th>
+                    <th className="px-4 py-3 text-left">TCP / Paid</th>
+                    <th className="px-4 py-3 text-left">Release Progress</th>
+                    <th className="px-4 py-3 text-left">Status</th>
+                    <th className="px-4 py-3 text-left">Actions</th>
+                  </tr>
+                </thead>
 
-              <tr className="border-b border-slate-200">
-                <th className="px-4 py-3 text-left">Buyer’s Name</th>
-                <th className="px-4 py-3 text-left">Unit ID</th>
-                <th className="px-4 py-3 text-left">Mode of Payment</th>
-                <th className="px-4 py-3 text-left">Area</th>
-                <th className="px-4 py-3 text-left">Price per SQM</th>
-                <th className="px-4 py-3 text-left">Net Selling Price</th>
-                <th className="px-4 py-3 text-left">Distributed / Direct</th>
-                <th className="border-r border-slate-200 px-4 py-3 text-left">
-                  Project
-                </th>
+                <tbody>
+                  {paginatedGroups.map(({ main, override, isOrphanOverride }) => {
+                    const hasOverride = Boolean(override)
+                    const canAddMissingOverride =
+                      main.source_type === "main" &&
+                      main.sale_type === "distributed" &&
+                      !hasOverrideForMain(main, commissions)
 
-                <th className="px-4 py-3 text-left">Unit Manager</th>
-                <th className="px-4 py-3 text-left">Rate</th>
-                <th className="px-4 py-3 text-left">Commission</th>
-                <th className="px-4 py-3 text-left">Payment Percentage</th>
-                <th className="px-4 py-3 text-left">1st Release 20%</th>
-                <th className="px-4 py-3 text-left">2nd Release 40%</th>
-                <th className="px-4 py-3 text-left">3rd Release 60%</th>
-                <th className="px-4 py-3 text-left">4th Release 75%</th>
-                <th className="px-4 py-3 text-left">Retention 25%</th>
-                <th className="px-4 py-3 text-left">Received %</th>
-                <th className="px-4 py-3 text-left">Total Remaining</th>
-                <th className="border-r border-slate-200 px-4 py-3 text-left">
-                  Cash Advance
-                </th>
+                    return (
+                      <tr key={main.id} className="border-b border-slate-100 align-top">
+                        <td className="px-4 py-3">
+                          <p className="font-bold text-slate-900">
+                            {main.client_name}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            {main.unit_id} · {main.project_name}
+                          </p>
+                          {isOrphanOverride ? (
+                            <p className="mt-1 rounded bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-700">
+                              Orphan override row
+                            </p>
+                          ) : null}
+                        </td>
 
-                <th className="px-4 py-3 text-left">Agent’s Name</th>
-                <th className="px-4 py-3 text-left">Rate</th>
-                <th className="px-4 py-3 text-left">Commission</th>
-                <th className="px-4 py-3 text-left">Payment Percentage</th>
-                <th className="px-4 py-3 text-left">1st Release 20%</th>
-                <th className="px-4 py-3 text-left">2nd Release 40%</th>
-                <th className="px-4 py-3 text-left">3rd Release 60%</th>
-                <th className="px-4 py-3 text-left">4th Release 75%</th>
-                <th className="px-4 py-3 text-left">Retention 25%</th>
-                <th className="px-4 py-3 text-left">Received %</th>
-                <th className="px-4 py-3 text-left">Total Remaining</th>
-                <th className="px-4 py-3 text-left">Cash Advance</th>
-                <th className="px-4 py-3 text-left">Cash Kaliwaan / Date</th>
-                <th className="px-4 py-3 text-left">Actions</th>
-              </tr>
-            </thead>
+                        <td className="px-4 py-3">
+                          <p className="font-bold text-slate-900">
+                            {main.seller_name}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            {formatText(main.seller_role)} ·{" "}
+                            {formatNumber(main.rate)}%
+                          </p>
+                          <p className="mt-1 text-xs text-slate-500">
+                            Gross: {formatMoney(main.gross_commission)}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            Source: {formatText(main.source_type)}
+                          </p>
+                        </td>
 
-            <tbody>
-              {paginatedGroups.map((group) => {
-                const main = group.main
-                const override = group.override
+                        <td className="px-4 py-3">
+                          {override ? (
+                            <div>
+                              <p className="font-bold text-slate-900">
+                                {override.seller_name}
+                              </p>
+                              <p className="text-xs text-slate-500">
+                                {formatText(override.seller_role)} ·{" "}
+                                {formatNumber(override.rate)}%
+                              </p>
+                              <p className="mt-1 text-xs text-slate-500">
+                                Gross: {formatMoney(override.gross_commission)}
+                              </p>
+                              <StatusBadge status={override.status} />
+                            </div>
+                          ) : (
+                            <div>
+                              <p className="text-sm text-slate-500">
+                                No override commission
+                              </p>
+                              {canAddMissingOverride ? (
+                                <Button
+                                  className="mt-2"
+                                  onClick={() => openMissingOverrideModal(main)}
+                                  variant="secondary"
+                                >
+                                  Add Missing Override
+                                </Button>
+                              ) : null}
+                            </div>
+                          )}
+                        </td>
 
-                return (
-                  <tr
-                    key={group.client_unit_id}
-                    className="border-b border-slate-100 align-top"
-                  >
-                    <td className="px-4 py-3 font-semibold text-slate-900">
-                      {main.client_name}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {main.unit_id}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {formatText(main.mode_of_payment || "-")}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {formatNumber(main.lot_area_sqm)}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {formatMoney(main.price_per_sqm)}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {formatMoney(main.net_selling_price)}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {formatText(main.sale_type)}
-                    </td>
-                    <td className="border-r border-slate-200 px-4 py-3 text-slate-600">
-                      {main.project_name}
-                    </td>
-
-                    <td className="px-4 py-3 text-slate-600">
-                      <p className="font-semibold text-slate-900">
-                        {main.seller_name}
-                      </p>
-                      <p className="text-xs text-slate-500">
-                        {formatText(main.commission_role || main.seller_role)}
-                      </p>
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {formatNumber(main.rate)}%
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {formatMoney(main.gross_commission)}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {formatNumber(main.payment_percentage || 0)}%
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {formatReleaseCell(
-                        main.first_release_amount,
-                        main.first_release_status
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {formatReleaseCell(
-                        main.second_release_amount,
-                        main.second_release_status
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {formatReleaseCell(
-                        main.third_release_amount,
-                        main.third_release_status
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {formatReleaseCell(
-                        main.fourth_release_amount,
-                        main.fourth_release_status
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {formatReleaseCell(
-                        main.retention_amount,
-                        main.retention_status
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {formatNumber(main.total_released_percent || 0)}%
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {formatMoney(main.remaining_amount)}
-                    </td>
-                    <td className="border-r border-slate-200 px-4 py-3 text-slate-600">
-                      <CashAdvanceCell
-                        amount={main.cash_advance_amount || 0}
-                        remaining={main.cash_advance_remaining || 0}
-                        deducted={main.cash_advance_deducted || 0}
-                      />
-                    </td>
-
-                    <td className="px-4 py-3 text-slate-600">
-                      {override ? (
-                        <>
+                        <td className="px-4 py-3">
                           <p className="font-semibold text-slate-900">
-                            {override.seller_name}
+                            {formatMoney(main.total_contract_price)}
                           </p>
                           <p className="text-xs text-slate-500">
-                            {formatText(
-                              override.commission_role || override.seller_role
-                            )}
+                            Paid: {formatMoney(main.total_paid)}
                           </p>
-                        </>
-                      ) : (
-                        "-"
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {override ? `${formatNumber(override.rate)}%` : "-"}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {override ? formatMoney(override.gross_commission) : "-"}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {override
-                        ? `${formatNumber(override.payment_percentage || 0)}%`
-                        : "-"}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {override
-                        ? formatReleaseCell(
-                            override.first_release_amount,
-                            override.first_release_status
-                          )
-                        : "-"}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {override
-                        ? formatReleaseCell(
-                            override.second_release_amount,
-                            override.second_release_status
-                          )
-                        : "-"}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {override
-                        ? formatReleaseCell(
-                            override.third_release_amount,
-                            override.third_release_status
-                          )
-                        : "-"}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {override
-                        ? formatReleaseCell(
-                            override.fourth_release_amount,
-                            override.fourth_release_status
-                          )
-                        : "-"}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {override
-                        ? formatReleaseCell(
-                            override.retention_amount,
-                            override.retention_status
-                          )
-                        : "-"}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {override
-                        ? `${formatNumber(override.total_released_percent || 0)}%`
-                        : "-"}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {override ? formatMoney(override.remaining_amount) : "-"}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {override ? (
-                        <CashAdvanceCell
-                          amount={override.cash_advance_amount || 0}
-                          remaining={override.cash_advance_remaining || 0}
-                          deducted={override.cash_advance_deducted || 0}
-                        />
-                      ) : (
-                        "-"
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {override &&
-                      Number(override.cash_kaliwaan_amount || 0) > 0 ? (
-                        <>
-                          <p>{formatMoney(override.cash_kaliwaan_amount)}</p>
                           <p className="text-xs text-slate-500">
-                            {formatDate(override.cash_kaliwaan_date)}
+                            {formatNumber(main.payment_percentage)}%
                           </p>
-                        </>
-                      ) : (
-                        "-"
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          icon={<FiEye />}
-                          onClick={() => setViewCommissionId(main.id)}
-                        >
-                          Main
-                        </Button>
+                        </td>
 
-                        <Button
-                          icon={<FiEdit2 />}
-                          onClick={() => openEditModal(main)}
-                        >
-                          Edit Main
-                        </Button>
+                        <td className="px-4 py-3">
+                          <p className="text-xs text-slate-500">
+                            Released: {formatMoney(main.released_amount)}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            Remaining: {formatMoney(main.remaining_amount)}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            Cash Advance:{" "}
+                            {formatMoney(main.cash_advance_deduction)}
+                          </p>
+                        </td>
 
-                        {override ? (
-                          <>
+                        <td className="px-4 py-3">
+                          <StatusBadge status={main.status} />
+                          <p className="mt-2 text-xs text-slate-500">
+                            {formatText(main.sale_type)}
+                          </p>
+                        </td>
+
+                        <td className="px-4 py-3">
+                          <div className="flex flex-col gap-2">
                             <Button
                               icon={<FiEye />}
-                              onClick={() => setViewCommissionId(override.id)}
+                              onClick={() => openDetailsModal(main)}
                             >
-                              Agent
+                              View
                             </Button>
+
                             <Button
                               icon={<FiEdit2 />}
-                              onClick={() => openEditModal(override)}
+                              onClick={() => openEditModal(main, override || undefined)}
                             >
-                              Edit Agent
+                              Edit Main
                             </Button>
-                          </>
-                        ) : null}
-                      </div>
-                    </td>
-                  </tr>
-                )
-              })}
 
-              {paginatedGroups.length === 0 ? (
-                <tr>
-                  <td colSpan={34}>
-                    <EmptyState
-                      title="No commissions found"
-                      description="Commissions are generated automatically when a listing is reserved."
-                    />
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-      </TableContainer>
+                            {override ? (
+                              <Button
+                                icon={<FiEdit2 />}
+                                onClick={() => openEditModal(override)}
+                              >
+                                Edit Agent
+                              </Button>
+                            ) : null}
 
-      <Pagination
-        page={page}
-        rowsPerPage={rowsPerPage}
-        totalRows={totalRows}
-        onPageChange={setPage}
-        onRowsPerPageChange={setRowsPerPage}
-      />
+                            <Button
+                              disabled={generateMutation.isPending}
+                              onClick={() => generateMutation.mutate(main.id)}
+                              variant="secondary"
+                            >
+                              Generate Releases
+                            </Button>
+
+                            {override ? (
+                              <Button
+                                disabled={generateMutation.isPending}
+                                onClick={() => generateMutation.mutate(override.id)}
+                                variant="secondary"
+                              >
+                                Generate Agent Releases
+                              </Button>
+                            ) : null}
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </TableContainer>
+
+            <Pagination
+              page={page}
+              rowsPerPage={rowsPerPage}
+              totalRows={filteredGroups.length}
+              onPageChange={setPage}
+              onRowsPerPageChange={setRowsPerPage}
+            />
+          </>
+        )}
+      </div>
 
       {editCommission ? (
         <Modal
           title={`Edit Commission - ${editCommission.seller_name}`}
-          onClose={() => setEditCommission(null)}
-          size="lg"
+          onClose={() => {
+            setEditCommission(null)
+            setEditData(defaultCommissionEditData)
+          }}
+          size="xl"
           footer={
             <div className="flex justify-end gap-2">
-              <Button onClick={() => setEditCommission(null)}>Cancel</Button>
+              <Button
+                onClick={() => {
+                  setEditCommission(null)
+                  setEditData(defaultCommissionEditData)
+                }}
+              >
+                Cancel
+              </Button>
               <Button
                 disabled={updateMutation.isPending}
                 onClick={handleUpdateCommission}
@@ -1267,282 +1264,497 @@ const Commissions = () => {
             </div>
           }
         >
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <Select
-              label="Seller"
-              value={editData.seller_id}
-              onChange={(e) =>
-                setEditData({
-                  ...editData,
-                  seller_id: e.target.value ? Number(e.target.value) : "",
-                })
-              }
-            >
-              <option value="">Select seller</option>
-              {sellers.map((seller) => (
-                <option key={seller.id} value={seller.id}>
-                  {seller.full_name} - {formatText(seller.seller_role)}
-                </option>
-              ))}
-            </Select>
+          <div className="space-y-5">
+            {hasReleasedMilestone(editCommission) ? (
+              <Alert
+                variant="warning"
+                title="Seller and rate cannot be changed after a release has been paid. You can still add a missing override from the main table if the override was forgotten."
+              />
+            ) : null}
 
-            <Input
-              label="Rate (%)"
-              type="number"
-              min={0}
-              max={100}
-              step="0.01"
-              value={editData.rate}
-              onChange={(e) =>
-                setEditData({
-                  ...editData,
-                  rate: e.target.value,
-                })
-              }
-            />
+            <div className="grid gap-4 md:grid-cols-2">
+              <Select
+                label="Seller"
+                value={editData.seller_id}
+                disabled={hasReleasedMilestone(editCommission)}
+                onChange={(e) =>
+                  setEditData({
+                    ...editData,
+                    seller_id: e.target.value ? Number(e.target.value) : "",
+                  })
+                }
+              >
+                <option value="">Select seller</option>
+                {sellers.map((seller) => (
+                  <option key={seller.id} value={seller.id}>
+                    {seller.full_name} - {formatText(seller.seller_role)}
+                  </option>
+                ))}
+              </Select>
 
-            <Input
-              label="Commission Role"
-              value={editData.commission_role}
-              onChange={(e) =>
-                setEditData({
-                  ...editData,
-                  commission_role: e.target.value,
-                })
-              }
-            />
+              <Input
+                label="Rate (%)"
+                type="number"
+                min={0}
+                step="0.01"
+                value={editData.rate}
+                disabled={hasReleasedMilestone(editCommission)}
+                onChange={(e) =>
+                  setEditData({
+                    ...editData,
+                    rate: e.target.value,
+                  })
+                }
+              />
 
-            <Select
-              label="Source Type"
-              value={editData.source_type}
-              onChange={(e) => {
-                const sourceType = e.target.value as "main" | "override"
+              <Select
+                label="Commission Role"
+                value={editData.commission_role}
+                onChange={(e) =>
+                  setEditData({
+                    ...editData,
+                    commission_role: e.target.value,
+                  })
+                }
+              >
+                <option value="agent">Agent</option>
+                <option value="manager">Manager</option>
+                <option value="broker">Broker</option>
+              </Select>
 
-                setEditData({
-                  ...editData,
-                  source_type: sourceType,
-                  override_seller_id:
-                    sourceType === "override" ? "" : editData.override_seller_id,
-                  override_rate:
-                    sourceType === "override" ? "" : editData.override_rate,
-                  override_notes_for_child:
-                    sourceType === "override"
-                      ? ""
-                      : editData.override_notes_for_child,
-                })
-              }}
-            >
-              <option value="main">Main</option>
-              <option value="override">Override / Agent</option>
-            </Select>
+              <Select
+                label="Source Type"
+                value={editData.source_type}
+                onChange={(e) =>
+                  setEditData({
+                    ...editData,
+                    source_type: e.target.value as "main" | "override",
+                  })
+                }
+              >
+                <option value="main">Main</option>
+                <option value="override">Override</option>
+              </Select>
 
-            <Select
-              label="Distributed / Direct"
-              value={editData.sale_type}
-              onChange={(e) => {
-                const saleType = e.target.value as "distributed" | "direct"
+              <Select
+                label="Distributed / Direct"
+                value={editData.sale_type}
+                onChange={(e) => {
+                  const saleType = e.target.value as "distributed" | "direct"
 
-                setEditData({
-                  ...editData,
-                  sale_type: saleType,
-                  override_seller_id:
-                    saleType === "direct" ? "" : editData.override_seller_id,
-                  override_rate:
-                    saleType === "direct" ? "" : editData.override_rate,
-                  override_notes_for_child:
-                    saleType === "direct" ? "" : editData.override_notes_for_child,
-                })
-              }}
-            >
-              <option value="distributed">Distributed</option>
-              <option value="direct">Direct</option>
-            </Select>
+                  setEditData({
+                    ...editData,
+                    sale_type: saleType,
+                    override_seller_id:
+                      saleType === "direct" ? "" : editData.override_seller_id,
+                    override_rate:
+                      saleType === "direct" ? "" : editData.override_rate,
+                    override_notes_for_child:
+                      saleType === "direct"
+                        ? ""
+                        : editData.override_notes_for_child,
+                  })
+                }}
+              >
+                <option value="distributed">Distributed</option>
+                <option value="direct">Direct</option>
+              </Select>
 
-            <Select
-              label="Status"
-              value={editData.status}
-              onChange={(e) =>
-                setEditData({
-                  ...editData,
-                  status: e.target.value,
-                })
-              }
-            >
-              <option value="active">Active</option>
-              <option value="partially_released">Partially Released</option>
-              <option value="released">Released</option>
-              <option value="cancelled">Cancelled</option>
-              <option value="on_hold">On Hold</option>
-            </Select>
+              <Select
+                label="Status"
+                value={editData.status}
+                onChange={(e) =>
+                  setEditData({
+                    ...editData,
+                    status: e.target.value,
+                  })
+                }
+              >
+                <option value="active">Active</option>
+                <option value="partially_released">Partially Released</option>
+                <option value="released">Released</option>
+                <option value="on_hold">On Hold</option>
+                <option value="cancelled">Cancelled</option>
+              </Select>
+            </div>
 
-            <Input
-              label="Cash Kaliwaan Amount"
-              type="number"
-              min={0}
-              step="0.01"
-              value={editData.cash_kaliwaan_amount}
-              onChange={(e) =>
-                setEditData({
-                  ...editData,
-                  cash_kaliwaan_amount: e.target.value,
-                })
-              }
-              placeholder="Optional"
-            />
+            {selectedEditSeller ? (
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <h3 className="text-sm font-bold text-slate-900">
+                  Selected Seller
+                </h3>
+                <div className="mt-3 grid gap-4 md:grid-cols-3">
+                  <ComputedBox label="Seller" value={selectedEditSeller.full_name} />
+                  <ComputedBox
+                    label="Role"
+                    value={formatText(selectedEditSeller.seller_role)}
+                  />
+                  <ComputedBox
+                    label="Default Rate"
+                    value={
+                      selectedEditSeller.commission_rate
+                        ? `${formatNumber(selectedEditSeller.commission_rate)}%`
+                        : "-"
+                    }
+                  />
+                </div>
+              </div>
+            ) : null}
 
-            <Input
-              label="Cash Kaliwaan Date"
-              type="date"
-              value={editData.cash_kaliwaan_date}
-              onChange={(e) =>
-                setEditData({
-                  ...editData,
-                  cash_kaliwaan_date: e.target.value,
-                })
-              }
-            />
+            {editData.source_type === "main" &&
+            editData.sale_type === "distributed" ? (
+              <div className="rounded-xl border border-blue-100 bg-blue-50 p-4">
+                <h3 className="text-sm font-bold text-slate-900">
+                  Agent / Optional Override Commission
+                </h3>
 
-            <Input
-              label="Cash Kaliwaan Notes"
-              value={editData.cash_kaliwaan_notes}
-              onChange={(e) =>
-                setEditData({
-                  ...editData,
-                  cash_kaliwaan_notes: e.target.value,
-                })
-              }
-              placeholder="Optional"
-            />
+                <p className="mt-1 text-xs text-slate-600">
+                  Use this if the main commission should have a linked optional
+                  override commission. If the main commission already has paid
+                  releases and the override was forgotten, use Add Missing
+                  Override from the table instead.
+                </p>
 
-            <Input
-              label="Override Notes"
-              value={editData.override_notes}
-              onChange={(e) =>
-                setEditData({
-                  ...editData,
-                  override_notes: e.target.value,
-                })
-              }
-              placeholder="Optional"
-            />
+                <div className="mt-4 grid gap-4 md:grid-cols-2">
+                  <Select
+                    label="Override Seller"
+                    value={editData.override_seller_id}
+                    onChange={(e) =>
+                      setEditData({
+                        ...editData,
+                        override_seller_id: e.target.value
+                          ? Number(e.target.value)
+                          : "",
+                      })
+                    }
+                  >
+                    <option value="">No override seller</option>
+                    {sellers
+                      .filter((seller) => Number(seller.id) !== Number(editData.seller_id))
+                      .map((seller) => (
+                        <option key={seller.id} value={seller.id}>
+                          {seller.full_name} - {formatText(seller.seller_role)}
+                        </option>
+                      ))}
+                  </Select>
 
-            <Input
-              label="Notes"
-              value={editData.notes}
-              onChange={(e) =>
-                setEditData({
-                  ...editData,
-                  notes: e.target.value,
-                })
-              }
-              placeholder="Optional"
-            />
-          </div>
+                  <Input
+                    label="Override Rate (%)"
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={editData.override_rate}
+                    onChange={(e) =>
+                      setEditData({
+                        ...editData,
+                        override_rate: e.target.value,
+                      })
+                    }
+                  />
 
-          {editData.source_type === "main" &&
-          editData.sale_type === "distributed" ? (
-            <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-4">
+                  <label className="block md:col-span-2">
+                    <span className="mb-1.5 block text-sm font-semibold text-slate-700">
+                      Override Notes
+                    </span>
+                    <textarea
+                      className="min-h-24 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                      value={editData.override_notes_for_child}
+                      onChange={(e) =>
+                        setEditData({
+                          ...editData,
+                          override_notes_for_child: e.target.value,
+                        })
+                      }
+                    />
+                  </label>
+                </div>
+
+                {selectedOverrideSeller ? (
+                  <div className="mt-4 rounded-lg border border-blue-100 bg-white p-3">
+                    <p className="text-xs font-semibold uppercase text-slate-400">
+                      Selected Override Seller
+                    </p>
+                    <p className="mt-1 text-sm font-bold text-slate-900">
+                      {selectedOverrideSeller.full_name}
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      {formatText(selectedOverrideSeller.seller_role)}
+                    </p>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            <div className="rounded-xl border border-amber-100 bg-amber-50 p-4">
               <h3 className="text-sm font-bold text-slate-900">
-                Agent / Optional Override Commission
+                Cash Kaliwaan / Notes
               </h3>
 
-              <p className="mt-1 text-xs text-slate-600">
-                This creates or updates the linked override commission row for
-                this main commission.
-              </p>
-
-              <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
-                <Select
-                  label="Override Seller / Agent"
-                  value={editData.override_seller_id}
-                  onChange={(e) =>
-                    setEditData({
-                      ...editData,
-                      override_seller_id: e.target.value
-                        ? Number(e.target.value)
-                        : "",
-                    })
-                  }
-                >
-                  <option value="">No override seller</option>
-                  {sellers
-                    .filter((seller) => Number(seller.id) !== Number(editData.seller_id))
-                    .map((seller) => (
-                      <option key={seller.id} value={seller.id}>
-                        {seller.full_name} - {formatText(seller.seller_role)}
-                      </option>
-                    ))}
-                </Select>
-
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
                 <Input
-                  label="Override Rate (%)"
+                  label="Cash Kaliwaan Amount"
                   type="number"
                   min={0}
-                  max={100}
                   step="0.01"
-                  value={editData.override_rate}
+                  value={editData.cash_kaliwaan_amount}
                   onChange={(e) =>
                     setEditData({
                       ...editData,
-                      override_rate: e.target.value,
+                      cash_kaliwaan_amount: e.target.value,
                     })
                   }
-                  placeholder="Example: 2"
+                />
+
+                <Input
+                  label="Cash Kaliwaan Date"
+                  type="date"
+                  value={editData.cash_kaliwaan_date}
+                  onChange={(e) =>
+                    setEditData({
+                      ...editData,
+                      cash_kaliwaan_date: e.target.value,
+                    })
+                  }
                 />
 
                 <label className="block md:col-span-2">
                   <span className="mb-1.5 block text-sm font-semibold text-slate-700">
-                    Override Notes
+                    Cash Kaliwaan Notes
                   </span>
                   <textarea
-                    className="min-h-24 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                    value={editData.override_notes_for_child}
+                    className="min-h-20 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    value={editData.cash_kaliwaan_notes}
                     onChange={(e) =>
                       setEditData({
                         ...editData,
-                        override_notes_for_child: e.target.value,
+                        cash_kaliwaan_notes: e.target.value,
                       })
                     }
-                    placeholder="Reason for optional override commission"
+                  />
+                </label>
+
+                <label className="block md:col-span-2">
+                  <span className="mb-1.5 block text-sm font-semibold text-slate-700">
+                    Notes
+                  </span>
+                  <textarea
+                    className="min-h-20 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    value={editData.notes}
+                    onChange={(e) =>
+                      setEditData({
+                        ...editData,
+                        notes: e.target.value,
+                      })
+                    }
                   />
                 </label>
               </div>
             </div>
-          ) : null}
-
-          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
-            <ComputedBox
-              label="Net Selling Price (Commission Base)"
-              value={formatMoney(editCommission.commission_base)}
-            />
-            <ComputedBox
-              label="Current Gross"
-              value={formatMoney(editCommission.gross_commission)}
-            />
-            <ComputedBox
-              label="Released"
-              value={formatMoney(editCommission.released_amount)}
-            />
           </div>
-
-          <p className="mt-3 text-sm text-slate-500">
-            Seller and rate cannot be changed after a release has been paid.
-          </p>
         </Modal>
       ) : null}
 
-      {viewCommissionId ? (
+      {missingOverrideMain ? (
         <Modal
-          title="Commission Details"
-          onClose={() => setViewCommissionId(null)}
-          size="xl"
+          title={`Add Missing Override - ${missingOverrideMain.client_name}`}
+          onClose={() => {
+            setMissingOverrideMain(null)
+            setMissingOverrideData(defaultMissingOverrideData)
+          }}
+          size="lg"
           footer={
-            <div className="flex justify-end">
-              <Button onClick={() => setViewCommissionId(null)}>Close</Button>
+            <div className="flex justify-end gap-2">
+              <Button
+                onClick={() => {
+                  setMissingOverrideMain(null)
+                  setMissingOverrideData(defaultMissingOverrideData)
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                disabled={
+                  addMissingOverrideMutation.isPending ||
+                  !missingOverrideData.seller_id ||
+                  missingOverrideData.rate === ""
+                }
+                onClick={handleAddMissingOverride}
+                variant="primary"
+              >
+                {addMissingOverrideMutation.isPending
+                  ? "Saving..."
+                  : "Add Missing Override"}
+              </Button>
             </div>
           }
         >
-          {isDetailsLoading ? <LoadingState label="Loading commission details..." /> : null}
+          <div className="space-y-4">
+            <Alert
+              variant="info"
+              title="This creates a new child override commission. It does not edit the paid main commission or delete existing releases."
+            />
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <ComputedBox
+                label="Main Seller"
+                value={missingOverrideMain.seller_name}
+              />
+              <ComputedBox
+                label="Main Gross Commission"
+                value={formatMoney(missingOverrideMain.gross_commission)}
+              />
+              <ComputedBox
+                label="Commission Base"
+                value={formatMoney(missingOverrideMain.commission_base)}
+              />
+              <ComputedBox
+                label="Client / Unit"
+                value={`${missingOverrideMain.client_name} - ${missingOverrideMain.unit_id}`}
+              />
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <Select
+                label="Override Seller"
+                value={missingOverrideData.seller_id}
+                onChange={(e) =>
+                  setMissingOverrideData({
+                    ...missingOverrideData,
+                    seller_id: e.target.value ? Number(e.target.value) : "",
+                  })
+                }
+              >
+                <option value="">Select override seller</option>
+                {sellers
+                  .filter((seller) => Number(seller.id) !== Number(missingOverrideMain.seller_id))
+                  .map((seller) => (
+                    <option key={seller.id} value={seller.id}>
+                      {seller.full_name} - {formatText(seller.seller_role)}
+                    </option>
+                  ))}
+              </Select>
+
+              <Input
+                label="Override Rate (%)"
+                type="number"
+                min={0}
+                step="0.01"
+                value={missingOverrideData.rate}
+                onChange={(e) =>
+                  setMissingOverrideData({
+                    ...missingOverrideData,
+                    rate: e.target.value,
+                  })
+                }
+              />
+
+              <Input
+                label="Cash Kaliwaan Amount"
+                type="number"
+                min={0}
+                step="0.01"
+                value={missingOverrideData.cash_kaliwaan_amount}
+                onChange={(e) =>
+                  setMissingOverrideData({
+                    ...missingOverrideData,
+                    cash_kaliwaan_amount: e.target.value,
+                  })
+                }
+              />
+
+              <Input
+                label="Cash Kaliwaan Date"
+                type="date"
+                value={missingOverrideData.cash_kaliwaan_date}
+                onChange={(e) =>
+                  setMissingOverrideData({
+                    ...missingOverrideData,
+                    cash_kaliwaan_date: e.target.value,
+                  })
+                }
+              />
+
+              <label className="block md:col-span-2">
+                <span className="mb-1.5 block text-sm font-semibold text-slate-700">
+                  Override Notes
+                </span>
+                <textarea
+                  className="min-h-24 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  value={missingOverrideData.override_notes}
+                  onChange={(e) =>
+                    setMissingOverrideData({
+                      ...missingOverrideData,
+                      override_notes: e.target.value,
+                    })
+                  }
+                  placeholder="Reason this override was added later"
+                />
+              </label>
+
+              <label className="block md:col-span-2">
+                <span className="mb-1.5 block text-sm font-semibold text-slate-700">
+                  Cash Kaliwaan Notes
+                </span>
+                <textarea
+                  className="min-h-20 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  value={missingOverrideData.cash_kaliwaan_notes}
+                  onChange={(e) =>
+                    setMissingOverrideData({
+                      ...missingOverrideData,
+                      cash_kaliwaan_notes: e.target.value,
+                    })
+                  }
+                />
+              </label>
+
+              <label className="block md:col-span-2">
+                <span className="mb-1.5 block text-sm font-semibold text-slate-700">
+                  Notes
+                </span>
+                <textarea
+                  className="min-h-20 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  value={missingOverrideData.notes}
+                  onChange={(e) =>
+                    setMissingOverrideData({
+                      ...missingOverrideData,
+                      notes: e.target.value,
+                    })
+                  }
+                />
+              </label>
+            </div>
+
+            {selectedMissingOverrideSeller ? (
+              <div className="rounded-lg border border-blue-100 bg-blue-50 p-3">
+                <p className="text-xs font-semibold uppercase text-slate-400">
+                  Selected Override Seller
+                </p>
+                <p className="mt-1 text-sm font-bold text-slate-900">
+                  {selectedMissingOverrideSeller.full_name}
+                </p>
+                <p className="text-xs text-slate-500">
+                  {formatText(selectedMissingOverrideSeller.seller_role)}
+                </p>
+              </div>
+            ) : null}
+          </div>
+        </Modal>
+      ) : null}
+
+      {selectedCommissionId ? (
+        <Modal
+          title="Commission Details"
+          onClose={() => setSelectedCommissionId(null)}
+          size="xl"
+          footer={
+            <div className="flex justify-end">
+              <Button onClick={() => setSelectedCommissionId(null)}>
+                Close
+              </Button>
+            </div>
+          }
+        >
+          {isDetailsLoading ? <LoadingState label="Loading details..." /> : null}
 
           {detailsError ? (
             <Alert variant="error" title="Failed to load commission details" />
@@ -1550,25 +1762,22 @@ const Commissions = () => {
 
           {commissionDetails ? (
             <div className="space-y-6">
-              <DetailsSection title="Commission Info">
-                <Detail label="Client" value={commissionDetails.client_name} />
-                <Detail label="Unit" value={commissionDetails.unit_id} />
-                <Detail label="Project" value={commissionDetails.project_name} />
-                <Detail
-                  label="Mode of Payment"
-                  value={formatText(commissionDetails.mode_of_payment || "-")}
-                />
+              <DetailsSection title="Commission Information">
                 <Detail label="Seller" value={commissionDetails.seller_name} />
                 <Detail
-                  label="Type"
+                  label="Role"
+                  value={formatText(commissionDetails.seller_role)}
+                />
+                <Detail
+                  label="Source"
                   value={formatText(commissionDetails.source_type)}
                 />
                 <Detail
-                  label="Distributed / Direct"
+                  label="Sale Type"
                   value={formatText(commissionDetails.sale_type)}
                 />
                 <Detail
-                  label="Net Selling Price"
+                  label="Commission Base"
                   value={formatMoney(commissionDetails.commission_base)}
                 />
                 <Detail
@@ -1580,214 +1789,153 @@ const Commissions = () => {
                   value={formatMoney(commissionDetails.gross_commission)}
                 />
                 <Detail
-                  label="Cash Advance"
-                  value={formatMoney(commissionDetails.cash_advance_amount || 0)}
-                />
-                <Detail
-                  label="Cash Advance Remaining"
-                  value={formatMoney(
-                    commissionDetails.cash_advance_remaining || 0
-                  )}
-                />
-                <Detail
-                  label="Cash Advance Deducted"
-                  value={formatMoney(
-                    commissionDetails.cash_advance_deducted || 0
-                  )}
-                />
-                <Detail
-                  label="Eligible"
-                  value={formatMoney(commissionDetails.eligible_amount)}
-                />
-                <Detail
                   label="Released"
                   value={formatMoney(commissionDetails.released_amount)}
                 />
+              </DetailsSection>
+
+              <DetailsSection title="Property / Payment">
+                <Detail label="Client" value={commissionDetails.client_name} />
+                <Detail label="Unit" value={commissionDetails.unit_id} />
+                <Detail label="Project" value={commissionDetails.project_name} />
                 <Detail
-                  label="Remaining"
-                  value={formatMoney(commissionDetails.remaining_amount)}
+                  label="TCP"
+                  value={formatMoney(commissionDetails.total_contract_price)}
                 />
                 <Detail
-                  label="Payment Percentage"
-                  value={`${formatNumber(
-                    commissionDetails.payment_percentage || 0
-                  )}%`}
+                  label="Paid"
+                  value={formatMoney(commissionDetails.total_paid)}
                 />
                 <Detail
-                  label="Status"
-                  value={formatText(commissionDetails.status)}
+                  label="Payment %"
+                  value={`${formatNumber(commissionDetails.payment_percentage)}%`}
                 />
               </DetailsSection>
 
-              <DetailsSection title="Optional Cash Kaliwaan">
-                <Detail
-                  label="Amount"
-                  value={formatMoney(commissionDetails.cash_kaliwaan_amount)}
-                />
-                <Detail
-                  label="Date"
-                  value={formatDate(commissionDetails.cash_kaliwaan_date)}
-                />
-                <Detail
-                  label="Notes"
-                  value={commissionDetails.cash_kaliwaan_notes || "-"}
-                />
-              </DetailsSection>
-
-              <div className="flex items-center justify-between gap-3">
-                <h3 className="text-base font-bold text-slate-900">
-                  Release Milestones
-                </h3>
-
-                {(commissionDetails.releases || []).length === 0 ? (
+              <section>
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <h3 className="text-base font-bold text-slate-900">
+                    Release Milestones
+                  </h3>
                   <Button
                     disabled={generateMutation.isPending}
                     onClick={() => generateMutation.mutate(commissionDetails.id)}
-                    variant="primary"
                   >
                     Generate Milestones
                   </Button>
-                ) : null}
-              </div>
+                </div>
 
-              <TableContainer>
-                <table className="w-full text-sm">
-                  <thead className="bg-slate-50">
-                    <tr className="border-b border-slate-200">
-                      <th className="px-4 py-3 text-left">Stage</th>
-                      <th className="px-4 py-3 text-left">Trigger</th>
-                      <th className="px-4 py-3 text-left">Release %</th>
-                      <th className="px-4 py-3 text-left">Gross Amount</th>
-                      <th className="px-4 py-3 text-left">
-                        Cash Advance Deduction
-                      </th>
-                      <th className="px-4 py-3 text-left">Net Amount</th>
-                      <th className="px-4 py-3 text-left">Status</th>
-                      <th className="px-4 py-3 text-left">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(commissionDetails.releases || []).map((release) => (
-                      <tr key={release.id} className="border-b border-slate-100">
-                        <td className="px-4 py-3 font-semibold">
-                          {getReleaseStageLabel(release.release_stage)}
-                        </td>
-                        <td className="px-4 py-3 text-slate-600">
-                          {release.release_stage === "retention"
-                            ? "Final condition"
-                            : `${formatNumber(
-                                release.trigger_payment_percent || 0
-                              )}% paid`}
-                        </td>
-                        <td className="px-4 py-3 text-slate-600">
-                          {formatNumber(release.release_percent)}%
-                        </td>
-                        <td className="px-4 py-3 text-slate-600">
-                          {formatMoney(release.gross_release_amount)}
-                        </td>
-                        <td className="px-4 py-3 text-slate-600">
-                          {formatMoney(release.cash_advance_deduction)}
-                        </td>
-                        <td className="px-4 py-3 text-slate-600">
-                          {formatMoney(release.net_release_amount)}
-                        </td>
-                        <td className="px-4 py-3">
-                          <StatusBadge status={release.status} />
-                        </td>
-                        <td className="px-4 py-3">
-                          {release.status === "eligible" ? (
-                            <div className="flex flex-wrap gap-2">
-                              <Button
-                                disabled={markReleaseMutation.isPending}
-                                onClick={() => markReleaseMutation.mutate(release.id)}
-                                variant="primary"
-                              >
-                                Mark Released
-                              </Button>
-                              <Button onClick={() => setDeductReleaseId(release.id)}>
-                                Deduct Advance
-                              </Button>
-                              <Button
-                                icon={<FiPause />}
-                                disabled={holdReleaseMutation.isPending}
-                                onClick={() => holdReleaseMutation.mutate(release.id)}
-                              >
-                                Hold
-                              </Button>
-                              <Button
-                                disabled={cancelReleaseMutation.isPending}
-                                onClick={() => setCancelReleaseId(release.id)}
-                                variant="danger"
-                              >
-                                Cancel
-                              </Button>
-                            </div>
-                          ) : null}
-
-                          {release.status === "pending" ? (
-                            <div className="flex flex-wrap gap-2">
-                              <Button onClick={() => setDeductReleaseId(release.id)}>
-                                Deduct Advance
-                              </Button>
-                              <Button
-                                icon={<FiPause />}
-                                disabled={holdReleaseMutation.isPending}
-                                onClick={() => holdReleaseMutation.mutate(release.id)}
-                              >
-                                Hold
-                              </Button>
-                              <Button
-                                disabled={cancelReleaseMutation.isPending}
-                                onClick={() => setCancelReleaseId(release.id)}
-                                variant="danger"
-                              >
-                                Cancel
-                              </Button>
-                            </div>
-                          ) : null}
-
-                          {release.status === "on_hold" ? (
-                            <Button
-                              icon={<FiPlay />}
-                              disabled={unholdReleaseMutation.isPending}
-                              onClick={() => unholdReleaseMutation.mutate(release.id)}
-                            >
-                              Restore
-                            </Button>
-                          ) : null}
-
-                          {release.status === "released" ? (
-                            <span className="text-slate-600">
-                              Released {formatDate(release.released_at)} by{" "}
-                              {release.released_by_name || "-"}
-                            </span>
-                          ) : null}
-
-                          {release.status === "cancelled" ? (
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="text-slate-500">Cancelled</span>
-                              <Button
-                                disabled={restoreCancelledReleaseMutation.isPending}
-                                onClick={() => restoreCancelledReleaseMutation.mutate(release.id)}
-                              >
-                                Restore
-                              </Button>
-                            </div>
-                          ) : null}
-                        </td>
+                <TableContainer>
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-50">
+                      <tr className="border-b border-slate-200">
+                        <th className="px-4 py-3 text-left">Stage</th>
+                        <th className="px-4 py-3 text-left">Trigger</th>
+                        <th className="px-4 py-3 text-left">Release %</th>
+                        <th className="px-4 py-3 text-left">Gross</th>
+                        <th className="px-4 py-3 text-left">Deduction</th>
+                        <th className="px-4 py-3 text-left">Net</th>
+                        <th className="px-4 py-3 text-left">Status</th>
+                        <th className="px-4 py-3 text-left">Actions</th>
                       </tr>
-                    ))}
+                    </thead>
 
-                    {(commissionDetails.releases || []).length === 0 ? (
-                      <tr>
-                        <td colSpan={8}>
-                          <EmptyState title="No milestones generated" />
-                        </td>
-                      </tr>
-                    ) : null}
-                  </tbody>
-                </table>
-              </TableContainer>
+                    <tbody>
+                      {(commissionDetails.releases || []).map((release) => (
+                        <tr key={release.id} className="border-b border-slate-100">
+                          <td className="px-4 py-3 font-semibold text-slate-900">
+                            {getReleaseStageLabel(release.release_stage)}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {release.trigger_payment_percent === null
+                              ? "-"
+                              : `${formatNumber(release.trigger_payment_percent)}%`}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {formatNumber(release.release_percent)}%
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {formatMoney(release.gross_release_amount)}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {formatMoney(release.cash_advance_deduction)}
+                          </td>
+                          <td className="px-4 py-3 font-semibold text-slate-900">
+                            {formatMoney(release.net_release_amount)}
+                          </td>
+                          <td className="px-4 py-3">
+                            <StatusBadge status={release.status} />
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex flex-wrap gap-2">
+                              {release.status === "eligible" ||
+                              release.status === "pending" ? (
+                                <>
+                                  <Button
+                                    disabled={markReleaseMutation.isPending}
+                                    onClick={() => markReleaseMutation.mutate(release.id)}
+                                    variant="primary"
+                                  >
+                                    Release
+                                  </Button>
+                                  <Button
+                                    disabled={holdReleaseMutation.isPending}
+                                    onClick={() => holdReleaseMutation.mutate(release.id)}
+                                  >
+                                    Hold
+                                  </Button>
+                                  <Button
+                                    disabled={deductMutation.isPending}
+                                    onClick={() => {
+                                      setDeductReleaseId(release.id)
+                                      setDeductData(defaultDeductAdvanceData)
+                                    }}
+                                  >
+                                    Deduct
+                                  </Button>
+                                  <Button
+                                    disabled={cancelReleaseMutation.isPending}
+                                    onClick={() => setCancelReleaseId(release.id)}
+                                    variant="danger"
+                                  >
+                                    Cancel
+                                  </Button>
+                                </>
+                              ) : null}
+
+                              {release.status === "on_hold" ? (
+                                <Button
+                                  disabled={unholdReleaseMutation.isPending}
+                                  onClick={() => unholdReleaseMutation.mutate(release.id)}
+                                >
+                                  Unhold
+                                </Button>
+                              ) : null}
+
+                              {release.status === "cancelled" ? (
+                                <Button
+                                  disabled={restoreCancelledReleaseMutation.isPending}
+                                  onClick={() => restoreCancelledReleaseMutation.mutate(release.id)}
+                                >
+                                  Restore
+                                </Button>
+                              ) : null}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+
+                      {(commissionDetails.releases || []).length === 0 ? (
+                        <tr>
+                          <td colSpan={8}>
+                            <EmptyState title="No milestones generated" />
+                          </td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </TableContainer>
+              </section>
 
               <section>
                 <h3 className="mb-3 text-base font-bold text-slate-900">

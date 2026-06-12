@@ -5,6 +5,7 @@ import {
   getCommissionsByClientUnit,
   createCommission,
   updateCommission,
+  addMissingOverrideCommission,
   getCommissionSummary,
   createHierarchyCommissions,
   getCommissionReleases,
@@ -26,6 +27,7 @@ router.get('/commissions-summary', auth, getCommissionSummary)
 
 router.get('/commissions/:id/releases', auth, getCommissionReleases)
 router.post('/commissions/:id/releases/generate', auth, generateReleaseMilestones)
+router.post('/commissions/:id/missing-override', auth, addMissingOverrideCommission)
 
 router.patch('/commission-releases/:id/mark-released', auth, markReleaseStage)
 router.patch('/commission-releases/:id/deduct-advance', auth, deductCashAdvance)
