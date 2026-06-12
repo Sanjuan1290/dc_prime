@@ -775,7 +775,7 @@ const Listings = () => {
         <table className="w-full text-sm">
           <thead className="bg-slate-50">
             <tr className="border-b border-slate-200">
-              <FormulaHeader label="Installment" />
+              <FormulaHeader label="Unit Type" />
               <FormulaHeader label="Unit ID" />
               <FormulaHeader label="Area" />
               <FormulaHeader label="Price per SQM" />
