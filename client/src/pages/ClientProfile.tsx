@@ -73,6 +73,13 @@ type ClientUnit = {
   seller_commission_rate?: number | string | null
   sale_type?: "distributed" | "direct" | string | null
   reports_under: string | null
+  document_total_count?: number | string
+  document_checklist_count?: number | string
+  document_required_count?: number | string
+  document_submitted_count?: number | string
+  document_submitted_required_count?: number | string
+  document_approved_count?: number | string
+  document_rejected_count?: number | string
   document_status: string
   commission_count?: number | string
   gross_commission_total?: number | string
@@ -486,6 +493,44 @@ const isRequired = (value: number | boolean) => {
   return value === true || Number(value) === 1
 }
 
+const documentStatusOptions = [
+  { label: "Not Submitted", value: "not_submitted" },
+  { label: "Submitted", value: "submitted" },
+  { label: "Approved", value: "approved" },
+  { label: "Rejected", value: "rejected" },
+]
+
+const countValue = (value: number | string | null | undefined) => {
+  return Number(value || 0)
+}
+
+const getUnitDocumentSummary = (unit: ClientUnit) => {
+  const checklistCount = countValue(unit.document_checklist_count)
+  const totalCount = countValue(unit.document_total_count)
+  const submittedCount = countValue(unit.document_submitted_count)
+  const requiredCount = countValue(unit.document_required_count)
+  const submittedRequiredCount = countValue(
+    unit.document_submitted_required_count
+  )
+
+  return {
+    checklistCount,
+    totalCount,
+    submittedCount,
+    requiredCount,
+    submittedRequiredCount,
+    hasChecklist: checklistCount > 0,
+    progressLabel:
+      checklistCount > 0
+        ? `Documents: ${submittedCount}/${checklistCount} submitted`
+        : "No checklist generated",
+    requiredLabel:
+      requiredCount > 0
+        ? `Required: ${submittedRequiredCount}/${requiredCount}`
+        : "No required documents",
+  }
+}
+
 const ClientProfile = () => {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -821,13 +866,13 @@ const ClientProfile = () => {
     deleteUnitMutation.mutate(deleteUnit.id)
   }
 
-  const handleDocumentChecklistToggle = (
+  const handleDocumentStatusChange = (
     document: ClientDocument,
-    checked: boolean
+    status: string
   ) => {
     updateDocumentMutation.mutate({
       clientDocumentId: document.id,
-      status: checked ? "submitted" : "not_submitted",
+      status,
     })
   }
 
@@ -977,9 +1022,6 @@ const ClientProfile = () => {
       <div className="mt-6">
         <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="text-lg font-bold text-slate-900">Client Units</h2>
-          <Button icon={<FiPlus />} onClick={openReserveModal} variant="primary">
-            Reserve Listing
-          </Button>
         </div>
 
         {clientUnits.length === 0 ? (
@@ -1015,8 +1057,11 @@ const ClientProfile = () => {
               </thead>
 
               <tbody>
-                {clientUnits.map((unit) => (
-                  <tr key={unit.id} className="border-b border-slate-100">
+                {clientUnits.map((unit) => {
+                  const documentSummary = getUnitDocumentSummary(unit)
+
+                  return (
+                    <tr key={unit.id} className="border-b border-slate-100">
                     <td className="px-4 py-3">
                       <p className="font-bold text-slate-900">{unit.unit_id}</p>
                       <p className="text-xs text-slate-500">
@@ -1061,13 +1106,31 @@ const ClientProfile = () => {
                       {unit.due_day || "-"}
                     </td>
 
-                    <td className="px-4 py-3">
+                    <td className="min-w-56 px-4 py-3">
                       <button
-                        className="font-semibold text-blue-600 hover:text-blue-700"
+                        className="w-full rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-left shadow-sm transition hover:border-blue-300 hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-100"
                         onClick={() => openDocumentsModal(unit)}
                         type="button"
                       >
-                        {formatText(unit.document_status || "incomplete")}
+                        <span className="flex items-start gap-2">
+                          <FiFileText className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" />
+                          <span className="min-w-0">
+                            <span className="block text-sm font-bold text-blue-700">
+                              Open Checklist
+                            </span>
+                            <span className="mt-0.5 block text-xs font-semibold text-slate-700">
+                              {documentSummary.progressLabel}
+                            </span>
+                            <span className="mt-0.5 block text-xs text-slate-500">
+                              {documentSummary.requiredLabel}
+                            </span>
+                            <span className="mt-2 block">
+                              <StatusBadge
+                                status={unit.document_status || "incomplete"}
+                              />
+                            </span>
+                          </span>
+                        </span>
                       </button>
                     </td>
 
@@ -1100,8 +1163,9 @@ const ClientProfile = () => {
                         </Button>
                       </div>
                     </td>
-                  </tr>
-                ))}
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </TableContainer>
@@ -1853,7 +1917,9 @@ const ClientProfile = () => {
                     createChecklistMutation.mutate(selectedDocumentsUnit.id)
                   }
                 >
-                  Create Checklist
+                  {clientDocuments.length === 0
+                    ? "Generate Checklist"
+                    : "Sync Checklist"}
                 </Button>
                 <Button
                   disabled={applyReusableMutation.isPending}
@@ -1892,7 +1958,7 @@ const ClientProfile = () => {
                   }
                   variant="primary"
                 >
-                  Create Checklist
+                  Generate Checklist
                 </Button>
               }
             />
@@ -1924,33 +1990,24 @@ const ClientProfile = () => {
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50">
                     <tr className="border-b border-slate-200">
-                      <th className="px-4 py-3 text-left">Submitted</th>
                       <th className="px-4 py-3 text-left">Document</th>
-                      <th className="px-4 py-3 text-left">Required</th>
+                      <th className="px-4 py-3 text-left">Type</th>
                       <th className="px-4 py-3 text-left">Reusable</th>
                       <th className="px-4 py-3 text-left">Status</th>
-                      <th className="px-4 py-3 text-left">Updated</th>
+                      <th className="px-4 py-3 text-left">Submitted Date</th>
+                      <th className="px-4 py-3 text-left">Action</th>
                     </tr>
                   </thead>
 
                   <tbody>
-                    {clientDocuments.map((document) => (
-                      <tr key={document.id} className="border-b border-slate-100">
-                        <td className="px-4 py-3">
-                          <input
-                            type="checkbox"
-                            checked={isSubmitted(document.status)}
-                            disabled={updateDocumentMutation.isPending}
-                            onChange={(e) =>
-                              handleDocumentChecklistToggle(
-                                document,
-                                e.target.checked
-                              )
-                            }
-                            className="h-5 w-5"
-                          />
-                        </td>
+                    {clientDocuments.map((document) => {
+                      const submittedDate =
+                        document.status === "not_submitted"
+                          ? null
+                          : document.reviewed_at || document.updated_at
 
+                      return (
+                        <tr key={document.id} className="border-b border-slate-100">
                         <td className="px-4 py-3">
                           <p className="font-semibold text-slate-900">
                             {document.name}
@@ -1960,8 +2017,19 @@ const ClientProfile = () => {
                           </p>
                         </td>
 
-                        <td className="px-4 py-3 text-slate-600">
-                          {isRequired(document.is_required) ? "Yes" : "No"}
+                        <td className="px-4 py-3">
+                          <span
+                            className={[
+                              "inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold",
+                              isRequired(document.is_required)
+                                ? "border-blue-200 bg-blue-50 text-blue-700"
+                                : "border-slate-200 bg-slate-50 text-slate-600",
+                            ].join(" ")}
+                          >
+                            {isRequired(document.is_required)
+                              ? "Required"
+                              : "Optional"}
+                          </span>
                         </td>
 
                         <td className="px-4 py-3 text-slate-600">
@@ -1969,20 +2037,35 @@ const ClientProfile = () => {
                         </td>
 
                         <td className="px-4 py-3">
-                          <StatusBadge
-                            status={
-                              isSubmitted(document.status)
-                                ? "submitted"
-                                : "not_submitted"
-                            }
-                          />
+                          <StatusBadge status={document.status} />
                         </td>
 
                         <td className="px-4 py-3 text-slate-600">
-                          {formatDate(document.updated_at)}
+                          {submittedDate ? formatDate(submittedDate) : "-"}
                         </td>
-                      </tr>
-                    ))}
+
+                        <td className="px-4 py-3">
+                          <Select
+                            aria-label={`Update ${document.name} status`}
+                            disabled={updateDocumentMutation.isPending}
+                            value={document.status}
+                            onChange={(e) =>
+                              handleDocumentStatusChange(
+                                document,
+                                e.target.value
+                              )
+                            }
+                          >
+                            {documentStatusOptions.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </Select>
+                        </td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
               </TableContainer>

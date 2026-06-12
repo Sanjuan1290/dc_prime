@@ -105,9 +105,16 @@ const clientUnitFields = `
   seller.seller_role AS seller_role,
   seller.commission_rate AS seller_commission_rate,
   COALESCE(parent_seller.full_name, seller.custom_reports_under, 'None') AS reports_under,
+  COALESCE(document_summary.total_count, 0) AS document_total_count,
+  COALESCE(document_summary.checklist_count, 0) AS document_checklist_count,
+  COALESCE(document_summary.required_count, 0) AS document_required_count,
+  COALESCE(document_summary.submitted_count, 0) AS document_submitted_count,
+  COALESCE(document_summary.submitted_required_count, 0) AS document_submitted_required_count,
+  COALESCE(document_summary.approved_count, 0) AS document_approved_count,
+  COALESCE(document_summary.rejected_count, 0) AS document_rejected_count,
   CASE
     WHEN COALESCE(document_summary.required_count, 0) > 0
-      AND COALESCE(document_summary.submitted_count, 0) = document_summary.required_count
+      AND COALESCE(document_summary.submitted_required_count, 0) >= document_summary.required_count
     THEN 'complete'
     ELSE 'incomplete'
   END AS document_status,
@@ -137,17 +144,28 @@ const clientUnitJoins = `
   LEFT JOIN (
     SELECT
       cu_docs.id AS client_unit_id,
-      COUNT(d.id) AS required_count,
+      COUNT(d.id) AS total_count,
+      COUNT(cdl.id) AS checklist_count,
+      SUM(CASE WHEN d.is_required = TRUE THEN 1 ELSE 0 END) AS required_count,
       SUM(
         CASE
           WHEN cdl.status IN ('submitted', 'approved') THEN 1
           ELSE 0
         END
-      ) AS submitted_count
+      ) AS submitted_count,
+      SUM(
+        CASE
+          WHEN d.is_required = TRUE
+            AND cdl.status IN ('submitted', 'approved')
+          THEN 1
+          ELSE 0
+        END
+      ) AS submitted_required_count,
+      SUM(CASE WHEN cdl.status = 'approved' THEN 1 ELSE 0 END) AS approved_count,
+      SUM(CASE WHEN cdl.status = 'rejected' THEN 1 ELSE 0 END) AS rejected_count
     FROM client_units cu_docs
     LEFT JOIN documents d
-      ON d.is_required = TRUE
-      AND d.status = 'active'
+      ON d.status = 'active'
     LEFT JOIN client_document_list cdl
       ON cdl.client_unit_id = cu_docs.id
       AND cdl.document_id = d.id
@@ -454,9 +472,16 @@ export const searchClientUnits = async (req, res) => {
       cu.status,
       cu.seller_id,
       seller.full_name AS seller_name,
+      COALESCE(document_summary.total_count, 0) AS document_total_count,
+      COALESCE(document_summary.checklist_count, 0) AS document_checklist_count,
+      COALESCE(document_summary.required_count, 0) AS document_required_count,
+      COALESCE(document_summary.submitted_count, 0) AS document_submitted_count,
+      COALESCE(document_summary.submitted_required_count, 0) AS document_submitted_required_count,
+      COALESCE(document_summary.approved_count, 0) AS document_approved_count,
+      COALESCE(document_summary.rejected_count, 0) AS document_rejected_count,
       CASE
         WHEN COALESCE(document_summary.required_count, 0) > 0
-          AND COALESCE(document_summary.submitted_count, 0) = document_summary.required_count
+          AND COALESCE(document_summary.submitted_required_count, 0) >= document_summary.required_count
         THEN 'complete'
         ELSE 'incomplete'
       END AS document_status
@@ -474,12 +499,23 @@ export const searchClientUnits = async (req, res) => {
     LEFT JOIN (
       SELECT
         cu_docs.id AS client_unit_id,
-        COUNT(d.id) AS required_count,
-        SUM(CASE WHEN cdl.status IN ('submitted', 'approved') THEN 1 ELSE 0 END) AS submitted_count
+        COUNT(d.id) AS total_count,
+        COUNT(cdl.id) AS checklist_count,
+        SUM(CASE WHEN d.is_required = TRUE THEN 1 ELSE 0 END) AS required_count,
+        SUM(CASE WHEN cdl.status IN ('submitted', 'approved') THEN 1 ELSE 0 END) AS submitted_count,
+        SUM(
+          CASE
+            WHEN d.is_required = TRUE
+              AND cdl.status IN ('submitted', 'approved')
+            THEN 1
+            ELSE 0
+          END
+        ) AS submitted_required_count,
+        SUM(CASE WHEN cdl.status = 'approved' THEN 1 ELSE 0 END) AS approved_count,
+        SUM(CASE WHEN cdl.status = 'rejected' THEN 1 ELSE 0 END) AS rejected_count
       FROM client_units cu_docs
       LEFT JOIN documents d
-        ON d.is_required = TRUE
-        AND d.status = 'active'
+        ON d.status = 'active'
       LEFT JOIN client_document_list cdl
         ON cdl.client_unit_id = cu_docs.id
         AND cdl.document_id = d.id

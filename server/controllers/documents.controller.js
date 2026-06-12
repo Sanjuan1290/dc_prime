@@ -320,14 +320,13 @@ export const createChecklistForClientUnit = async (req, res) => {
     SELECT id
     FROM documents
     WHERE status = 'active'
-      AND is_required = TRUE
     ORDER BY id ASC
     `
   )
 
   if (documents.length === 0) {
     return res.status(200).json({
-      message: 'No required documents found',
+      message: 'No active documents found',
       data: {
         clientUnitId: Number(clientUnitId),
         insertedDocuments: 0,

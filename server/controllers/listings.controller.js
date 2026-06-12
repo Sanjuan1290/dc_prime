@@ -1,6 +1,7 @@
 import { db } from '../db/connect.js'
 import { createAuditLog } from '../utils/createAuditLog.js'
 import { getClientIp } from '../utils/getClientIp.js'
+import { refreshCommissionEligibility } from './commissions.controller.js'
 
 const nullableValue = (value) => {
   if (value === undefined || value === null || value === '') return null
@@ -54,6 +55,124 @@ const computeListingAmounts = ({
   }
 }
 
+const recomputeListingClientUnitBalances = async (connectionOrDb, listingId) => {
+  const [clientUnits] = await connectionOrDb.query(
+    `
+    SELECT
+      cu.id,
+      cu.status,
+      cu.listing_id,
+      l.reservation_fee,
+      COALESCE(
+        NULLIF(l.total_contract_price, 0),
+        l.net_selling_price + l.legal_misc_fee,
+        l.net_selling_price,
+        0
+      ) AS total_contract_price,
+      COALESCE(SUM(CASE WHEN p.status = 'verified' THEN p.amount ELSE 0 END), 0) AS paid_amount,
+      COALESCE(
+        SUM(
+          CASE
+            WHEN p.status = 'verified' AND p.payment_type = 'reservation'
+            THEN p.amount
+            ELSE 0
+          END
+        ),
+        0
+      ) AS reservation_paid,
+      COALESCE(
+        SUM(
+          CASE
+            WHEN p.status = 'verified'
+              AND p.payment_type IN ('downpayment', 'monthly', 'legal_misc', 'full_payment', 'other')
+            THEN p.amount
+            ELSE 0
+          END
+        ),
+        0
+      ) AS active_payment_paid
+    FROM client_units cu
+    INNER JOIN listings l ON l.id = cu.listing_id
+    LEFT JOIN payments p ON p.client_unit_id = cu.id
+    WHERE cu.listing_id = ?
+      AND cu.status IN ('reserved', 'active', 'fully_paid')
+    GROUP BY
+      cu.id,
+      cu.status,
+      cu.listing_id,
+      l.reservation_fee,
+      l.total_contract_price,
+      l.net_selling_price,
+      l.legal_misc_fee
+    `,
+    [listingId]
+  )
+
+  const balanceSummaries = []
+
+  for (const clientUnit of clientUnits) {
+    const totalContractPrice = numberValue(clientUnit.total_contract_price)
+    const paidAmount = numberValue(clientUnit.paid_amount)
+    const reservationPaid = numberValue(clientUnit.reservation_paid)
+    const activePaymentPaid = numberValue(clientUnit.active_payment_paid)
+    const reservationFee = numberValue(clientUnit.reservation_fee)
+    const balance = Math.max(formatDecimal(totalContractPrice - paidAmount), 0)
+
+    let nextStatus = clientUnit.status
+    let nextListingStatus = null
+
+    if (totalContractPrice > 0 && paidAmount >= totalContractPrice) {
+      nextStatus = 'fully_paid'
+      nextListingStatus = 'sold'
+    } else if (activePaymentPaid > 0) {
+      nextStatus = 'active'
+      nextListingStatus = 'active'
+    } else if (reservationPaid > 0 || paidAmount >= reservationFee) {
+      nextStatus = 'reserved'
+      nextListingStatus = 'reserved'
+    }
+
+    await connectionOrDb.query(
+      `
+      UPDATE client_units
+      SET
+        balance = ?,
+        status = ?
+      WHERE id = ?
+      `,
+      [balance, nextStatus, clientUnit.id]
+    )
+
+    if (nextListingStatus) {
+      await connectionOrDb.query(
+        `
+        UPDATE listings
+        SET status = ?
+        WHERE id = ?
+        `,
+        [nextListingStatus, clientUnit.listing_id]
+      )
+    }
+
+    const eligibilitySummary = await refreshCommissionEligibility(
+      clientUnit.id,
+      connectionOrDb
+    )
+
+    balanceSummaries.push({
+      clientUnitId: clientUnit.id,
+      totalContractPrice: formatDecimal(totalContractPrice),
+      paidAmount: formatDecimal(paidAmount),
+      balance,
+      status: nextStatus,
+      listingStatus: nextListingStatus,
+      eligibilitySummary,
+    })
+  }
+
+  return balanceSummaries
+}
+
 const listingFields = `
   l.id,
   l.project_id,
@@ -71,6 +190,13 @@ const listingFields = `
   l.legal_misc_fee,
   l.total_contract_price,
   l.status,
+  EXISTS (
+    SELECT 1
+    FROM client_units cu
+    WHERE cu.listing_id = l.id
+      AND cu.status IN ('reserved', 'active', 'fully_paid')
+    LIMIT 1
+  ) AS has_active_client_unit,
   l.created_at,
   l.updated_at
 `
@@ -443,6 +569,13 @@ export const createListing = async (req, res) => {
     })
   }
 
+  const computedAmounts = computeListingAmounts({
+    lot_area_sqm,
+    price_per_sqm,
+    legal_misc_rate,
+    reservation_fee
+  })
+
   const [result] = await db.query(
     `
     INSERT INTO listings (
@@ -480,7 +613,12 @@ export const createListing = async (req, res) => {
 
   return res.status(201).json({
     message: 'Listing created successfully',
-    listingId: result.insertId
+    listingId: result.insertId,
+    pricing: {
+      net_selling_price: computedAmounts.netSellingPrice,
+      legal_misc_fee: computedAmounts.legalMiscFee,
+      total_contract_price: computedAmounts.totalContractPrice
+    }
   })
 }
 
@@ -511,39 +649,64 @@ export const updateListing = async (req, res) => {
     })
   }
 
-  const [result] = await db.query(
-    `
-    UPDATE listings
-    SET
-      project_id = ?,
-      cadastral_lot_no = ?,
-      unit_id = ?,
-      lot_type = ?,
-      reservation_fee = ?,
-      price_per_sqm = ?,
-      lot_area_sqm = ?,
-      legal_misc_rate = ?,
-      status = ?
-    WHERE id = ?
-    `,
-    [
-      project_id,
-      nullableValue(cadastral_lot_no),
-      unit_id,
-      nullableValue(lot_type),
-      numberValue(reservation_fee),
-      numberValue(price_per_sqm),
-      numberValue(lot_area_sqm),
-      numberValue(legal_misc_rate),
-      status,
-      id
-    ]
-  )
+  const computedAmounts = computeListingAmounts({
+    lot_area_sqm,
+    price_per_sqm,
+    legal_misc_rate,
+    reservation_fee
+  })
 
-  if (result.affectedRows === 0) {
-    return res.status(404).json({
-      message: 'Listing not found'
-    })
+  const connection = await db.getConnection()
+  let balanceSummaries = []
+
+  try {
+    await connection.beginTransaction()
+
+    const [result] = await connection.query(
+      `
+      UPDATE listings
+      SET
+        project_id = ?,
+        cadastral_lot_no = ?,
+        unit_id = ?,
+        lot_type = ?,
+        reservation_fee = ?,
+        price_per_sqm = ?,
+        lot_area_sqm = ?,
+        legal_misc_rate = ?,
+        status = ?
+      WHERE id = ?
+      `,
+      [
+        project_id,
+        nullableValue(cadastral_lot_no),
+        unit_id,
+        nullableValue(lot_type),
+        numberValue(reservation_fee),
+        numberValue(price_per_sqm),
+        numberValue(lot_area_sqm),
+        numberValue(legal_misc_rate),
+        status,
+        id
+      ]
+    )
+
+    if (result.affectedRows === 0) {
+      await connection.rollback()
+
+      return res.status(404).json({
+        message: 'Listing not found'
+      })
+    }
+
+    balanceSummaries = await recomputeListingClientUnitBalances(connection, id)
+
+    await connection.commit()
+  } catch (error) {
+    await connection.rollback()
+    throw error
+  } finally {
+    connection.release()
   }
 
   await createAuditLog({
@@ -555,7 +718,13 @@ export const updateListing = async (req, res) => {
   })
 
   return res.status(200).json({
-    message: 'Listing updated successfully'
+    message: 'Listing updated successfully',
+    pricing: {
+      net_selling_price: computedAmounts.netSellingPrice,
+      legal_misc_fee: computedAmounts.legalMiscFee,
+      total_contract_price: computedAmounts.totalContractPrice
+    },
+    balanceSummaries
   })
 }
 

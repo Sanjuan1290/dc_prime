@@ -65,6 +65,7 @@ type Listing = {
   eighteen_months?: number | string;
   twenty_months?: number | string;
   status: ListingStatus;
+  has_active_client_unit?: boolean | number | string;
   created_at: string;
   updated_at: string;
 };
@@ -355,6 +356,55 @@ const listingToFormData = (listing: Listing): ListingFormData => ({
   status: listing.status,
 });
 
+const roundMoney = (value: number) => Number(value.toFixed(2));
+
+const calculateListingBreakdown = (listingData: ListingFormData) => {
+  const netSellingPrice =
+    Number(listingData.lot_area_sqm || 0) *
+    Number(listingData.price_per_sqm || 0);
+  const legalMiscFee =
+    netSellingPrice * (Number(listingData.legal_misc_rate || 0) / 100);
+  const totalContractPrice = netSellingPrice + legalMiscFee;
+  const downPaymentBalance = Math.max(
+    totalContractPrice * 0.3 - Number(listingData.reservation_fee || 0),
+    0,
+  );
+  const spotDpDiscount = downPaymentBalance * 0.075;
+  const spotDp = downPaymentBalance - spotDpDiscount;
+  const seventyFivePercent = totalContractPrice * 0.75;
+
+  return {
+    netSellingPrice: roundMoney(netSellingPrice),
+    legalMiscFee: roundMoney(legalMiscFee),
+    totalContractPrice: roundMoney(totalContractPrice),
+    downPaymentBalance: roundMoney(downPaymentBalance),
+    spotDpDiscount: roundMoney(spotDpDiscount),
+    spotDp: roundMoney(spotDp),
+    threeMonths: roundMoney(downPaymentBalance / 3),
+    seventyFivePercent: roundMoney(seventyFivePercent),
+    twelveMonths: roundMoney(seventyFivePercent / 12),
+    eighteenMonths: roundMoney(seventyFivePercent / 18),
+    twentyMonths: roundMoney(seventyFivePercent / 20),
+  };
+};
+
+const hasAttachedClientUnit = (listing: Listing) => {
+  return (
+    Boolean(Number(listing.has_active_client_unit || 0)) ||
+    ["reserved", "active", "sold"].includes(String(listing.status))
+  );
+};
+
+const didLmfRateChange = (
+  listing: Listing,
+  nextListingData: ListingFormData,
+) => {
+  return (
+    Number(listing.legal_misc_rate || 0) !==
+    Number(nextListingData.legal_misc_rate || 0)
+  );
+};
+
 const Listings = () => {
   const queryClient = useQueryClient();
 
@@ -367,6 +417,11 @@ const Listings = () => {
   const [viewListingId, setViewListingId] = useState<number | null>(null);
   const [editListing, setEditListing] = useState<Listing | null>(null);
   const [listingToDelete, setListingToDelete] = useState<Listing | null>(null);
+  const [pendingLmfUpdate, setPendingLmfUpdate] = useState<{
+    id: number;
+    listingData: ListingFormData;
+    unitId: string;
+  } | null>(null);
 
   const [formData, setFormData] = useState<ListingFormData>(
     defaultListingFormData,
@@ -424,6 +479,13 @@ const Listings = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["listings"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["client-units"] });
+      queryClient.invalidateQueries({ queryKey: ["available-listings"] });
+      queryClient.invalidateQueries({ queryKey: ["payments"] });
+      queryClient.invalidateQueries({ queryKey: ["commissions"] });
+      queryClient.invalidateQueries({ queryKey: ["commission-summary"] });
+      queryClient.invalidateQueries({ queryKey: ["commission-releases"] });
+      queryClient.invalidateQueries({ queryKey: ["reports"] });
 
       if (viewListingId) {
         queryClient.invalidateQueries({
@@ -432,6 +494,7 @@ const Listings = () => {
       }
 
       setEditListing(null);
+      setPendingLmfUpdate(null);
       setSuccessMessage("Listing updated successfully");
     },
   });
@@ -491,12 +554,26 @@ const Listings = () => {
 
     if (!editListing) return;
 
+    const listingData = {
+      ...editFormData,
+      lot_type: resolveLotType(editLotTypeMode, editCustomLotType),
+    };
+
+    if (
+      didLmfRateChange(editListing, listingData) &&
+      hasAttachedClientUnit(editListing)
+    ) {
+      setPendingLmfUpdate({
+        id: editListing.id,
+        listingData,
+        unitId: editListing.unit_id,
+      });
+      return;
+    }
+
     updateListingMutation.mutate({
       id: editListing.id,
-      listingData: {
-        ...editFormData,
-        lot_type: resolveLotType(editLotTypeMode, editCustomLotType),
-      },
+      listingData,
     });
   };
 
@@ -885,10 +962,36 @@ const Listings = () => {
           customLotType={editCustomLotType}
           setCustomLotType={setEditCustomLotType}
           onSubmit={handleUpdateListing}
-          onClose={() => setEditListing(null)}
+          onClose={() => {
+            setEditListing(null);
+            setPendingLmfUpdate(null);
+          }}
           isPending={updateListingMutation.isPending}
           submitLabel="Save Changes"
         />
+      ) : null}
+
+      {pendingLmfUpdate ? (
+        <Modal
+          onClose={() => setPendingLmfUpdate(null)}
+          title="Confirm LMF Update"
+        >
+          <ConfirmBox
+            title="This unit already has an active client account"
+            message={`Changing the LMF rate for ${pendingLmfUpdate.unitId} will recalculate TCP and the client's remaining balance.`}
+            cancelLabel="Review Changes"
+            confirmLabel={
+              updateListingMutation.isPending ? "Updating..." : "Proceed"
+            }
+            onCancel={() => setPendingLmfUpdate(null)}
+            onConfirm={() =>
+              updateListingMutation.mutate({
+                id: pendingLmfUpdate.id,
+                listingData: pendingLmfUpdate.listingData,
+              })
+            }
+          />
+        </Modal>
       ) : null}
 
       {viewListingId ? (
@@ -933,6 +1036,20 @@ const ListingFormModal = ({
   submitLabel,
 }: ListingFormModalProps) => {
   const formId = `${title.replaceAll(" ", "-").toLowerCase()}-form`;
+  const breakdown = calculateListingBreakdown(formData);
+  const breakdownRows = [
+    ["Net Selling Price", breakdown.netSellingPrice],
+    ["LMF Amount", breakdown.legalMiscFee],
+    ["TCP", breakdown.totalContractPrice],
+    ["30% of TCP less RS", breakdown.downPaymentBalance],
+    ["7.5% Discount", breakdown.spotDpDiscount],
+    ["Spot DP", breakdown.spotDp],
+    ["3-month DP", breakdown.threeMonths],
+    ["75% of TCP", breakdown.seventyFivePercent],
+    ["12-month DP", breakdown.twelveMonths],
+    ["18-month DP", breakdown.eighteenMonths],
+    ["20-month DP", breakdown.twentyMonths],
+  ] as const;
 
   return (
     <Modal
@@ -1108,6 +1225,28 @@ const ListingFormModal = ({
           <option value="sold">Sold</option>
           <option value="inactive">Inactive</option>
         </Select>
+
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 md:col-span-2">
+          <h3 className="mb-3 text-sm font-bold text-slate-900">
+            Live Price Breakdown
+          </h3>
+
+          <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {breakdownRows.map(([label, value]) => (
+              <div
+                key={label}
+                className="rounded-lg border border-slate-200 bg-white p-3"
+              >
+                <dt className="text-xs font-semibold uppercase text-slate-500">
+                  {label}
+                </dt>
+                <dd className="mt-1 text-sm font-bold text-slate-900">
+                  {formatMoney(value)}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </div>
       </form>
     </Modal>
   );

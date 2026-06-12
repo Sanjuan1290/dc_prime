@@ -1184,32 +1184,7 @@ const Commissions = () => {
                               Edit Main
                             </Button>
 
-                            {override ? (
-                              <Button
-                                icon={<FiEdit2 />}
-                                onClick={() => openEditModal(override)}
-                              >
-                                Edit Agent
-                              </Button>
-                            ) : null}
 
-                            <Button
-                              disabled={generateMutation.isPending}
-                              onClick={() => generateMutation.mutate(main.id)}
-                              variant="secondary"
-                            >
-                              Generate Release Schedule
-                            </Button>
-
-                            {override ? (
-                              <Button
-                                disabled={generateMutation.isPending}
-                                onClick={() => generateMutation.mutate(override.id)}
-                                variant="secondary"
-                              >
-                                Generate Agent Schedule
-                              </Button>
-                            ) : null}
                           </div>
                         </td>
                       </tr>
@@ -1819,12 +1794,6 @@ const Commissions = () => {
                   <h3 className="text-base font-bold text-slate-900">
                     Release Milestones
                   </h3>
-                  <Button
-                    disabled={generateMutation.isPending}
-                    onClick={() => generateMutation.mutate(commissionDetails.id)}
-                  >
-                    Generate Milestones
-                  </Button>
                 </div>
 
                 <TableContainer>
