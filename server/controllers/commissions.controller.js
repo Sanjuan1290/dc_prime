@@ -252,6 +252,24 @@
     return rows[0]
   }
 
+  const getOverrideCommissionByParentId = async (parentCommissionId) => {
+    const [rows] = await db.query(
+      `
+      SELECT
+        ${commissionFields}
+      ${commissionJoins}
+      WHERE cm.parent_commission_id = ?
+        AND cm.source_type = 'override'
+        AND cm.status <> 'cancelled'
+      ORDER BY cm.id DESC
+      LIMIT 1
+      `,
+      [parentCommissionId]
+    )
+
+    return rows[0] || null
+  }
+
   const getReleasesByCommissionId = async (commissionId) => {
     const [rows] = await db.query(
       `
@@ -836,6 +854,20 @@
 
     const releases = await getReleasesByCommissionId(id)
     const cashAdvanceDeductions = await getCashAdvanceDeductionsByCommissionId(id)
+    const pairedOverrideCommission =
+      commission.source_type === 'main'
+        ? await getOverrideCommissionByParentId(id)
+        : null
+
+    const pairedOverrideDetails = pairedOverrideCommission
+      ? {
+          ...pairedOverrideCommission,
+          releases: await getReleasesByCommissionId(pairedOverrideCommission.id),
+          cashAdvanceDeductions: await getCashAdvanceDeductionsByCommissionId(
+            pairedOverrideCommission.id
+          ),
+        }
+      : null
 
     return res.status(200).json({
       message: 'Commission fetched successfully',
@@ -843,11 +875,13 @@
         ...commission,
         releases,
         cashAdvanceDeductions,
+        pairedOverrideCommission: pairedOverrideDetails,
       },
       data: {
         ...commission,
         releases,
         cashAdvanceDeductions,
+        pairedOverrideCommission: pairedOverrideDetails,
       },
     })
   }

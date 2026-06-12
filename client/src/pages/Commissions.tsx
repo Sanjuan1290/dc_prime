@@ -153,9 +153,13 @@ type CashAdvance = {
   updated_at: string
 }
 
-type CommissionDetails = Commission & {
+type CommissionWithReleaseDetails = Commission & {
   releases: CommissionRelease[]
   cashAdvanceDeductions: CashAdvanceDeduction[]
+}
+
+type CommissionDetails = CommissionWithReleaseDetails & {
+  pairedOverrideCommission?: CommissionWithReleaseDetails | null
 }
 
 type Seller = {
@@ -660,18 +664,50 @@ const Commissions = () => {
     enabled: Boolean(selectedCommissionId),
   })
 
-  const releaseForDeduction =
-    commissionDetails?.releases?.find(
-      (release) => Number(release.id) === Number(deductReleaseId)
-    ) || null
+  const releaseContexts = [
+    commissionDetails
+      ? {
+          commission: commissionDetails,
+          releases: commissionDetails.releases || [],
+        }
+      : null,
+    commissionDetails?.pairedOverrideCommission
+      ? {
+          commission: commissionDetails.pairedOverrideCommission,
+          releases: commissionDetails.pairedOverrideCommission.releases || [],
+        }
+      : null,
+  ].filter(
+    (
+      context
+    ): context is {
+      commission: CommissionWithReleaseDetails
+      releases: CommissionRelease[]
+    } => Boolean(context)
+  )
+
+  const releaseForDeductionContext =
+    releaseContexts
+      .map((context) => ({
+        commission: context.commission,
+        release: context.releases.find(
+          (release) => Number(release.id) === Number(deductReleaseId)
+        ),
+      }))
+      .find((context) => Boolean(context.release)) || null
+
+  const releaseForDeduction = releaseForDeductionContext?.release || null
 
   const releaseForCancellation =
-    commissionDetails?.releases?.find(
-      (release) => Number(release.id) === Number(cancelReleaseId)
-    ) || null
+    releaseContexts
+      .flatMap((context) => context.releases)
+      .find((release) => Number(release.id) === Number(cancelReleaseId)) || null
 
   const selectedDeductionSellerId =
-    commissionDetails?.seller_id || editCommission?.seller_id || null
+    releaseForDeductionContext?.commission.seller_id ||
+    commissionDetails?.seller_id ||
+    editCommission?.seller_id ||
+    null
 
   const { data: approvedCashAdvances = [] } = useQuery({
     queryKey: ["approved-cash-advances", selectedDeductionSellerId],
@@ -898,6 +934,126 @@ const Commissions = () => {
     setSelectedCommissionId(commission.id)
     setSuccessMessage("")
   }
+
+  const renderReleaseMilestonesTable = (
+    releases: CommissionRelease[],
+    emptyTitle = "No milestones generated"
+  ) => (
+    <TableContainer>
+      <table className="w-full text-sm">
+        <thead className="bg-slate-50">
+          <tr className="border-b border-slate-200">
+            <th className="px-4 py-3 text-left">Stage</th>
+            <th className="px-4 py-3 text-left">Trigger</th>
+            <th className="px-4 py-3 text-left">Release %</th>
+            <th className="px-4 py-3 text-left">Gross</th>
+            <th className="px-4 py-3 text-left">Deduction</th>
+            <th className="px-4 py-3 text-left">Net</th>
+            <th className="px-4 py-3 text-left">Status</th>
+            <th className="px-4 py-3 text-left">Actions</th>
+          </tr>
+        </thead>
+
+        <tbody>
+          {releases.map((release) => (
+            <tr key={release.id} className="border-b border-slate-100">
+              <td className="px-4 py-3 font-semibold text-slate-900">
+                {getReleaseStageLabel(release.release_stage)}
+              </td>
+              <td className="px-4 py-3 text-slate-600">
+                {release.trigger_payment_percent === null
+                  ? "-"
+                  : `${formatNumber(release.trigger_payment_percent)}%`}
+              </td>
+              <td className="px-4 py-3 text-slate-600">
+                {formatNumber(release.release_percent)}%
+              </td>
+              <td className="px-4 py-3 text-slate-600">
+                {formatMoney(release.gross_release_amount)}
+              </td>
+              <td className="px-4 py-3 text-slate-600">
+                {formatMoney(release.cash_advance_deduction)}
+              </td>
+              <td className="px-4 py-3 font-semibold text-slate-900">
+                {formatMoney(release.net_release_amount)}
+              </td>
+              <td className="px-4 py-3">
+                <StatusBadge status={release.status} />
+              </td>
+              <td className="px-4 py-3">
+                <div className="flex flex-wrap gap-2">
+                  {release.status === "eligible" ? (
+                    <Button
+                      disabled={markReleaseMutation.isPending}
+                      onClick={() => markReleaseMutation.mutate(release.id)}
+                      variant="primary"
+                    >
+                      Release
+                    </Button>
+                  ) : null}
+
+                  {["pending", "eligible"].includes(release.status) ? (
+                    <>
+                      <Button
+                        disabled={holdReleaseMutation.isPending}
+                        onClick={() => holdReleaseMutation.mutate(release.id)}
+                      >
+                        Hold
+                      </Button>
+                      <Button
+                        disabled={deductMutation.isPending}
+                        onClick={() => {
+                          setDeductReleaseId(release.id)
+                          setDeductData(defaultDeductAdvanceData)
+                        }}
+                      >
+                        Deduct
+                      </Button>
+                      <Button
+                        disabled={cancelReleaseMutation.isPending}
+                        onClick={() => setCancelReleaseId(release.id)}
+                        variant="danger"
+                      >
+                        Cancel
+                      </Button>
+                    </>
+                  ) : null}
+
+                  {release.status === "on_hold" ? (
+                    <Button
+                      disabled={unholdReleaseMutation.isPending}
+                      onClick={() => unholdReleaseMutation.mutate(release.id)}
+                    >
+                      Unhold
+                    </Button>
+                  ) : null}
+
+                  {release.status === "cancelled" ? (
+                    <Button
+                      disabled={restoreCancelledReleaseMutation.isPending}
+                      onClick={() =>
+                        restoreCancelledReleaseMutation.mutate(release.id)
+                      }
+                    >
+                      Restore
+                    </Button>
+                  ) : null}
+                </div>
+              </td>
+            </tr>
+          ))}
+
+          {releases.length === 0 ? (
+            <tr>
+              <td colSpan={8}>
+                <EmptyState title={emptyTitle} />
+              </td>
+            </tr>
+          ) : null}
+        </tbody>
+      </table>
+    </TableContainer>
+  )
 
   const selectedEditSeller = sellers.find(
     (seller) => Number(seller.id) === Number(editData.seller_id)
@@ -1792,123 +1948,62 @@ const Commissions = () => {
               <section>
                 <div className="mb-3 flex items-center justify-between gap-3">
                   <h3 className="text-base font-bold text-slate-900">
-                    Release Milestones
+                    {commissionDetails.source_type === "override"
+                      ? "Override Release Milestones"
+                      : "Main Release Milestones"}
                   </h3>
                 </div>
 
-                <TableContainer>
-                  <table className="w-full text-sm">
-                    <thead className="bg-slate-50">
-                      <tr className="border-b border-slate-200">
-                        <th className="px-4 py-3 text-left">Stage</th>
-                        <th className="px-4 py-3 text-left">Trigger</th>
-                        <th className="px-4 py-3 text-left">Release %</th>
-                        <th className="px-4 py-3 text-left">Gross</th>
-                        <th className="px-4 py-3 text-left">Deduction</th>
-                        <th className="px-4 py-3 text-left">Net</th>
-                        <th className="px-4 py-3 text-left">Status</th>
-                        <th className="px-4 py-3 text-left">Actions</th>
-                      </tr>
-                    </thead>
-
-                    <tbody>
-                      {(commissionDetails.releases || []).map((release) => (
-                        <tr key={release.id} className="border-b border-slate-100">
-                          <td className="px-4 py-3 font-semibold text-slate-900">
-                            {getReleaseStageLabel(release.release_stage)}
-                          </td>
-                          <td className="px-4 py-3 text-slate-600">
-                            {release.trigger_payment_percent === null
-                              ? "-"
-                              : `${formatNumber(release.trigger_payment_percent)}%`}
-                          </td>
-                          <td className="px-4 py-3 text-slate-600">
-                            {formatNumber(release.release_percent)}%
-                          </td>
-                          <td className="px-4 py-3 text-slate-600">
-                            {formatMoney(release.gross_release_amount)}
-                          </td>
-                          <td className="px-4 py-3 text-slate-600">
-                            {formatMoney(release.cash_advance_deduction)}
-                          </td>
-                          <td className="px-4 py-3 font-semibold text-slate-900">
-                            {formatMoney(release.net_release_amount)}
-                          </td>
-                          <td className="px-4 py-3">
-                            <StatusBadge status={release.status} />
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="flex flex-wrap gap-2">
-                              {release.status === "eligible" ? (
-                                <Button
-                                  disabled={markReleaseMutation.isPending}
-                                  onClick={() => markReleaseMutation.mutate(release.id)}
-                                  variant="primary"
-                                >
-                                  Release
-                                </Button>
-                              ) : null}
-
-                              {["pending", "eligible"].includes(release.status) ? (
-                                <>
-                                  <Button
-                                    disabled={holdReleaseMutation.isPending}
-                                    onClick={() => holdReleaseMutation.mutate(release.id)}
-                                  >
-                                    Hold
-                                  </Button>
-                                  <Button
-                                    disabled={deductMutation.isPending}
-                                    onClick={() => {
-                                      setDeductReleaseId(release.id)
-                                      setDeductData(defaultDeductAdvanceData)
-                                    }}
-                                  >
-                                    Deduct
-                                  </Button>
-                                  <Button
-                                    disabled={cancelReleaseMutation.isPending}
-                                    onClick={() => setCancelReleaseId(release.id)}
-                                    variant="danger"
-                                  >
-                                    Cancel
-                                  </Button>
-                                </>
-                              ) : null}
-
-                              {release.status === "on_hold" ? (
-                                <Button
-                                  disabled={unholdReleaseMutation.isPending}
-                                  onClick={() => unholdReleaseMutation.mutate(release.id)}
-                                >
-                                  Unhold
-                                </Button>
-                              ) : null}
-
-                              {release.status === "cancelled" ? (
-                                <Button
-                                  disabled={restoreCancelledReleaseMutation.isPending}
-                                  onClick={() => restoreCancelledReleaseMutation.mutate(release.id)}
-                                >
-                                  Restore
-                                </Button>
-                              ) : null}
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-
-                      {(commissionDetails.releases || []).length === 0 ? (
-                        <tr>
-                          <td colSpan={8}>
-                            <EmptyState title="No milestones generated" />
-                          </td>
-                        </tr>
-                      ) : null}
-                    </tbody>
-                  </table>
-                </TableContainer>
+                {renderReleaseMilestonesTable(commissionDetails.releases || [])}
               </section>
+
+              {commissionDetails.pairedOverrideCommission ? (
+                <section>
+                  <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                    <div>
+                      <h3 className="text-base font-bold text-slate-900">
+                        Override Agent Release Milestones
+                      </h3>
+                      <p className="mt-1 text-sm text-slate-500">
+                        {commissionDetails.pairedOverrideCommission.seller_name} -{" "}
+                        {formatText(
+                          commissionDetails.pairedOverrideCommission.seller_role
+                        )}{" "}
+                        - {formatNumber(commissionDetails.pairedOverrideCommission.rate)}%
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                      <ComputedBox
+                        label="Gross"
+                        value={formatMoney(
+                          commissionDetails.pairedOverrideCommission
+                            .gross_commission
+                        )}
+                      />
+                      <ComputedBox
+                        label="Released"
+                        value={formatMoney(
+                          commissionDetails.pairedOverrideCommission
+                            .released_amount
+                        )}
+                      />
+                      <ComputedBox
+                        label="Remaining"
+                        value={formatMoney(
+                          commissionDetails.pairedOverrideCommission
+                            .remaining_amount
+                        )}
+                      />
+                    </div>
+                  </div>
+
+                  {renderReleaseMilestonesTable(
+                    commissionDetails.pairedOverrideCommission.releases || [],
+                    "No override milestones generated"
+                  )}
+                </section>
+              ) : null}
 
               <section>
                 <h3 className="mb-3 text-base font-bold text-slate-900">
