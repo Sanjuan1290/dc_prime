@@ -5,6 +5,13 @@ import { getClientIp } from '../utils/getClientIp.js'
 const allowedSellerRoles = ['broker_network_manager', 'broker', 'manager', 'agent']
 const allowedStatuses = ['active', 'inactive']
 
+const sellerParentRoleMap = {
+  broker_network_manager: [],
+  broker: ['broker_network_manager'],
+  manager: ['broker'],
+  agent: ['manager'],
+}
+
 const isMissing = (value) => {
   return value === undefined || value === null || value === ''
 }
@@ -78,9 +85,15 @@ const validateStatus = (status) => {
 const validateParentSeller = async ({
   connectionOrDb = db,
   sellerId = null,
+  sellerRole = 'agent',
   parentSellerId,
 }) => {
-  if (isMissing(parentSellerId)) return null
+  const allowedParentRoles = sellerParentRoleMap[sellerRole] || []
+
+  if (isMissing(parentSellerId)) {
+    if (allowedParentRoles.length === 0) return null
+    return { isValid: false, message: `A ${sellerRole.replaceAll('_', ' ')} must report under a ${allowedParentRoles.join(' or ').replaceAll('_', ' ')}` }
+  }
 
   if (!isMissing(sellerId) && Number(sellerId) === Number(parentSellerId)) {
     return {
@@ -102,6 +115,13 @@ const validateParentSeller = async ({
     return {
       isValid: false,
       message: 'Parent seller is inactive',
+    }
+  }
+
+  if (!allowedParentRoles.includes(parentSeller.seller_role)) {
+    return {
+      isValid: false,
+      message: `A ${sellerRole.replaceAll('_', ' ')} can only report under: ${allowedParentRoles.join(', ').replaceAll('_', ' ') || 'none'}`,
     }
   }
 
@@ -313,6 +333,7 @@ export const createAccreditedSeller = async (req, res) => {
   }
 
   const parentValidation = await validateParentSeller({
+    sellerRole: finalSellerRole,
     parentSellerId: parent_seller_id,
   })
 
@@ -343,7 +364,7 @@ export const createAccreditedSeller = async (req, res) => {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
-        nullableValue(user_id),
+        null,
         full_name,
         nullableValue(email),
         nullableValue(contact_no),
@@ -429,6 +450,7 @@ export const updateAccreditedSeller = async (req, res) => {
 
   const parentValidation = await validateParentSeller({
     sellerId: id,
+    sellerRole: finalSellerRole,
     parentSellerId: parent_seller_id,
   })
 
@@ -471,7 +493,7 @@ export const updateAccreditedSeller = async (req, res) => {
       WHERE id = ?
       `,
       [
-        nullableValue(user_id),
+        null,
         full_name,
         nullableValue(email),
         nullableValue(contact_no),
@@ -568,7 +590,7 @@ export const getSellerHierarchy = async (req, res) => {
 }
 
 export const getPossibleParentSellers = async (req, res) => {
-  const { exclude_id } = req.query
+  const { exclude_id, seller_role } = req.query
 
   const conditions = [
     `seller.status = 'active'`,
@@ -579,6 +601,19 @@ export const getPossibleParentSellers = async (req, res) => {
   if (!isMissing(exclude_id)) {
     conditions.push('seller.id <> ?')
     params.push(exclude_id)
+  }
+
+  const allowedParentRoles = sellerParentRoleMap[seller_role] || []
+  if (!isMissing(seller_role)) {
+    if (allowedParentRoles.length === 0) {
+      return res.status(200).json({
+        message: 'No parent sellers required for this role',
+        possibleParentSellers: [],
+        data: [],
+      })
+    }
+    conditions.push(`seller.seller_role IN (${allowedParentRoles.map(() => '?').join(',')})`)
+    params.push(...allowedParentRoles)
   }
 
   const [sellers] = await db.query(

@@ -759,3 +759,74 @@ export const getCashAdvanceSummary = async (req, res) => {
     data: summary,
   })
 }
+
+
+export const getSellerCommissionSummaryForCashAdvance = async (req, res) => {
+  const { sellerId } = req.params
+
+  const [clientUnits] = await db.query(
+    `
+    SELECT DISTINCT
+      cu.id,
+      l.unit_id,
+      c.full_name AS client_name,
+      p.name AS project_name,
+      cu.status,
+      cu.mode_of_payment
+    FROM commissions cm
+    JOIN client_units cu ON cu.id = cm.client_unit_id
+    JOIN clients c ON c.id = cu.client_id
+    JOIN listings l ON l.id = cu.listing_id
+    JOIN projects p ON p.id = l.project_id
+    WHERE cm.seller_id = ?
+    ORDER BY cu.id DESC
+    `,
+    [sellerId]
+  )
+
+  const [eligibleReleases] = await db.query(
+    `
+    SELECT
+      cr.id,
+      cr.commission_id,
+      cr.release_stage,
+      cr.gross_release_amount,
+      cr.cash_advance_deduction,
+      cr.net_release_amount,
+      cr.status,
+      cm.client_unit_id,
+      c.full_name AS client_name,
+      l.unit_id,
+      p.name AS project_name
+    FROM commission_releases cr
+    JOIN commissions cm ON cm.id = cr.commission_id
+    JOIN client_units cu ON cu.id = cm.client_unit_id
+    JOIN clients c ON c.id = cu.client_id
+    JOIN listings l ON l.id = cu.listing_id
+    JOIN projects p ON p.id = l.project_id
+    WHERE cm.seller_id = ?
+      AND cr.status = 'eligible'
+      AND cr.net_release_amount > 0
+    ORDER BY cr.id ASC
+    `,
+    [sellerId]
+  )
+
+  const totals = eligibleReleases.reduce(
+    (sum, release) => {
+      sum.total_eligible += Number(release.gross_release_amount || 0)
+      sum.total_deducted += Number(release.cash_advance_deduction || 0)
+      sum.total_available += Number(release.net_release_amount || 0)
+      return sum
+    },
+    { total_eligible: 0, total_deducted: 0, total_available: 0 }
+  )
+
+  res.status(200).json({
+    message: 'Seller commission summary fetched successfully',
+    clientUnits,
+    eligibleReleases,
+    totals,
+    data: { clientUnits, eligibleReleases, totals },
+  })
+}

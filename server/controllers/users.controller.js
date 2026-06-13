@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken'
 import { db } from '../db/connect.js'
 import { createAuditLog } from '../utils/createAuditLog.js'
 
-const allowedRoles = ['super_admin', 'admin', 'personnel']
+const allowedRoles = ['super_admin', 'admin', 'treasury', 'broker_network_manager', 'broker', 'manager', 'agent', 'client', 'personnel']
 
 const adminFeatures = [
   'users',
@@ -73,7 +73,9 @@ export const login = async (req, res) => {
 
   const features = ['super_admin', 'admin'].includes(user.role)
     ? adminFeatures
-    : []
+    : user.role === 'treasury'
+      ? ['dashboard', 'payments', 'reports']
+      : ['dashboard', 'commissions', 'cash-advances']
 
   const token = jwt.sign(
     {

@@ -402,6 +402,8 @@ const attendanceSelectFields = `
   a.schedule_time_in,
   a.schedule_time_out,
   a.break_minutes,
+  a.is_double_pay,
+  a.double_pay_reason,
   a.created_at,
   a.updated_at
 `
@@ -631,8 +633,10 @@ export const createAttendance = async (req, res) => {
       time_out,
       schedule_time_in,
       schedule_time_out,
-      break_minutes
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      break_minutes,
+      is_double_pay,
+      double_pay_reason
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     [
       employee_id,
@@ -642,7 +646,9 @@ export const createAttendance = async (req, res) => {
       shouldClearTimes ? null : nullableValue(time_out),
       schedule_time_in || defaultSchedule.timeIn,
       schedule_time_out || defaultSchedule.timeOut,
-      Number(break_minutes || defaultSchedule.breakMinutes)
+      Number(break_minutes || defaultSchedule.breakMinutes),
+      is_double_pay ? 1 : 0,
+      is_double_pay ? nullableValue(double_pay_reason) : null
     ]
   )
 
@@ -700,8 +706,10 @@ export const createDefaultAttendance = async (req, res) => {
       time_out,
       schedule_time_in,
       schedule_time_out,
-      break_minutes
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      break_minutes,
+      is_double_pay,
+      double_pay_reason
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     [
       employee_id,
@@ -888,7 +896,9 @@ export const updateAttendance = async (req, res) => {
       time_out = ?,
       schedule_time_in = ?,
       schedule_time_out = ?,
-      break_minutes = ?
+      break_minutes = ?,
+      is_double_pay = ?,
+      double_pay_reason = ?
     WHERE id = ?
     `,
     [
@@ -900,6 +910,8 @@ export const updateAttendance = async (req, res) => {
       schedule_time_in || defaultSchedule.timeIn,
       schedule_time_out || defaultSchedule.timeOut,
       Number(break_minutes || defaultSchedule.breakMinutes),
+      is_double_pay ? 1 : 0,
+      is_double_pay ? nullableValue(double_pay_reason) : null,
       id
     ]
   )

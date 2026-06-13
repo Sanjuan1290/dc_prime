@@ -2,6 +2,8 @@ import { db } from '../db/connect.js'
 import { createAuditLog } from '../utils/createAuditLog.js'
 import { getClientIp } from '../utils/getClientIp.js'
 import { refreshCommissionEligibility } from './commissions.controller.js'
+import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
+import { createDriveFolderIfMissing, deleteDriveFile, getDriveFileBuffer, safeDriveName, uploadFileToDrive } from '../lib/googleDrive.js'
 
 const allowedClientDocumentStatuses = [
   'not_submitted',
@@ -296,6 +298,16 @@ export const getClientUnitDocuments = async (req, res) => {
       d.is_required,
       d.can_reuse,
       cdl.file_url,
+      cdl.storage_provider,
+      cdl.drive_file_id,
+      cdl.drive_folder_id,
+      cdl.file_name,
+      cdl.mime_type,
+      cdl.file_size,
+      cdl.web_view_link,
+      cdl.uploaded_at,
+      cdl.uploaded_by,
+      uploader.full_name AS uploaded_by_name,
       cdl.status,
       cdl.reviewed_by,
       reviewer.full_name AS reviewed_by_name,
@@ -305,6 +317,7 @@ export const getClientUnitDocuments = async (req, res) => {
     FROM client_document_list cdl
     INNER JOIN documents d ON d.id = cdl.document_id
     LEFT JOIN users reviewer ON reviewer.id = cdl.reviewed_by
+    LEFT JOIN users uploader ON uploader.id = cdl.uploaded_by
     WHERE cdl.client_unit_id = ?
     ORDER BY d.id ASC
     `,
@@ -400,6 +413,16 @@ export const updateClientDocumentStatus = async (req, res) => {
       cdl.client_unit_id,
       cdl.document_id,
       cdl.file_url,
+      cdl.storage_provider,
+      cdl.drive_file_id,
+      cdl.drive_folder_id,
+      cdl.file_name,
+      cdl.mime_type,
+      cdl.file_size,
+      cdl.web_view_link,
+      cdl.uploaded_at,
+      cdl.uploaded_by,
+      uploader.full_name AS uploaded_by_name,
       cdl.status,
       d.name AS document_name
     FROM client_document_list cdl
@@ -578,6 +601,228 @@ export const applyExistingReusableDocuments = async (req, res) => {
   } finally {
     connection.release()
   }
+}
+
+
+const allowedUploadMimeTypes = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
+
+const getClientDocumentForFile = async (id, connectionOrDb = db) => {
+  const [rows] = await connectionOrDb.query(
+    `
+    SELECT
+      cdl.*,
+      d.name AS document_name,
+      cu.client_id,
+      c.full_name AS client_name,
+      l.unit_id,
+      p.name AS project_name
+    FROM client_document_list cdl
+    JOIN documents d ON d.id = cdl.document_id
+    JOIN client_units cu ON cu.id = cdl.client_unit_id
+    JOIN clients c ON c.id = cu.client_id
+    JOIN listings l ON l.id = cu.listing_id
+    JOIN projects p ON p.id = l.project_id
+    WHERE cdl.id = ?
+    LIMIT 1
+    `,
+    [id]
+  )
+
+  return rows[0] || null
+}
+
+const getOrCreateClientDocumentFolder = async (documentRow) => {
+  const rootFolderId = process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID
+  if (!rootFolderId) throw new Error('GOOGLE_DRIVE_ROOT_FOLDER_ID is missing in .env')
+
+  const clientsFolder = await createDriveFolderIfMissing({
+    name: 'clients',
+    parentFolderId: rootFolderId,
+  })
+
+  const clientFolder = await createDriveFolderIfMissing({
+    name: `client-${documentRow.client_id}-${safeDriveName(documentRow.client_name)}`,
+    parentFolderId: clientsFolder.id,
+  })
+
+  const unitFolder = await createDriveFolderIfMissing({
+    name: safeDriveName(documentRow.unit_id),
+    parentFolderId: clientFolder.id,
+  })
+
+  return createDriveFolderIfMissing({
+    name: 'documents',
+    parentFolderId: unitFolder.id,
+  })
+}
+
+export const uploadClientDocumentFile = async (req, res) => {
+  const { id } = req.params
+  const file = req.file
+
+  if (!file) {
+    return res.status(400).json({ message: 'File is required' })
+  }
+
+  if (!allowedUploadMimeTypes.includes(file.mimetype)) {
+    return res.status(400).json({ message: 'Only JPG, PNG, WEBP, and PDF files are allowed' })
+  }
+
+  const documentRow = await getClientDocumentForFile(id)
+  if (!documentRow) {
+    return res.status(404).json({ message: 'Client document not found' })
+  }
+
+  const folder = await getOrCreateClientDocumentFolder(documentRow)
+
+  if (documentRow.drive_file_id) {
+    try {
+      await deleteDriveFile(documentRow.drive_file_id)
+    } catch (error) {
+      console.warn(`[documents] failed to delete old Drive file ${documentRow.drive_file_id}:`, error.message)
+    }
+  }
+
+  const uploaded = await uploadFileToDrive({
+    buffer: file.buffer,
+    fileName: file.originalname,
+    mimeType: file.mimetype,
+    parentFolderId: folder.id,
+  })
+
+  const nextStatus = documentRow.status === 'not_submitted' ? 'submitted' : documentRow.status
+
+  await db.query(
+    `
+    UPDATE client_document_list
+    SET
+      storage_provider = 'google_drive',
+      drive_file_id = ?,
+      drive_folder_id = ?,
+      file_name = ?,
+      mime_type = ?,
+      file_size = ?,
+      web_view_link = ?,
+      file_url = ?,
+      uploaded_at = NOW(),
+      uploaded_by = ?,
+      status = ?,
+      reviewed_by = CASE WHEN ? = 'submitted' THEN ? ELSE reviewed_by END,
+      reviewed_at = CASE WHEN ? = 'submitted' THEN NOW() ELSE reviewed_at END
+    WHERE id = ?
+    `,
+    [
+      uploaded.id,
+      folder.id,
+      uploaded.name || file.originalname,
+      file.mimetype,
+      file.size,
+      uploaded.webViewLink || null,
+      uploaded.webViewLink || null,
+      req.user.id,
+      nextStatus,
+      nextStatus,
+      req.user.id,
+      nextStatus,
+      id,
+    ]
+  )
+
+  await createAuditLog({
+    userId: req.user.id,
+    action: 'upload',
+    module: 'Client Documents',
+    description: `Uploaded file for client document ${id}`,
+    ipAddress: getClientIp(req),
+  })
+
+  const updatedDocument = await getClientDocumentForFile(id)
+
+  res.status(200).json({
+    message: 'Document uploaded successfully',
+    document: updatedDocument,
+    data: updatedDocument,
+  })
+}
+
+export const openClientDocumentFile = async (req, res) => {
+  const { id } = req.params
+  const documentRow = await getClientDocumentForFile(id)
+
+  if (!documentRow || !documentRow.drive_file_id) {
+    return res.status(404).json({ message: 'Uploaded file not found' })
+  }
+
+  const buffer = await getDriveFileBuffer(documentRow.drive_file_id)
+  res.setHeader('Content-Type', documentRow.mime_type || 'application/octet-stream')
+  res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(documentRow.file_name || 'document')}"`)
+  res.send(buffer)
+}
+
+export const downloadClientUnitDocumentsPdf = async (req, res) => {
+  const { clientUnitId } = req.params
+
+  const [rows] = await db.query(
+    `
+    SELECT
+      cdl.id,
+      cdl.drive_file_id,
+      cdl.file_name,
+      cdl.mime_type,
+      cdl.status,
+      d.name AS document_name,
+      l.unit_id
+    FROM client_document_list cdl
+    JOIN documents d ON d.id = cdl.document_id
+    JOIN client_units cu ON cu.id = cdl.client_unit_id
+    JOIN listings l ON l.id = cu.listing_id
+    WHERE cdl.client_unit_id = ?
+      AND cdl.drive_file_id IS NOT NULL
+    ORDER BY d.id ASC
+    `,
+    [clientUnitId]
+  )
+
+  if (rows.length === 0) {
+    return res.status(400).json({ message: 'No uploaded document images found for this client unit.' })
+  }
+
+  const pdf = await PDFDocument.create()
+  const font = await pdf.embedFont(StandardFonts.Helvetica)
+  const bold = await pdf.embedFont(StandardFonts.HelveticaBold)
+  const pageWidth = 595.28
+  const pageHeight = 841.89
+  const margin = 36
+
+  for (const row of rows) {
+    const page = pdf.addPage([pageWidth, pageHeight])
+    page.drawText(row.document_name || 'Document', { x: margin, y: pageHeight - 42, size: 13, font: bold, color: rgb(0.05, 0.1, 0.2) })
+    page.drawText(row.file_name || '-', { x: margin, y: pageHeight - 62, size: 9, font, color: rgb(0.35, 0.4, 0.5) })
+
+    try {
+      const buffer = await getDriveFileBuffer(row.drive_file_id)
+      if (row.mime_type === 'image/jpeg' || row.mime_type === 'image/jpg') {
+        const image = await pdf.embedJpg(buffer)
+        const scaled = image.scaleToFit(pageWidth - margin * 2, pageHeight - 110)
+        page.drawImage(image, { x: (pageWidth - scaled.width) / 2, y: 40, width: scaled.width, height: scaled.height })
+      } else if (row.mime_type === 'image/png') {
+        const image = await pdf.embedPng(buffer)
+        const scaled = image.scaleToFit(pageWidth - margin * 2, pageHeight - 110)
+        page.drawImage(image, { x: (pageWidth - scaled.width) / 2, y: 40, width: scaled.width, height: scaled.height })
+      } else {
+        page.drawText('This file is stored as a PDF or unsupported image type.', { x: margin, y: pageHeight - 120, size: 11, font })
+        page.drawText('Open the uploaded file directly from the document checklist.', { x: margin, y: pageHeight - 140, size: 11, font })
+      }
+    } catch (error) {
+      page.drawText(`Could not include this file: ${error.message}`, { x: margin, y: pageHeight - 120, size: 11, font, color: rgb(0.7, 0.1, 0.1) })
+    }
+  }
+
+  const pdfBytes = await pdf.save()
+  const unitId = rows[0]?.unit_id || clientUnitId
+  res.setHeader('Content-Type', 'application/pdf')
+  res.setHeader('Content-Disposition', `attachment; filename="documents-${unitId}.pdf"`)
+  res.send(Buffer.from(pdfBytes))
 }
 
 export const getClientUnitDocumentStatus = async (req, res) => {

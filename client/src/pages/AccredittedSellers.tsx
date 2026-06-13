@@ -44,7 +44,6 @@ type AccreditedSeller = {
 };
 
 type SellerFormData = {
-  user_id: string;
   full_name: string;
   email: string;
   contact_no: string;
@@ -64,7 +63,6 @@ type SellersResponse = {
 };
 
 const emptyFormData: SellerFormData = {
-  user_id: "",
   full_name: "",
   email: "",
   contact_no: "",
@@ -79,6 +77,16 @@ const emptyFormData: SellerFormData = {
 
 const sellerRoles = ["broker_network_manager", "broker", "manager", "agent"];
 const sellerStatuses = ["active", "inactive"];
+
+const allowedParentRolesBySellerRole: Record<string, string[]> = {
+  broker_network_manager: [],
+  broker: ["broker_network_manager"],
+  manager: ["broker"],
+  agent: ["manager"],
+};
+
+const getAllowedParentRoles = (sellerRole: SellerRole) => allowedParentRolesBySellerRole[String(sellerRole)] || [];
+
 
 const fetchSellers = async (): Promise<AccreditedSeller[]> => {
   const response = await fetch(`${API_URL}/accredited-sellers`, {
@@ -99,7 +107,6 @@ const fetchPossibleParentSellers = async (
   const url = excludeId
     ? `${API_URL}/accredited-sellers/possible-parents?exclude_id=${excludeId}`
     : `${API_URL}/accredited-sellers/possible-parents`;
-
   const response = await fetch(url, {
     credentials: "include",
   });
@@ -168,7 +175,6 @@ const formatSellerPayload = (sellerData: SellerFormData) => {
       : null;
 
   return {
-    user_id: sellerData.user_id ? Number(sellerData.user_id) : null,
     full_name: sellerData.full_name.trim(),
     email: sellerData.email.trim() || null,
     contact_no: sellerData.contact_no.trim() || null,
@@ -203,7 +209,6 @@ const deleteSeller = async (id: number) => {
 
 const sellerToFormData = (seller: AccreditedSeller): SellerFormData => {
   return {
-    user_id: seller.user_id ? String(seller.user_id) : "",
     full_name: seller.full_name,
     email: seller.email || "",
     contact_no: seller.contact_no || "",
@@ -630,6 +635,11 @@ const SellerFormModal = ({
   isPending,
   submitLabel,
 }: SellerFormModalProps) => {
+  const allowedParentRoles = getAllowedParentRoles(formData.seller_role)
+  const filteredParentSellers = possibleParentSellers.filter((seller) =>
+    allowedParentRoles.includes(String(seller.seller_role))
+  )
+
   return (
     <Modal
       title={title}
@@ -687,6 +697,9 @@ const SellerFormModal = ({
             setFormData({
               ...formData,
               seller_role: event.target.value,
+              reports_under_mode: getAllowedParentRoles(event.target.value).length ? 'seller' : 'none',
+              parent_seller_id: '',
+              custom_reports_under: '',
             })
           }
         >
@@ -741,20 +754,6 @@ const SellerFormModal = ({
             </option>
           ))}
         </Select>
-
-        <Input
-          label="Linked User ID"
-          type="number"
-          min={1}
-          value={formData.user_id}
-          onChange={(event) =>
-            setFormData({
-              ...formData,
-              user_id: event.target.value,
-            })
-          }
-          placeholder="Optional"
-        />
       </div>
 
       <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
@@ -773,8 +772,8 @@ const SellerFormModal = ({
               })
             }
           >
-            <option value="none">None</option>
-            <option value="seller">Existing Seller</option>
+            {allowedParentRoles.length === 0 ? <option value="none">None</option> : null}
+            {allowedParentRoles.length > 0 ? <option value="seller">Existing Seller</option> : null}
             <option value="custom">Custom Name</option>
           </Select>
 
@@ -790,7 +789,7 @@ const SellerFormModal = ({
               }
             >
               <option value="">Select seller</option>
-              {possibleParentSellers.map((seller) => (
+              {filteredParentSellers.map((seller) => (
                 <option key={seller.id} value={seller.id}>
                   {seller.full_name} - {formatText(seller.seller_role)}
                 </option>

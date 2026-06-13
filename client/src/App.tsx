@@ -20,6 +20,7 @@ import NotFound from "./pages/NotFound"
 import CashAdvances from "./pages/CashAdvances"
 import OfferToBuyPrint from "./pages/OfferToBuyPrint"
 import StatementOfAccountPrint from "./pages/StatementOfAccountPrint"
+import Users from "./pages/Users"
 
 
 const App = () => {
@@ -43,6 +44,7 @@ const App = () => {
         <Route path="reports" element={<Reports/>} />
         <Route path="audit-logs" element={<AuditLogs/>} />
         <Route path="settings" element={<Settings/>} />
+        <Route path="users" element={<Users/>} />
         <Route path="employees" element={<Employees/>} />
         <Route path="attendance" element={<Attendance/>} />
       </Route>

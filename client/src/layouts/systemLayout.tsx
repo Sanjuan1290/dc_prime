@@ -14,6 +14,7 @@ import {
   FiMap,
   FiMenu,
   FiSettings,
+  FiShield,
   FiUserCheck,
   FiUsers,
   FiX,
@@ -161,9 +162,30 @@ const navGroups: NavGroup[] = [
     title: "Administration",
     description: "System controls",
     tone: "slate",
-    items: [{ label: "Settings", to: "/settings", icon: FiSettings, tone: "slate" }],
+    items: [
+      { label: "Settings", to: "/settings", icon: FiSettings, tone: "slate" },
+      { label: "Users", to: "/users", icon: FiShield, tone: "slate" },
+    ],
   },
 ]
+
+
+const roleAllowedPaths: Record<string, string[]> = {
+  super_admin: ["/dashboard", "/projects", "/listings", "/clients", "/client", "/accreditted_sellers", "/payments", "/commissions", "/cash-advances", "/documents", "/audit-logs", "/reports", "/employees", "/attendance", "/settings", "/users"],
+  admin: ["/dashboard", "/projects", "/listings", "/clients", "/client", "/accreditted_sellers", "/payments", "/commissions", "/cash-advances", "/documents", "/audit-logs", "/reports", "/employees", "/attendance", "/settings"],
+  treasury: ["/dashboard", "/payments", "/reports"],
+  broker_network_manager: ["/dashboard", "/commissions", "/cash-advances"],
+  broker: ["/dashboard", "/commissions", "/cash-advances"],
+  manager: ["/dashboard", "/commissions", "/cash-advances"],
+  agent: ["/dashboard", "/commissions", "/cash-advances"],
+  client: ["/dashboard"],
+}
+
+const canAccessPath = (role: string | undefined, path: string) => {
+  if (!role) return false
+  const allowed = roleAllowedPaths[role] || roleAllowedPaths.agent
+  return allowed.some((allowedPath) => path === allowedPath || path.startsWith(`${allowedPath}/`))
+}
 
 const SystemLayout = () => {
   const navigate = useNavigate()
@@ -174,11 +196,20 @@ const SystemLayout = () => {
   const { data, isLoading } = useCurrentUser()
   const currentUser = (data as CurrentUserResponse | null)?.user
 
-  const activeItem = useMemo(() => {
+  const visibleNavGroups = useMemo(() => {
     return navGroups
+      .map((group) => ({
+        ...group,
+        items: group.items.filter((item) => canAccessPath(currentUser?.role, item.to)),
+      }))
+      .filter((group) => group.items.length > 0)
+  }, [currentUser?.role])
+
+  const activeItem = useMemo(() => {
+    return visibleNavGroups
       .flatMap((group) => group.items.map((item) => ({ ...item, groupTitle: group.title })))
       .find((item) => location.pathname === item.to || location.pathname.startsWith(`${item.to}/`))
-  }, [location.pathname])
+  }, [location.pathname, visibleNavGroups])
 
   const handleLogout = async () => {
     await fetch(`${API_URL}/logout`, {
@@ -203,6 +234,10 @@ const SystemLayout = () => {
 
   if (!currentUser) {
     return <Navigate to="/" replace state={{ from: location.pathname }} />
+  }
+
+  if (!canAccessPath(currentUser.role, location.pathname)) {
+    return <Navigate to="/dashboard" replace />
   }
 
   const sidebar = (
@@ -246,7 +281,7 @@ const SystemLayout = () => {
       </div>
 
       <nav className="flex-1 overflow-y-auto p-3">
-        {navGroups.map((group) => (
+        {visibleNavGroups.map((group) => (
           <div key={group.title} className="mb-4">
             <div className="mb-2 flex items-center justify-between gap-2 px-3">
               <div className="min-w-0">

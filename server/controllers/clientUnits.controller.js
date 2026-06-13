@@ -362,6 +362,25 @@ const clientUnitFields = `
   END AS payment_percentage,
   cu.mode_of_payment,
   cu.due_day,
+  CASE
+    WHEN cu.due_day IS NULL THEN NULL
+    WHEN DAY(CURDATE()) <= LEAST(cu.due_day, DAY(LAST_DAY(CURDATE()))) THEN
+      STR_TO_DATE(CONCAT(YEAR(CURDATE()), '-', LPAD(MONTH(CURDATE()), 2, '0'), '-', LPAD(LEAST(cu.due_day, DAY(LAST_DAY(CURDATE()))), 2, '0')), '%Y-%m-%d')
+    ELSE
+      STR_TO_DATE(CONCAT(YEAR(DATE_ADD(CURDATE(), INTERVAL 1 MONTH)), '-', LPAD(MONTH(DATE_ADD(CURDATE(), INTERVAL 1 MONTH)), 2, '0'), '-', LPAD(LEAST(cu.due_day, DAY(LAST_DAY(DATE_ADD(CURDATE(), INTERVAL 1 MONTH)))), 2, '0')), '%Y-%m-%d')
+  END AS next_due_date,
+  CASE
+    WHEN cu.due_day IS NULL THEN NULL
+    ELSE DATEDIFF(
+      CASE
+        WHEN DAY(CURDATE()) <= LEAST(cu.due_day, DAY(LAST_DAY(CURDATE()))) THEN
+          STR_TO_DATE(CONCAT(YEAR(CURDATE()), '-', LPAD(MONTH(CURDATE()), 2, '0'), '-', LPAD(LEAST(cu.due_day, DAY(LAST_DAY(CURDATE()))), 2, '0')), '%Y-%m-%d')
+        ELSE
+          STR_TO_DATE(CONCAT(YEAR(DATE_ADD(CURDATE(), INTERVAL 1 MONTH)), '-', LPAD(MONTH(DATE_ADD(CURDATE(), INTERVAL 1 MONTH)), 2, '0'), '-', LPAD(LEAST(cu.due_day, DAY(LAST_DAY(DATE_ADD(CURDATE(), INTERVAL 1 MONTH)))), 2, '0')), '%Y-%m-%d')
+      END,
+      CURDATE()
+    )
+  END AS days_until_due,
   cu.starting_date,
   cu.due_date,
   cu.offer_purchase_price,

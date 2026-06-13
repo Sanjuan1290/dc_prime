@@ -9,6 +9,8 @@ import {
   FiPlus,
   FiPrinter,
   FiRefreshCw,
+  FiUpload,
+  FiDownload,
   FiUser,
 } from "react-icons/fi"
 import Alert from "../components/ui/Alert"
@@ -190,6 +192,8 @@ type ClientUnit = {
   due_day: number | null
   starting_date?: string | null
   due_date?: string | null
+  next_due_date?: string | null
+  days_until_due?: number | string | null
   offer_purchase_price?: number | string | null
   reservation_fee_amount?: number | string | null
   downpayment_amount?: number | string | null
@@ -257,6 +261,16 @@ type ClientDocument = {
   is_required: number | boolean
   can_reuse: number | boolean
   file_url: string | null
+  storage_provider?: string | null
+  drive_file_id?: string | null
+  drive_folder_id?: string | null
+  file_name?: string | null
+  mime_type?: string | null
+  file_size?: number | string | null
+  web_view_link?: string | null
+  uploaded_at?: string | null
+  uploaded_by?: number | null
+  uploaded_by_name?: string | null
   status: "not_submitted" | "submitted" | "approved" | "rejected" | string
   reviewed_by: number | null
   reviewed_by_name: string | null
@@ -981,6 +995,46 @@ const updateClientDocumentStatus = async ({
   return res.json()
 }
 
+
+const uploadClientDocumentFile = async ({
+  clientDocumentId,
+  file,
+}: {
+  clientDocumentId: number
+  file: File
+}) => {
+  const formData = new FormData()
+  formData.append("file", file)
+
+  const res = await fetch(`${API_URL}/client-documents/${clientDocumentId}/upload`, {
+    method: "PATCH",
+    credentials: "include",
+    body: formData,
+  })
+
+  if (!res.ok) throw new Error(await getErrorMessage(res))
+
+  return res.json()
+}
+
+const downloadClientUnitDocumentsPdf = async (unit: ClientUnit) => {
+  const res = await fetch(`${API_URL}/client-units/${unit.id}/documents/download-pdf`, {
+    credentials: "include",
+  })
+
+  if (!res.ok) throw new Error(await getErrorMessage(res))
+
+  const blob = await res.blob()
+  const url = window.URL.createObjectURL(blob)
+  const link = document.createElement("a")
+  link.href = url
+  link.download = `documents-${unit.unit_id || unit.id}.pdf`
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.URL.revokeObjectURL(url)
+}
+
 const isSubmitted = (status: string) => {
   return ["submitted", "approved"].includes(status)
 }
@@ -1273,6 +1327,19 @@ const ClientProfile = () => {
       invalidateClientProfile()
       setSuccessMessage("Document checklist updated successfully")
     },
+  })
+
+  const uploadDocumentMutation = useMutation({
+    mutationFn: uploadClientDocumentFile,
+    onSuccess: () => {
+      invalidateClientProfile()
+      setSuccessMessage("Document file uploaded successfully")
+    },
+  })
+
+  const downloadDocumentsMutation = useMutation({
+    mutationFn: downloadClientUnitDocumentsPdf,
+    onError: () => undefined,
   })
 
   const createChecklistMutation = useMutation({
@@ -1617,6 +1684,14 @@ const ClientProfile = () => {
     })
   }
 
+  const handleDocumentFileChange = (document: ClientDocument, file: File | null) => {
+    if (!file) return
+    uploadDocumentMutation.mutate({
+      clientDocumentId: document.id,
+      file,
+    })
+  }
+
   if (isClientLoading || areUnitsLoading) {
     return <LoadingState label="Loading client profile..." />
   }
@@ -1651,6 +1726,17 @@ const ClientProfile = () => {
       />
 
       {successMessage ? <Alert variant="success" title={successMessage} /> : null}
+
+      {clientUnits
+        .filter((unit) => Number(unit.days_until_due ?? 999) >= 0 && Number(unit.days_until_due ?? 999) <= 7)
+        .slice(0, 1)
+        .map((unit) => (
+          <Alert
+            key={`due-${unit.id}`}
+            variant="warning"
+            title={`Payment due in ${Number(unit.days_until_due)} day(s) — Unit ${unit.unit_id}${unit.next_due_date ? ` · Due on ${formatDate(unit.next_due_date)}` : ""}`}
+          />
+        ))}
 
       {reserveMutation.error ? (
         <Alert
@@ -3408,6 +3494,13 @@ const ClientProfile = () => {
                 >
                   Apply Reusable Docs
                 </Button>
+                <Button
+                  icon={<FiDownload />}
+                  disabled={downloadDocumentsMutation.isPending}
+                  onClick={() => downloadDocumentsMutation.mutate(selectedDocumentsUnit)}
+                >
+                  Download Docs Images
+                </Button>
               </div>
 
               <Button onClick={() => setSelectedDocumentsUnit(null)}>
@@ -3431,6 +3524,28 @@ const ClientProfile = () => {
                 updateDocumentMutation.error instanceof Error
                   ? updateDocumentMutation.error.message
                   : "Failed to update document status"
+              }
+            />
+          ) : null}
+
+          {uploadDocumentMutation.error ? (
+            <Alert
+              variant="error"
+              title={
+                uploadDocumentMutation.error instanceof Error
+                  ? uploadDocumentMutation.error.message
+                  : "Failed to upload document"
+              }
+            />
+          ) : null}
+
+          {downloadDocumentsMutation.error ? (
+            <Alert
+              variant="error"
+              title={
+                downloadDocumentsMutation.error instanceof Error
+                  ? downloadDocumentsMutation.error.message
+                  : "Failed to download document PDF"
               }
             />
           ) : null}
@@ -3484,6 +3599,7 @@ const ClientProfile = () => {
                       <th className="px-4 py-3 text-left">Type</th>
                       <th className="px-4 py-3 text-left">Reusable</th>
                       <th className="px-4 py-3 text-left">Status</th>
+                      <th className="px-4 py-3 text-left">Uploaded File</th>
                       <th className="px-4 py-3 text-left">Submitted Date</th>
                       <th className="px-4 py-3 text-left">Action</th>
                     </tr>
@@ -3531,10 +3647,26 @@ const ClientProfile = () => {
                         </td>
 
                         <td className="px-4 py-3 text-slate-600">
+                          {document.file_name ? (
+                            <a
+                              className="font-semibold text-blue-600 hover:text-blue-700"
+                              href={`${API_URL}/client-documents/${document.id}/file`}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              {document.file_name}
+                            </a>
+                          ) : (
+                            "-"
+                          )}
+                        </td>
+
+                        <td className="px-4 py-3 text-slate-600">
                           {submittedDate ? formatDate(submittedDate) : "-"}
                         </td>
 
                         <td className="px-4 py-3">
+                          <div className="flex min-w-[220px] flex-col gap-2">
                           <Select
                             aria-label={`Update ${document.name} status`}
                             disabled={updateDocumentMutation.isPending}
@@ -3552,6 +3684,24 @@ const ClientProfile = () => {
                               </option>
                             ))}
                           </Select>
+
+                          <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-blue-300 hover:text-blue-700">
+                            <FiUpload />
+                            {uploadDocumentMutation.isPending ? "Uploading..." : "Upload"}
+                            <input
+                              className="hidden"
+                              type="file"
+                              accept="image/jpeg,image/png,image/webp,application/pdf"
+                              disabled={uploadDocumentMutation.isPending}
+                              onChange={(event) =>
+                                handleDocumentFileChange(
+                                  document,
+                                  event.target.files?.[0] || null
+                                )
+                              }
+                            />
+                          </label>
+                          </div>
                         </td>
                         </tr>
                       )

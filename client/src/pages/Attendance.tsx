@@ -37,6 +37,8 @@ type AttendanceRecord = {
   schedule_time_in: string | null
   schedule_time_out: string | null
   break_minutes: number
+  is_double_pay: number | boolean
+  double_pay_reason: string | null
   work_hours: number | null
   attendance_status: string
   created_at: string
@@ -52,6 +54,8 @@ type AttendanceFormData = {
   schedule_time_in: string
   schedule_time_out: string
   break_minutes: number
+  is_double_pay: boolean
+  double_pay_reason: string
 }
 
 type AttendanceResponse = {
@@ -80,6 +84,8 @@ const emptyFormData: AttendanceFormData = {
   schedule_time_in: "09:00",
   schedule_time_out: "18:00",
   break_minutes: 60,
+  is_double_pay: false,
+  double_pay_reason: "",
 }
 
 const getErrorMessage = async (response: Response) => {
@@ -430,6 +436,8 @@ const Attendance = () => {
         ? formatTime(editAttendance.schedule_time_out)
         : "18:00",
       break_minutes: Number(editAttendance.break_minutes || 60),
+      is_double_pay: Boolean(Number(editAttendance.is_double_pay || 0)),
+      double_pay_reason: editAttendance.double_pay_reason || "",
     }
 
     updateAttendanceMutation.mutate({
@@ -813,6 +821,7 @@ const Attendance = () => {
                 <th className="px-4 py-3 text-left">Time Out</th>
                 <th className="px-4 py-3 text-left">Schedule</th>
                 <th className="px-4 py-3 text-left">Break</th>
+                  <th className="px-4 py-3 text-left">Double Pay</th>
                 <th className="px-4 py-3 text-left">Work Hours</th>
                 <th className="px-4 py-3 text-left">Status</th>
                 <th className="px-4 py-3 text-left">Actions</th>
@@ -832,6 +841,7 @@ const Attendance = () => {
                     {formatTime(record.schedule_time_in)} - {formatTime(record.schedule_time_out)}
                   </td>
                   <td className="px-4 py-3">{record.break_minutes} mins</td>
+                  <td className="px-4 py-3">{Number(record.is_double_pay) === 1 ? (record.double_pay_reason || "Yes") : "-"}</td>
                   <td className="px-4 py-3">{formatWorkHours(record.work_hours)}</td>
                   <td className="px-4 py-3">{formatStatus(record.attendance_status)}</td>
                   <td className="px-4 py-3">
@@ -1048,6 +1058,42 @@ const Attendance = () => {
                 </label>
               </div>
 
+
+
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(editAttendance.is_double_pay)}
+                    onChange={(e) =>
+                      setEditAttendance({
+                        ...editAttendance,
+                        is_double_pay: e.target.checked,
+                        double_pay_reason: e.target.checked ? editAttendance.double_pay_reason || "" : "",
+                      })
+                    }
+                  />
+                  Double Pay Day
+                </label>
+
+                {editAttendance.is_double_pay ? (
+                  <label className="block">
+                    <span className="mb-1.5 block text-sm font-semibold text-slate-700">
+                      Double Pay Reason
+                    </span>
+                    <input
+                      value={editAttendance.double_pay_reason || ""}
+                      onChange={(e) =>
+                        setEditAttendance({
+                          ...editAttendance,
+                          double_pay_reason: e.target.value,
+                        })
+                      }
+                      className="w-full rounded-lg border border-slate-200 px-3 py-2"
+                    />
+                  </label>
+                ) : null}
+              </div>
               <div className="mt-2 flex justify-end gap-2">
                 <button
                   type="button"
@@ -1264,6 +1310,41 @@ const AttendanceFormFields = ({
           />
         </label>
       </div>
+
+
+      <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
+        <input
+          type="checkbox"
+          checked={formData.is_double_pay}
+          onChange={(e) =>
+            setFormData({
+              ...formData,
+              is_double_pay: e.target.checked,
+              double_pay_reason: e.target.checked ? formData.double_pay_reason : "",
+            })
+          }
+        />
+        Double Pay Day
+      </label>
+
+      {formData.is_double_pay ? (
+        <label className="block">
+          <span className="mb-1.5 block text-sm font-semibold text-slate-700">
+            Double Pay Reason
+          </span>
+          <input
+            value={formData.double_pay_reason}
+            onChange={(e) =>
+              setFormData({
+                ...formData,
+                double_pay_reason: e.target.value,
+              })
+            }
+            className="w-full rounded-lg border border-slate-200 px-3 py-2"
+            placeholder="Regular Holiday / Special Holiday"
+          />
+        </label>
+      ) : null}
     </>
   )
 }

@@ -22,6 +22,9 @@ import settingsRouter from './routers/settings.router.js'
 import useCurrentUser from './utils/useCurrentUser.js'
 import cashAdvancesRouter from './routers/cashAdvances.router.js'
 import printFormsRouter from './routers/printForms.router.js'
+import usersManagementRouter from './routers/usersManagement.router.js'
+import { startPaymentReminderJob } from './jobs/paymentReminderJob.js'
+import { startDocumentReminderJob } from './jobs/documentReminderJob.js'
 
 const app = express()
 
@@ -58,6 +61,7 @@ app.use('/api/v1', auditLogsRouter)
 app.use('/api/v1', settingsRouter)
 app.use('/api/v1', cashAdvancesRouter)
 app.use('/api/v1', printFormsRouter)
+app.use('/api/v1', usersManagementRouter)
 
 app.use((req, res) => {
   res.status(404).json({
@@ -74,6 +78,11 @@ app.use((err, req, res, _next) => {
 })
 
 const PORT = process.env.PORT || 5000
+
+if (process.env.ENABLE_EMAIL_JOBS !== 'false') {
+  startPaymentReminderJob()
+  startDocumentReminderJob()
+}
 
 app.listen(PORT, async () => {
   try {
