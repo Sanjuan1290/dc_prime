@@ -397,10 +397,10 @@ const Documents = () => {
                         {document.description || "-"}
                       </td>
                       <td className="px-4 py-3 text-slate-600">
-                        {Boolean(document.is_required) ? "Yes" : "No"}
+                        {document.is_required ? "Yes" : "No"}
                       </td>
                       <td className="px-4 py-3 text-slate-600">
-                        {Boolean(document.can_reuse) ? "Yes" : "No"}
+                        {document.can_reuse ? "Yes" : "No"}
                       </td>
                       <td className="px-4 py-3">
                         <StatusBadge status={document.status} />

@@ -23,6 +23,11 @@
     return normalizeMoney(normalizeMoney(commissionBase) * (normalizeRate(rate) / 100))
   }
 
+  const canPromoteRetentionEligibility = (options = {}) => {
+    // Stage 1 guard. Later RBAC can replace this role string check.
+    return options.actorRole === 'super_admin'
+  }
+
   const commissionFields = `
     cm.id,
     cm.client_unit_id,
@@ -358,45 +363,93 @@
     }
   }
 
-  const refreshCommissionStatus = async (connectionOrDb, commissionId) => {
+  const recalculateCommissionReleaseTotals = async (
+    connectionOrDb,
+    commissionId,
+    options = {}
+  ) => {
     const [rows] = await connectionOrDb.query(
       `
       SELECT
-        COUNT(id) AS total_releases,
-        SUM(CASE WHEN status = 'released' THEN 1 ELSE 0 END) AS released_count,
-        SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled_count
-      FROM commission_releases
-      WHERE commission_id = ?
+        cm.id,
+        cm.gross_commission,
+        cm.amount,
+        cm.status AS current_status,
+        COUNT(cr.id) AS total_releases,
+        COALESCE(SUM(CASE WHEN cr.status = 'released' THEN 1 ELSE 0 END), 0) AS released_count,
+        COALESCE(SUM(CASE WHEN cr.status = 'cancelled' THEN 1 ELSE 0 END), 0) AS cancelled_count,
+        COALESCE(SUM(CASE WHEN cr.status = 'released' THEN cr.net_release_amount ELSE 0 END), 0) AS released_amount
+      FROM commissions cm
+      LEFT JOIN commission_releases cr ON cr.commission_id = cm.id
+      WHERE cm.id = ?
+      GROUP BY cm.id
       `,
       [commissionId]
     )
 
-    const stats = rows[0] || {}
-    const totalReleases = Number(stats.total_releases || 0)
-    const releasedCount = Number(stats.released_count || 0)
-    const cancelledCount = Number(stats.cancelled_count || 0)
+    const commission = rows[0]
 
-    let nextStatus = 'active'
+    if (!commission) {
+      return null
+    }
+
+    const totalAmount = normalizeMoney(
+      commission.gross_commission || commission.amount
+    )
+    const releasedAmount = normalizeMoney(commission.released_amount)
+    const remainingAmount = normalizeMoney(
+      Math.max(totalAmount - releasedAmount, 0)
+    )
+    const totalReleases = Number(commission.total_releases || 0)
+    const cancelledCount = Number(commission.cancelled_count || 0)
+
+    let nextStatus = commission.current_status
 
     if (totalReleases > 0 && cancelledCount === totalReleases) {
       nextStatus = 'cancelled'
-    } else if (totalReleases > 0 && releasedCount + cancelledCount === totalReleases) {
+    } else if (
+      nextStatus === 'cancelled' &&
+      !options.allowCancelledRecovery
+    ) {
+      nextStatus = 'cancelled'
+    } else if (totalAmount > 0 && releasedAmount >= totalAmount) {
       nextStatus = 'released'
-    } else if (releasedCount > 0) {
+    } else if (releasedAmount > 0) {
       nextStatus = 'partially_released'
+    } else if (['released', 'partially_released', 'cancelled'].includes(nextStatus)) {
+      nextStatus = 'active'
     }
 
     await connectionOrDb.query(
       `
       UPDATE commissions
-      SET status = ?
+      SET
+        released_amount = ?,
+        status = ?
       WHERE id = ?
-        AND status <> 'cancelled'
       `,
-      [nextStatus, commissionId]
+      [releasedAmount, nextStatus, commissionId]
     )
 
-    return nextStatus
+    return {
+      releasedAmount,
+      remainingAmount,
+      status: nextStatus,
+    }
+  }
+
+  const refreshCommissionStatus = async (
+    connectionOrDb,
+    commissionId,
+    options = {}
+  ) => {
+    const totals = await recalculateCommissionReleaseTotals(
+      connectionOrDb,
+      commissionId,
+      options
+    )
+
+    return totals?.status || null
   }
 
   const generateReleaseMilestonesForCommission = async (
@@ -479,7 +532,8 @@
 
   export const refreshCommissionEligibility = async (
     clientUnitId,
-    connectionOrDb = db
+    connectionOrDb = db,
+    options = {}
   ) => {
     const [paymentRows] = await connectionOrDb.query(
       `
@@ -570,7 +624,7 @@
 
     let retentionUpdated = false
 
-    if (canReleaseRetention) {
+    if (canReleaseRetention && canPromoteRetentionEligibility(options)) {
       const [retentionResult] = await connectionOrDb.query(
         `
         UPDATE commission_releases cr
@@ -584,7 +638,7 @@
       )
 
       retentionUpdated = retentionResult.affectedRows > 0
-    } else {
+    } else if (!canReleaseRetention) {
       const [retentionResult] = await connectionOrDb.query(
         `
         UPDATE commission_releases cr
@@ -620,6 +674,8 @@
       demotedReleaseCount: demotionResult.affectedRows,
       updatedReleaseCount: eligibleResult.affectedRows,
       retentionUpdated,
+      retentionRequiresSuperAdmin:
+        canReleaseRetention && !canPromoteRetentionEligibility(options),
     }
   }
 
@@ -637,6 +693,7 @@
     cashKaliwaanNotes = null,
     overrideNotes = null,
     notes = null,
+    actorRole = null,
   }) => {
     const connectionOrDb = connection || db
 
@@ -742,7 +799,9 @@
       connectionOrDb
     )
 
-    await refreshCommissionEligibility(clientUnitId, connectionOrDb)
+    await refreshCommissionEligibility(clientUnitId, connectionOrDb, {
+      actorRole,
+    })
 
     return {
       commissionId: result.insertId,
@@ -956,6 +1015,7 @@
         cashKaliwaanNotes: cash_kaliwaan_notes,
         overrideNotes: override_notes,
         notes,
+        actorRole: req.user.role,
       })
 
       if (!result) {
@@ -1227,7 +1287,9 @@
       )
 
       await generateReleaseMilestonesForCommission(id, grossCommission)
-      await refreshCommissionEligibility(existingCommission.client_unit_id)
+      await refreshCommissionEligibility(existingCommission.client_unit_id, db, {
+        actorRole: req.user.role,
+      })
     }
 
     let syncedOverrideCommission = null
@@ -1342,11 +1404,14 @@
           cashKaliwaanNotes: cash_kaliwaan_notes,
           overrideNotes: override_notes_for_child,
           notes: `Optional override commission for main commission ${id}`,
+          actorRole: req.user.role,
         })
       }
     }
 
-    await refreshCommissionEligibility(existingCommission.client_unit_id)
+    await refreshCommissionEligibility(existingCommission.client_unit_id, db, {
+      actorRole: req.user.role,
+    })
     await refreshCommissionStatus(db, id)
 
     if (existingOverrideCommission) {
@@ -1499,6 +1564,7 @@ export const addMissingOverrideCommission = async (req, res) => {
       notes:
         notes ||
         `Missing override commission added for main commission ${id}`,
+      actorRole: req.user.role,
     })
 
     if (!createdOverride || !createdOverride.commissionId) {
@@ -1520,7 +1586,9 @@ export const addMissingOverrideCommission = async (req, res) => {
       [id]
     )
 
-    await refreshCommissionEligibility(mainCommission.client_unit_id, connection)
+    await refreshCommissionEligibility(mainCommission.client_unit_id, connection, {
+      actorRole: req.user.role,
+    })
     await refreshCommissionStatus(connection, id)
     await refreshCommissionStatus(connection, createdOverride.commissionId)
 
@@ -1655,7 +1723,9 @@ export const addMissingOverrideCommission = async (req, res) => {
       commission.gross_commission
     )
 
-    await refreshCommissionEligibility(commission.client_unit_id)
+    await refreshCommissionEligibility(commission.client_unit_id, db, {
+      actorRole: req.user.role,
+    })
 
     await createAuditLog({
       userId: req.user.id,
@@ -1740,18 +1810,7 @@ export const addMissingOverrideCommission = async (req, res) => {
         })
       }
 
-      await connection.query(
-        `UPDATE commissions
-        SET released_amount = (
-          SELECT COALESCE(SUM(net_release_amount), 0)
-          FROM commission_releases
-          WHERE commission_id = ? AND status = 'released'
-        )
-        WHERE id = ?`,
-        [release.commission_id, release.commission_id]
-      )
-
-      await refreshCommissionStatus(connection, release.commission_id)
+      await recalculateCommissionReleaseTotals(connection, release.commission_id)
 
       await connection.commit()
 
@@ -1823,10 +1882,10 @@ export const addMissingOverrideCommission = async (req, res) => {
         return res.status(404).json({ message: 'Release not found' })
       }
 
-      if (!['pending', 'eligible'].includes(release.status)) {
+      if (release.status !== 'eligible') {
         await connection.rollback()
         return res.status(400).json({
-          message: 'Only pending or eligible releases can have deductions',
+          message: 'Cash advance deductions can only be applied to eligible commission releases.',
         })
       }
 
@@ -1951,6 +2010,8 @@ export const addMissingOverrideCommission = async (req, res) => {
         [nextReleaseDeduction, nextNetReleaseAmount, releaseId]
       )
 
+      await recalculateCommissionReleaseTotals(connection, release.commission_id)
+
       await connection.commit()
 
       await createAuditLog({
@@ -2019,7 +2080,7 @@ export const addMissingOverrideCommission = async (req, res) => {
         [releaseId]
       )
 
-      await refreshCommissionStatus(connection, release.commission_id)
+      await recalculateCommissionReleaseTotals(connection, release.commission_id)
 
       await connection.commit()
 
@@ -2080,6 +2141,8 @@ export const addMissingOverrideCommission = async (req, res) => {
       [nullableValue(notes), releaseId]
     )
 
+    await recalculateCommissionReleaseTotals(db, release.commission_id)
+
     await createAuditLog({
       userId: req.user.id,
       action: 'hold',
@@ -2131,7 +2194,10 @@ export const addMissingOverrideCommission = async (req, res) => {
       [releaseId]
     )
 
-    await refreshCommissionEligibility(release.client_unit_id)
+    await refreshCommissionEligibility(release.client_unit_id, db, {
+      actorRole: req.user.role,
+    })
+    await recalculateCommissionReleaseTotals(db, release.commission_id)
 
     await createAuditLog({
       userId: req.user.id,
@@ -2192,8 +2258,12 @@ export const addMissingOverrideCommission = async (req, res) => {
         [releaseId]
       )
 
-      await refreshCommissionEligibility(release.client_unit_id, connection)
-      await refreshCommissionStatus(connection, release.commission_id)
+      await refreshCommissionEligibility(release.client_unit_id, connection, {
+        actorRole: req.user.role,
+      })
+      await refreshCommissionStatus(connection, release.commission_id, {
+        allowCancelledRecovery: true,
+      })
 
       await connection.commit()
 

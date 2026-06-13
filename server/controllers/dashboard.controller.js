@@ -194,21 +194,7 @@ export const getAgentPerformance = async (req, res) => {
         END
       ) AS cancelled,
 
-      COALESCE(
-        SUM(
-          CASE
-            WHEN cu.status <> 'cancelled'
-            THEN COALESCE(
-              NULLIF(listing.total_contract_price, 0),
-              listing.net_selling_price + listing.legal_misc_fee,
-              listing.net_selling_price,
-              0
-            )
-            ELSE 0
-          END
-        ),
-        0
-      ) AS net
+      COALESCE(commission_totals.commission_earned, 0) AS net
     FROM accredited_sellers seller
     LEFT JOIN (
       SELECT DISTINCT
@@ -218,11 +204,23 @@ export const getAgentPerformance = async (req, res) => {
     ) seller_units ON seller_units.seller_id = seller.id
     LEFT JOIN client_units cu ON cu.id = seller_units.client_unit_id
     LEFT JOIN listings listing ON listing.id = cu.listing_id
+    LEFT JOIN (
+      SELECT
+        seller_id,
+        COALESCE(
+          SUM(COALESCE(NULLIF(gross_commission, 0), amount, 0)),
+          0
+        ) AS commission_earned
+      FROM commissions
+      WHERE status <> 'cancelled'
+      GROUP BY seller_id
+    ) commission_totals ON commission_totals.seller_id = seller.id
     GROUP BY
       seller.id,
       seller.full_name,
-      seller.seller_role
-    ORDER BY total_sales DESC
+      seller.seller_role,
+      commission_totals.commission_earned
+    ORDER BY net DESC
     `
   )
 

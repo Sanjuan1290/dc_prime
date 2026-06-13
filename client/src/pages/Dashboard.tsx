@@ -355,7 +355,12 @@ const Dashboard = () => {
                   <XAxis tickFormatter={(value) => `${Number(value) / 1000000}M`} type="number" />
                   <YAxis dataKey="name" type="category" width={90} />
                   <Tooltip formatter={(value) => formatMoney(value as number)} />
-                  <Bar dataKey="net" fill="#10b981" radius={[0, 8, 8, 0]} />
+                  <Bar
+                    dataKey="net"
+                    fill="#10b981"
+                    name="Commission Earned"
+                    radius={[0, 8, 8, 0]}
+                  />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -383,7 +388,7 @@ const Dashboard = () => {
                 Cancelled
               </th>
               <th className="px-4 py-3 text-left font-semibold text-slate-600">
-                Net
+                Commission Earned
               </th>
             </tr>
           </thead>

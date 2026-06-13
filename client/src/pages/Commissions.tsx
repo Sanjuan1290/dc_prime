@@ -228,11 +228,6 @@ type CommissionResponse = {
   data?: CommissionDetails
 }
 
-type CommissionSummaryResponse = {
-  summary?: CommissionSummary
-  data?: CommissionSummary
-}
-
 type SellersResponse = {
   accreditedSellers?: Seller[]
   sellers?: Seller[]
@@ -286,34 +281,6 @@ const fetchCommissions = async (): Promise<Commission[]> => {
 
   const data = (await res.json()) as CommissionsResponse
   return data.commissions || data.data || []
-}
-
-const fetchCommissionSummary = async (): Promise<CommissionSummary> => {
-  const res = await fetch(`${API_URL}/commissions-summary`, {
-    credentials: "include",
-  })
-
-  if (!res.ok) throw new Error(await getErrorMessage(res))
-
-  const data = (await res.json()) as CommissionSummaryResponse
-
-  return (
-    data.summary ||
-    data.data || {
-      total_commissions: 0,
-      total_amount: 0,
-      total_eligible: 0,
-      total_released: 0,
-      total_remaining: 0,
-      total_cash_advance_deduction: 0,
-      active_count: 0,
-      partially_released_count: 0,
-      released_count: 0,
-      cancelled_count: 0,
-      main_count: 0,
-      override_count: 0,
-    }
-  )
 }
 
 const fetchSellers = async (): Promise<Seller[]> => {
@@ -644,11 +611,6 @@ const Commissions = () => {
     queryFn: fetchCommissions,
   })
 
-  const { data: summary } = useQuery({
-    queryKey: ["commission-summary"],
-    queryFn: fetchCommissionSummary,
-  })
-
   const { data: sellers = [] } = useQuery({
     queryKey: ["accredited-sellers", "active"],
     queryFn: fetchSellers,
@@ -878,6 +840,60 @@ const Commissions = () => {
     return matchesSearch && matchesStatus && matchesSource && matchesSaleType
   })
 
+  const filteredCommissions = filteredGroups.flatMap(({ main, override }) =>
+    override ? [main, override] : [main]
+  )
+
+  const summary = filteredCommissions.reduce<CommissionSummary>(
+    (totals, commission) => {
+      totals.total_commissions = Number(totals.total_commissions) + 1
+      totals.total_amount =
+        Number(totals.total_amount) + Number(commission.gross_commission || 0)
+      totals.total_eligible =
+        Number(totals.total_eligible) + Number(commission.eligible_amount || 0)
+      totals.total_released =
+        Number(totals.total_released) + Number(commission.released_amount || 0)
+      totals.total_remaining =
+        Number(totals.total_remaining) + Number(commission.remaining_amount || 0)
+      totals.total_cash_advance_deduction =
+        Number(totals.total_cash_advance_deduction) +
+        Number(commission.cash_advance_deduction || 0)
+      totals.active_count =
+        Number(totals.active_count) + (commission.status === "active" ? 1 : 0)
+      totals.partially_released_count =
+        Number(totals.partially_released_count) +
+        (commission.status === "partially_released" ? 1 : 0)
+      totals.released_count =
+        Number(totals.released_count) +
+        (commission.status === "released" ? 1 : 0)
+      totals.cancelled_count =
+        Number(totals.cancelled_count) +
+        (commission.status === "cancelled" ? 1 : 0)
+      totals.main_count =
+        Number(totals.main_count) +
+        (commission.source_type === "main" ? 1 : 0)
+      totals.override_count =
+        Number(totals.override_count) +
+        (commission.source_type === "override" ? 1 : 0)
+
+      return totals
+    },
+    {
+      total_commissions: 0,
+      total_amount: 0,
+      total_eligible: 0,
+      total_released: 0,
+      total_remaining: 0,
+      total_cash_advance_deduction: 0,
+      active_count: 0,
+      partially_released_count: 0,
+      released_count: 0,
+      cancelled_count: 0,
+      main_count: 0,
+      override_count: 0,
+    }
+  )
+
   const paginatedGroups = paginateRows(filteredGroups, page, rowsPerPage)
 
   const openEditModal = (commission: Commission, providedOverride?: Commission) => {
@@ -938,8 +954,21 @@ const Commissions = () => {
   const renderReleaseMilestonesTable = (
     releases: CommissionRelease[],
     emptyTitle = "No milestones generated"
-  ) => (
-    <TableContainer>
+  ) => {
+    const hasEligibleReleases = releases.some(
+      (release) => release.status === "eligible"
+    )
+
+    return (
+      <div className="space-y-3">
+        {releases.length > 0 && !hasEligibleReleases ? (
+          <Alert
+            variant="info"
+            title="No eligible releases are available for cash advance deductions."
+          />
+        ) : null}
+
+        <TableContainer>
       <table className="w-full text-sm">
         <thead className="bg-slate-50">
           <tr className="border-b border-slate-200">
@@ -1000,15 +1029,17 @@ const Commissions = () => {
                       >
                         Hold
                       </Button>
-                      <Button
-                        disabled={deductMutation.isPending}
-                        onClick={() => {
-                          setDeductReleaseId(release.id)
-                          setDeductData(defaultDeductAdvanceData)
-                        }}
-                      >
-                        Deduct
-                      </Button>
+                      {release.status === "eligible" ? (
+                        <Button
+                          disabled={deductMutation.isPending}
+                          onClick={() => {
+                            setDeductReleaseId(release.id)
+                            setDeductData(defaultDeductAdvanceData)
+                          }}
+                        >
+                          Deduct
+                        </Button>
+                      ) : null}
                       <Button
                         disabled={cancelReleaseMutation.isPending}
                         onClick={() => setCancelReleaseId(release.id)}
@@ -1052,8 +1083,10 @@ const Commissions = () => {
           ) : null}
         </tbody>
       </table>
-    </TableContainer>
-  )
+        </TableContainer>
+      </div>
+    )
+  }
 
   const selectedEditSeller = sellers.find(
     (seller) => Number(seller.id) === Number(editData.seller_id)
@@ -2114,7 +2147,11 @@ const Commissions = () => {
                 Cancel
               </Button>
               <Button
-                disabled={deductMutation.isPending || !deductData.cash_advance_id}
+                disabled={
+                  deductMutation.isPending ||
+                  !deductData.cash_advance_id ||
+                  releaseForDeduction?.status !== "eligible"
+                }
                 onClick={handleDeduct}
                 variant="primary"
               >
@@ -2137,8 +2174,15 @@ const Commissions = () => {
 
             {releaseForDeduction ? (
               <Alert
-                variant="info"
+                variant={releaseForDeduction.status === "eligible" ? "info" : "warning"}
                 title={`Release net amount available: ${formatMoney(releaseForDeduction.net_release_amount)}`}
+              />
+            ) : null}
+
+            {releaseForDeduction && releaseForDeduction.status !== "eligible" ? (
+              <Alert
+                variant="warning"
+                title="Cash advance deductions can only be applied to eligible releases."
               />
             ) : null}
 

@@ -92,7 +92,11 @@ const getPaymentById = async (id) => {
   return rows[0] || null
 }
 
-const recomputeClientUnitBalance = async (connectionOrDb, clientUnitId) => {
+const recomputeClientUnitBalance = async (
+  connectionOrDb,
+  clientUnitId,
+  options = {}
+) => {
   const [clientUnitRows] = await connectionOrDb.query(
     `
     SELECT
@@ -178,7 +182,7 @@ const recomputeClientUnitBalance = async (connectionOrDb, clientUnitId) => {
     )
   }
 
-  await refreshCommissionEligibility(clientUnitId, connectionOrDb)
+  await refreshCommissionEligibility(clientUnitId, connectionOrDb, options)
 
   return {
     totalContractPrice,
@@ -380,12 +384,14 @@ export const createPayment = async (req, res) => {
 
     const balanceSummary = await recomputeClientUnitBalance(
       connection,
-      client_unit_id
+      client_unit_id,
+      { actorRole: req.user.role }
     )
 
     const eligibilitySummary = await refreshCommissionEligibility(
       client_unit_id,
-      connection
+      connection,
+      { actorRole: req.user.role }
     )
 
     await connection.commit()
@@ -539,12 +545,14 @@ export const updatePayment = async (req, res) => {
     for (const affectedClientUnitId of affectedClientUnitIds) {
       const balanceSummary = await recomputeClientUnitBalance(
         connection,
-        affectedClientUnitId
+        affectedClientUnitId,
+        { actorRole: req.user.role }
       )
 
       const eligibilitySummary = await refreshCommissionEligibility(
         affectedClientUnitId,
-        connection
+        connection,
+        { actorRole: req.user.role }
       )
 
       balanceSummaries.push({
@@ -618,12 +626,14 @@ export const deletePayment = async (req, res) => {
 
     const balanceSummary = await recomputeClientUnitBalance(
       connection,
-      existingPayment.client_unit_id
+      existingPayment.client_unit_id,
+      { actorRole: req.user.role }
     )
 
     const eligibilitySummary = await refreshCommissionEligibility(
       existingPayment.client_unit_id,
-      connection
+      connection,
+      { actorRole: req.user.role }
     )
 
     await connection.commit()

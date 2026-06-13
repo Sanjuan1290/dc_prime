@@ -389,23 +389,17 @@ const Payments = () => {
     (unit) => Number(unit.id) === Number(editFormData.client_unit_id)
   )
 
-  const totalCollected = useMemo(() => {
-    return filteredPayments
-      .filter((payment) => payment.status === "verified")
-      .reduce((sum, payment) => sum + Number(payment.amount || 0), 0)
-  }, [filteredPayments])
+  const totalCollected = filteredPayments
+    .filter((payment) => payment.status === "verified")
+    .reduce((sum, payment) => sum + Number(payment.amount || 0), 0)
 
-  const pendingTotal = useMemo(() => {
-    return filteredPayments
-      .filter((payment) => payment.status === "pending")
-      .reduce((sum, payment) => sum + Number(payment.amount || 0), 0)
-  }, [filteredPayments])
+  const pendingTotal = filteredPayments
+    .filter((payment) => payment.status === "pending")
+    .reduce((sum, payment) => sum + Number(payment.amount || 0), 0)
 
-  const rejectedTotal = useMemo(() => {
-    return filteredPayments
-      .filter((payment) => payment.status === "rejected")
-      .reduce((sum, payment) => sum + Number(payment.amount || 0), 0)
-  }, [filteredPayments])
+  const rejectedTotal = filteredPayments
+    .filter((payment) => payment.status === "rejected")
+    .reduce((sum, payment) => sum + Number(payment.amount || 0), 0)
 
   const openAddModal = () => {
     setFormData(emptyFormData)

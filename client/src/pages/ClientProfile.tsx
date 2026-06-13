@@ -500,6 +500,24 @@ const documentStatusOptions = [
   { label: "Rejected", value: "rejected" },
 ]
 
+const documentStatusTransitions: Record<string, string[]> = {
+  not_submitted: ["submitted"],
+  submitted: ["approved", "rejected"],
+  rejected: ["submitted"],
+  approved: ["submitted", "not_submitted"],
+}
+
+const getDocumentStatusOptions = (status: string) => {
+  const allowedStatuses = new Set([
+    status,
+    ...(documentStatusTransitions[status] || []),
+  ])
+
+  return documentStatusOptions.filter((option) =>
+    allowedStatuses.has(option.value)
+  )
+}
+
 const countValue = (value: number | string | null | undefined) => {
   return Number(value || 0)
 }
@@ -1945,6 +1963,17 @@ const ClientProfile = () => {
             <Alert variant="error" title="Failed to load document checklist" />
           ) : null}
 
+          {updateDocumentMutation.error ? (
+            <Alert
+              variant="error"
+              title={
+                updateDocumentMutation.error instanceof Error
+                  ? updateDocumentMutation.error.message
+                  : "Failed to update document status"
+              }
+            />
+          ) : null}
+
           {!areDocumentsLoading && clientDocuments.length === 0 ? (
             <EmptyState
               title="No checklist found"
@@ -2056,7 +2085,7 @@ const ClientProfile = () => {
                               )
                             }
                           >
-                            {documentStatusOptions.map((option) => (
+                            {getDocumentStatusOptions(document.status).map((option) => (
                               <option key={option.value} value={option.value}>
                                 {option.label}
                               </option>

@@ -55,7 +55,11 @@ const computeListingAmounts = ({
   }
 }
 
-const recomputeListingClientUnitBalances = async (connectionOrDb, listingId) => {
+const recomputeListingClientUnitBalances = async (
+  connectionOrDb,
+  listingId,
+  options = {}
+) => {
   const [clientUnits] = await connectionOrDb.query(
     `
     SELECT
@@ -156,7 +160,8 @@ const recomputeListingClientUnitBalances = async (connectionOrDb, listingId) => 
 
     const eligibilitySummary = await refreshCommissionEligibility(
       clientUnit.id,
-      connectionOrDb
+      connectionOrDb,
+      options
     )
 
     balanceSummaries.push({
@@ -699,7 +704,9 @@ export const updateListing = async (req, res) => {
       })
     }
 
-    balanceSummaries = await recomputeListingClientUnitBalances(connection, id)
+    balanceSummaries = await recomputeListingClientUnitBalances(connection, id, {
+      actorRole: req.user.role,
+    })
 
     await connection.commit()
   } catch (error) {

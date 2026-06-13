@@ -10,6 +10,21 @@ const allowedClientDocumentStatuses = [
   'rejected',
 ]
 
+const allowedClientDocumentStatusTransitions = {
+  not_submitted: ['submitted'],
+  submitted: ['approved', 'rejected'],
+  rejected: ['submitted'],
+  approved: ['submitted', 'not_submitted'],
+}
+
+const canTransitionClientDocumentStatus = (currentStatus, nextStatus) => {
+  if (currentStatus === nextStatus) return true
+
+  return (
+    allowedClientDocumentStatusTransitions[currentStatus] || []
+  ).includes(nextStatus)
+}
+
 const isMissing = (value) => {
   return value === undefined || value === null || value === ''
 }
@@ -403,6 +418,12 @@ export const updateClientDocumentStatus = async (req, res) => {
     })
   }
 
+  if (!canTransitionClientDocumentStatus(existingDocument.status, status)) {
+    return res.status(400).json({
+      message: `Invalid document status transition from ${existingDocument.status} to ${status}. Submit the document before approving or rejecting it.`,
+    })
+  }
+
   const nextFileUrl =
     file_url !== undefined
       ? nullableValue(file_url)
@@ -437,7 +458,8 @@ export const updateClientDocumentStatus = async (req, res) => {
 
     const eligibilitySummary = await refreshCommissionEligibility(
       existingDocument.client_unit_id,
-      connection
+      connection,
+      { actorRole: req.user.role }
     )
 
     await connection.commit()
@@ -509,7 +531,11 @@ export const applyExistingReusableDocuments = async (req, res) => {
       ) reusable_source
         ON reusable_source.document_id = target.document_id
       SET
-        target.status = reusable_source.source_status,
+        target.status = CASE
+          WHEN target.status = 'approved' THEN 'approved'
+          WHEN target.status = 'submitted' THEN reusable_source.source_status
+          ELSE 'submitted'
+        END,
         target.reviewed_by = ?,
         target.reviewed_at = NOW()
       WHERE target.client_unit_id = ?
@@ -524,7 +550,8 @@ export const applyExistingReusableDocuments = async (req, res) => {
 
     const eligibilitySummary = await refreshCommissionEligibility(
       clientUnitId,
-      connection
+      connection,
+      { actorRole: req.user.role }
     )
 
     await connection.commit()

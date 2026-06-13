@@ -323,6 +323,7 @@ const createReservationCommissions = async ({
   cashKaliwaanAmount,
   cashKaliwaanDate,
   cashKaliwaanNotes,
+  actorRole,
 }) => {
   const createdCommissions = []
 
@@ -340,6 +341,7 @@ const createReservationCommissions = async ({
     parentCommissionId: null,
     saleType,
     notes: `Auto-generated from reservation of ${listing.unit_id}`,
+    actorRole,
   })
 
   if (mainCommission) {
@@ -364,6 +366,7 @@ const createReservationCommissions = async ({
       cashKaliwaanNotes,
       overrideNotes,
       notes: `Optional override commission from reservation of ${listing.unit_id}`,
+      actorRole,
     })
 
     if (overrideCommission) {
@@ -868,6 +871,7 @@ export const reserveListing = async (req, res) => {
       cashKaliwaanAmount: cash_kaliwaan_amount,
       cashKaliwaanDate: cash_kaliwaan_date,
       cashKaliwaanNotes: cash_kaliwaan_notes,
+      actorRole: req.user.role,
     })
 
     await connection.commit()
@@ -1104,10 +1108,13 @@ export const updateClientUnit = async (req, res) => {
         cashKaliwaanAmount: 0,
         cashKaliwaanDate: null,
         cashKaliwaanNotes: null,
+        actorRole: req.user.role,
       })
     }
 
-    await refreshCommissionEligibility(id, connection)
+    await refreshCommissionEligibility(id, connection, {
+      actorRole: req.user.role,
+    })
 
     await connection.commit()
 
@@ -1285,10 +1292,13 @@ export const changeClientUnitListing = async (req, res) => {
         parentCommissionId: null,
         saleType: 'distributed',
         notes: `Regenerated after unit change from ${oldListing?.unit_id || 'old unit'} to ${newListing.unit_id}`,
+        actorRole: req.user.role,
       })
     }
 
-    await refreshCommissionEligibility(id, connection)
+    await refreshCommissionEligibility(id, connection, {
+      actorRole: req.user.role,
+    })
 
     await connection.commit()
 
