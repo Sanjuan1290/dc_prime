@@ -21,6 +21,7 @@ import auditLogsRouter from './routers/auditLogs.router.js'
 import settingsRouter from './routers/settings.router.js'
 import useCurrentUser from './utils/useCurrentUser.js'
 import cashAdvancesRouter from './routers/cashAdvances.router.js'
+import printFormsRouter from './routers/printForms.router.js'
 
 const app = express()
 
@@ -56,6 +57,7 @@ app.use('/api/v1', reportsRouter)
 app.use('/api/v1', auditLogsRouter)
 app.use('/api/v1', settingsRouter)
 app.use('/api/v1', cashAdvancesRouter)
+app.use('/api/v1', printFormsRouter)
 
 app.use((req, res) => {
   res.status(404).json({

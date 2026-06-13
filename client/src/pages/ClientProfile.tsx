@@ -7,6 +7,7 @@ import {
   FiFileText,
   FiHome,
   FiPlus,
+  FiPrinter,
   FiRefreshCw,
   FiUser,
 } from "react-icons/fi"
@@ -2420,6 +2421,30 @@ const ClientProfile = () => {
 
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-2">
+                        <Button
+                          icon={<FiPrinter />}
+                          onClick={() =>
+                            window.open(
+                              `/client/${clientId}/units/${unit.id}/offer-to-buy/print`,
+                              "_blank",
+                              "noopener,noreferrer"
+                            )
+                          }
+                        >
+                          Offer to Buy
+                        </Button>
+                        <Button
+                          icon={<FiPrinter />}
+                          onClick={() =>
+                            window.open(
+                              `/client/${clientId}/units/${unit.id}/statement-of-account/print`,
+                              "_blank",
+                              "noopener,noreferrer"
+                            )
+                          }
+                        >
+                          SOA
+                        </Button>
                         <Button
                           icon={<FiEdit2 />}
                           onClick={() => openEditUnitModal(unit)}

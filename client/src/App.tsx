@@ -18,6 +18,8 @@ import Employees from "./pages/Employees"
 import Attendance from "./pages/Attendance"
 import NotFound from "./pages/NotFound"
 import CashAdvances from "./pages/CashAdvances"
+import OfferToBuyPrint from "./pages/OfferToBuyPrint"
+import StatementOfAccountPrint from "./pages/StatementOfAccountPrint"
 
 
 const App = () => {
@@ -44,6 +46,9 @@ const App = () => {
         <Route path="employees" element={<Employees/>} />
         <Route path="attendance" element={<Attendance/>} />
       </Route>
+
+      <Route path="client/:clientId/units/:clientUnitId/offer-to-buy/print" element={<OfferToBuyPrint />} />
+      <Route path="client/:clientId/units/:clientUnitId/statement-of-account/print" element={<StatementOfAccountPrint />} />
 
       <Route path="*" element={<NotFound />}/>
     </>
