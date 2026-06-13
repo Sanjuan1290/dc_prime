@@ -161,7 +161,7 @@ const StatementOfAccountPrint = () => {
               <th>Penalty</th>
               <th>Date Paid</th>
               <th>Amount Paid</th>
-              <th>Reference</th>
+              <th>Reference ID</th>
               <th>Running Balance</th>
             </tr>
           </thead>
@@ -240,3 +240,4 @@ const printStyles = `
 `
 
 export default StatementOfAccountPrint
+

@@ -39,6 +39,12 @@ type AccreditedSeller = {
   status: SellerStatus;
   accreditation_date: string | null;
   commission_rate: number | string | null;
+  commission_pool_rate?: number | string | null;
+  personal_commission_rate?: number | string | null;
+  override_commission_rate?: number | string | null;
+  max_downline_rate?: number | string | null;
+  rate_set_by_name?: string | null;
+  rate_updated_at?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -54,6 +60,10 @@ type SellerFormData = {
   status: SellerStatus;
   accreditation_date: string;
   commission_rate: string;
+  commission_pool_rate: string;
+  personal_commission_rate: string;
+  override_commission_rate: string;
+  max_downline_rate: string;
 };
 
 type SellersResponse = {
@@ -73,6 +83,10 @@ const emptyFormData: SellerFormData = {
   status: "active",
   accreditation_date: "",
   commission_rate: "",
+  commission_pool_rate: "",
+  personal_commission_rate: "",
+  override_commission_rate: "",
+  max_downline_rate: "",
 };
 
 const sellerRoles = ["broker_network_manager", "broker", "manager", "agent"];
@@ -187,6 +201,22 @@ const formatSellerPayload = (sellerData: SellerFormData) => {
       sellerData.commission_rate === ""
         ? null
         : Number(sellerData.commission_rate),
+    commission_pool_rate:
+      sellerData.commission_pool_rate === ""
+        ? null
+        : Number(sellerData.commission_pool_rate),
+    personal_commission_rate:
+      sellerData.personal_commission_rate === ""
+        ? null
+        : Number(sellerData.personal_commission_rate),
+    override_commission_rate:
+      sellerData.override_commission_rate === ""
+        ? null
+        : Number(sellerData.override_commission_rate),
+    max_downline_rate:
+      sellerData.max_downline_rate === ""
+        ? null
+        : Number(sellerData.max_downline_rate),
   };
 };
 
@@ -226,6 +256,22 @@ const sellerToFormData = (seller: AccreditedSeller): SellerFormData => {
       seller.commission_rate === null || seller.commission_rate === undefined
         ? ""
         : String(seller.commission_rate),
+    commission_pool_rate:
+      seller.commission_pool_rate === null || seller.commission_pool_rate === undefined
+        ? ""
+        : String(seller.commission_pool_rate),
+    personal_commission_rate:
+      seller.personal_commission_rate === null || seller.personal_commission_rate === undefined
+        ? ""
+        : String(seller.personal_commission_rate),
+    override_commission_rate:
+      seller.override_commission_rate === null || seller.override_commission_rate === undefined
+        ? ""
+        : String(seller.override_commission_rate),
+    max_downline_rate:
+      seller.max_downline_rate === null || seller.max_downline_rate === undefined
+        ? ""
+        : String(seller.max_downline_rate),
   };
 };
 
@@ -346,9 +392,10 @@ const AccredittedSellers = () => {
   const withRateCount = useMemo(() => {
     return sellers.filter(
       (seller) =>
-        seller.commission_rate !== null &&
-        seller.commission_rate !== undefined &&
-        seller.commission_rate !== "",
+        (seller.commission_pool_rate !== null && seller.commission_pool_rate !== undefined && seller.commission_pool_rate !== "") ||
+        (seller.personal_commission_rate !== null && seller.personal_commission_rate !== undefined && seller.personal_commission_rate !== "") ||
+        (seller.override_commission_rate !== null && seller.override_commission_rate !== undefined && seller.override_commission_rate !== "") ||
+        (seller.commission_rate !== null && seller.commission_rate !== undefined && seller.commission_rate !== ""),
     ).length;
   }, [sellers]);
 
@@ -395,7 +442,7 @@ const AccredittedSellers = () => {
       <PageHeader
         icon={<FiUsers />}
         title="Accredited Sellers"
-        subtitle="Manage accredited brokers, agents, reporting lines, and default commission rates."
+        subtitle="Manage seller hierarchy, reporting lines, and commission pool splits."
         actions={
           <Button icon={<FiPlus />} onClick={openAddModal} variant="primary">
             Add Seller
@@ -412,7 +459,7 @@ const AccredittedSellers = () => {
         <StatCard label="Total Sellers" value={sellers.length} />
         <StatCard label="Active" value={activeCount} />
         <StatCard label="Inactive" value={inactiveCount} />
-        <StatCard label="With Default Rate" value={withRateCount} />
+        <StatCard label="With Rates" value={withRateCount} />
       </div>
 
       <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-4">
@@ -476,7 +523,9 @@ const AccredittedSellers = () => {
               <th className="px-4 py-3 text-left">Contact</th>
               <th className="px-4 py-3 text-left">Role</th>
               <th className="px-4 py-3 text-left">Reports Under</th>
-              <th className="px-4 py-3 text-left">Default Rate</th>
+              <th className="px-4 py-3 text-left">Pool</th>
+              <th className="px-4 py-3 text-left">Personal</th>
+              <th className="px-4 py-3 text-left">Override</th>
               <th className="px-4 py-3 text-left">Accreditation Date</th>
               <th className="px-4 py-3 text-left">Status</th>
               <th className="px-4 py-3 text-left">Created</th>
@@ -512,7 +561,15 @@ const AccredittedSellers = () => {
                 </td>
 
                 <td className="px-4 py-3 font-semibold text-slate-900">
-                  {getCommissionRateDisplay(seller.commission_rate)}
+                  {getCommissionRateDisplay(seller.commission_pool_rate || null)}
+                </td>
+
+                <td className="px-4 py-3 font-semibold text-slate-900">
+                  {getCommissionRateDisplay(seller.personal_commission_rate || seller.commission_rate)}
+                </td>
+
+                <td className="px-4 py-3 font-semibold text-slate-900">
+                  {getCommissionRateDisplay(seller.override_commission_rate || null)}
                 </td>
 
                 <td className="px-4 py-3 text-slate-600">
@@ -549,7 +606,7 @@ const AccredittedSellers = () => {
 
             {paginatedSellers.length === 0 ? (
               <tr>
-                <td colSpan={9}>
+                <td colSpan={11}>
                   <EmptyState
                     title="No sellers found"
                     description="Add accredited sellers so reservations can generate commissions."
@@ -711,7 +768,7 @@ const SellerFormModal = ({
         </Select>
 
         <Input
-          label="Default Commission Rate (%)"
+          label="Legacy Default Rate (%)"
           type="number"
           min={0}
           max={100}
@@ -723,7 +780,55 @@ const SellerFormModal = ({
               commission_rate: event.target.value,
             })
           }
-          placeholder="Optional. Example: 5"
+          placeholder="Fallback only"
+        />
+
+        <Input
+          label="Commission Pool Rate (%)"
+          type="number"
+          min={0}
+          max={100}
+          step="0.01"
+          value={formData.commission_pool_rate}
+          onChange={(event) =>
+            setFormData({
+              ...formData,
+              commission_pool_rate: event.target.value,
+            })
+          }
+          placeholder="Broker/BNM pool. Example: 8"
+        />
+
+        <Input
+          label="Personal Commission Rate (%)"
+          type="number"
+          min={0}
+          max={100}
+          step="0.01"
+          value={formData.personal_commission_rate}
+          onChange={(event) =>
+            setFormData({
+              ...formData,
+              personal_commission_rate: event.target.value,
+            })
+          }
+          placeholder="Seller's own sale/main rate"
+        />
+
+        <Input
+          label="Override Commission Rate (%)"
+          type="number"
+          min={0}
+          max={100}
+          step="0.01"
+          value={formData.override_commission_rate}
+          onChange={(event) =>
+            setFormData({
+              ...formData,
+              override_commission_rate: event.target.value,
+            })
+          }
+          placeholder="Manager override. Example: 2"
         />
 
         <Input
@@ -813,8 +918,7 @@ const SellerFormModal = ({
         </div>
 
         <p className="mt-3 text-sm text-slate-500">
-          Changing the default commission rate syncs open commissions that have
-          no released payout yet.
+          Admin/super admin sets the main pool. Sellers can only split rates inside their allowed pool later. Distributed reservations now generate hierarchy commissions automatically.
         </p>
       </div>
     </Modal>
@@ -822,3 +926,4 @@ const SellerFormModal = ({
 };
 
 export default AccredittedSellers;
+

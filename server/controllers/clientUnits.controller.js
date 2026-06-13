@@ -3,6 +3,7 @@ import { createAuditLog } from '../utils/createAuditLog.js'
 import { getClientIp } from '../utils/getClientIp.js'
 import {
   createAutoCommissionForClientUnit,
+  createHierarchyCommissionsForClientUnit,
   refreshCommissionEligibility,
 } from './commissions.controller.js'
 
@@ -612,65 +613,45 @@ const createReservationCommissions = async ({
   sellerId,
   mainRateOverride,
   saleType,
-  overrideSellerId,
-  overrideRate,
-  overrideNotes,
   cashKaliwaanAmount,
   cashKaliwaanDate,
   cashKaliwaanNotes,
   actorRole,
 }) => {
-  const createdCommissions = []
-
   if (isMissing(sellerId)) {
-    return createdCommissions
+    return []
   }
 
-  const mainCommission = await createAutoCommissionForClientUnit({
-    connection,
-    clientUnitId,
-    sellerId,
-    rateOverride: mainRateOverride,
-    commissionRole: null,
-    sourceType: 'main',
-    parentCommissionId: null,
-    saleType,
-    notes: `Auto-generated from reservation of ${listing.unit_id}`,
-    actorRole,
-  })
-
-  if (mainCommission) {
-    createdCommissions.push(mainCommission)
-  }
-
-  const hasOverrideSeller = !isMissing(overrideSellerId)
-  const hasOverrideRate = !isMissing(overrideRate)
-
-  if (hasOverrideSeller && hasOverrideRate) {
-    const overrideCommission = await createAutoCommissionForClientUnit({
+  if (saleType === 'direct') {
+    const mainCommission = await createAutoCommissionForClientUnit({
       connection,
       clientUnitId,
-      sellerId: overrideSellerId,
-      rateOverride: overrideRate,
-      commissionRole: 'override',
-      sourceType: 'override',
-      parentCommissionId: mainCommission?.commissionId || null,
+      sellerId,
+      rateOverride: mainRateOverride,
+      commissionRole: null,
+      sourceType: 'main',
+      parentCommissionId: null,
       saleType,
       cashKaliwaanAmount,
       cashKaliwaanDate,
       cashKaliwaanNotes,
-      overrideNotes,
-      notes: `Optional override commission from reservation of ${listing.unit_id}`,
+      notes: `Direct commission from reservation of ${listing.unit_id}`,
       actorRole,
     })
 
-    if (overrideCommission) {
-      createdCommissions.push(overrideCommission)
-    }
+    return mainCommission ? [mainCommission] : []
   }
 
-  return createdCommissions
+  return createHierarchyCommissionsForClientUnit({
+    connection,
+    clientUnitId,
+    sellerId,
+    saleType: 'distributed',
+    notes: `Auto-generated hierarchy commission from reservation of ${listing.unit_id}`,
+    actorRole,
+  })
 }
+
 
 export const getClientUnits = async (req, res) => {
   const { search, status, client_id } = req.query
@@ -1010,20 +991,6 @@ export const reserveListing = async (req, res) => {
     })
   }
 
-  const hasOverrideSeller = !isMissing(override_seller_id)
-  const hasOverrideRate = !isMissing(override_rate)
-
-  if (hasOverrideSeller && !hasOverrideRate) {
-    return res.status(400).json({
-      message: 'Override rate is required when override seller is selected',
-    })
-  }
-
-  if (!hasOverrideSeller && hasOverrideRate) {
-    return res.status(400).json({
-      message: 'Override seller is required when override rate is entered',
-    })
-  }
 
   const finalSaleType = validateSaleType(sale_type)
   const finalModeOfPayment = mode_of_payment
@@ -1100,23 +1067,6 @@ export const reserveListing = async (req, res) => {
       })
     }
 
-    if (hasOverrideSeller) {
-      const overrideSeller = await getSellerById(connection, override_seller_id)
-
-      if (!overrideSeller) {
-        await connection.rollback()
-        return res.status(404).json({
-          message: 'Override seller not found or inactive',
-        })
-      }
-
-      if (Number(override_seller_id) === Number(finalSellerId)) {
-        await connection.rollback()
-        return res.status(400).json({
-          message: 'Override seller must be different from main seller',
-        })
-      }
-    }
 
     const [duplicateRows] = await connection.query(
       `
@@ -1207,9 +1157,6 @@ export const reserveListing = async (req, res) => {
       sellerId: finalSellerId,
       mainRateOverride: main_commission_rate_override,
       saleType: finalSaleType,
-      overrideSellerId: override_seller_id,
-      overrideRate: override_rate,
-      overrideNotes: override_notes,
       cashKaliwaanAmount: cash_kaliwaan_amount,
       cashKaliwaanDate: cash_kaliwaan_date,
       cashKaliwaanNotes: cash_kaliwaan_notes,
@@ -1296,20 +1243,6 @@ export const updateClientUnit = async (req, res) => {
     })
   }
 
-  const hasOverrideSeller = !isMissing(override_seller_id)
-  const hasOverrideRate = !isMissing(override_rate)
-
-  if (hasOverrideSeller && !hasOverrideRate) {
-    return res.status(400).json({
-      message: 'Override rate is required when override seller is selected',
-    })
-  }
-
-  if (!hasOverrideSeller && hasOverrideRate) {
-    return res.status(400).json({
-      message: 'Override seller is required when override rate is entered',
-    })
-  }
 
   const finalSellerId = !isMissing(seller_id)
     ? seller_id
@@ -1337,23 +1270,6 @@ export const updateClientUnit = async (req, res) => {
       }
     }
 
-    if (hasOverrideSeller) {
-      const overrideSeller = await getSellerById(connection, override_seller_id)
-
-      if (!overrideSeller) {
-        await connection.rollback()
-        return res.status(404).json({
-          message: 'Override seller not found or inactive',
-        })
-      }
-
-      if (Number(override_seller_id) === Number(finalSellerId)) {
-        await connection.rollback()
-        return res.status(400).json({
-          message: 'Override seller must be different from main seller',
-        })
-      }
-    }
 
     const [releasedRows] = await connection.query(
       `
@@ -1453,12 +1369,6 @@ export const updateClientUnit = async (req, res) => {
         sellerId: finalSellerId,
         mainRateOverride: main_commission_rate_override,
         saleType: finalSaleType,
-        overrideSellerId:
-          finalSaleType === 'distributed' ? override_seller_id : null,
-        overrideRate:
-          finalSaleType === 'distributed' ? override_rate : null,
-        overrideNotes:
-          finalSaleType === 'distributed' ? override_notes : null,
         cashKaliwaanAmount: 0,
         cashKaliwaanDate: null,
         cashKaliwaanNotes: null,
@@ -1853,3 +1763,4 @@ export const deleteClientUnit = async (req, res) => {
     connection.release()
   }
 }
+

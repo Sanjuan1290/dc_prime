@@ -124,6 +124,7 @@ const fetchPrintData = async (clientUnitId) => {
       amount,
       payment_type,
       payment_method,
+      reference_id,
       payment_date,
       status,
       verified_at,
@@ -220,7 +221,7 @@ const buildSchedule = ({ unit, payments }) => {
       date_paid: payment ? formatDateOnly(payment.payment_date) : null,
       amount_paid: payment ? normalizeMoney(payment.amount) : null,
       reference: payment
-        ? payment.payment_method || payment.payment_type || `Payment #${payment.id}`
+        ? payment.reference_id || payment.payment_method || payment.payment_type || `Payment #${payment.id}`
         : null,
       running_balance: normalizeMoney(Math.max(totalAmountPayable - cumulativePaid, 0)),
     }
@@ -307,3 +308,4 @@ export const logClientUnitFormPrint = async (req, res) => {
     },
   })
 }
+

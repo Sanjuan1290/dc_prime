@@ -44,6 +44,7 @@ type Payment = {
   amount: number | string
   payment_type: string | null
   payment_method: string | null
+  reference_id?: string | null
   payment_date: string
   status: PaymentStatus
   verified_by?: number | null
@@ -80,6 +81,7 @@ type PaymentFormData = {
   amount: string
   payment_type: string
   payment_method: string
+  reference_id: string
   payment_date: string
   status: PaymentStatus
 }
@@ -99,6 +101,7 @@ const emptyFormData: PaymentFormData = {
   amount: "",
   payment_type: "monthly",
   payment_method: "cash",
+  reference_id: "",
   payment_date: getLocalDate(),
   status: "pending",
 }
@@ -207,6 +210,7 @@ const formatPaymentPayload = (paymentData: PaymentFormData) => {
     amount: Number(paymentData.amount || 0),
     payment_type: paymentData.payment_type || null,
     payment_method: paymentData.payment_method || null,
+    reference_id: paymentData.reference_id.trim() || null,
     payment_date: paymentData.payment_date || getLocalDate(),
     status: paymentData.status || "pending",
   }
@@ -218,6 +222,7 @@ const paymentToFormData = (payment: Payment): PaymentFormData => {
     amount: String(payment.amount || ""),
     payment_type: payment.payment_type || "monthly",
     payment_method: payment.payment_method || "cash",
+    reference_id: payment.reference_id || "",
     payment_date: payment.payment_date
       ? payment.payment_date.slice(0, 10)
       : getLocalDate(),
@@ -329,6 +334,7 @@ const Payments = () => {
       payment.project_name.toLowerCase().includes(search) ||
       (payment.payment_type || "").toLowerCase().includes(search) ||
       (payment.payment_method || "").toLowerCase().includes(search) ||
+      (payment.reference_id || "").toLowerCase().includes(search) ||
       (payment.status || "").toLowerCase().includes(search)
 
     const matchesType =
@@ -569,6 +575,7 @@ const Payments = () => {
               <th className="px-4 py-3 text-left">Amount</th>
               <th className="px-4 py-3 text-left">Type</th>
               <th className="px-4 py-3 text-left">Method</th>
+              <th className="px-4 py-3 text-left">Reference ID</th>
               <th className="px-4 py-3 text-left">Payment Date</th>
               <th className="px-4 py-3 text-left">Verified By</th>
               <th className="px-4 py-3 text-left">Status</th>
@@ -596,6 +603,9 @@ const Payments = () => {
                 </td>
                 <td className="px-4 py-3 text-slate-600">
                   {formatText(payment.payment_method)}
+                </td>
+                <td className="px-4 py-3 text-slate-600">
+                  {payment.reference_id || "-"}
                 </td>
                 <td className="px-4 py-3 text-slate-600">
                   {formatDate(payment.payment_date)}
@@ -635,7 +645,7 @@ const Payments = () => {
 
             {paginatedPayments.length === 0 ? (
               <tr>
-                <td colSpan={10}>
+                <td colSpan={11}>
                   <EmptyState title="No payments found" />
                 </td>
               </tr>
@@ -890,6 +900,18 @@ const PaymentModal = ({
             ))}
           </Select>
 
+          <Input
+            label="Reference ID / OR No. / Transaction No."
+            value={formData.reference_id}
+            onChange={(e) =>
+              setFormData({
+                ...formData,
+                reference_id: e.target.value,
+              })
+            }
+            placeholder="Optional for cash; recommended for bank, GCash, check"
+          />
+
           <Select
             label="Status"
             value={formData.status}
@@ -935,3 +957,4 @@ const MiniDetail = ({
 }
 
 export default Payments
+

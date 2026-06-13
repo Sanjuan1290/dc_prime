@@ -23,7 +23,47 @@ const nullableValue = (value) => {
 
 const normalizeRate = (value) => {
   if (isMissing(value)) return null
-  return Number(Number(value).toFixed(2))
+  const parsed = Number(value)
+  if (Number.isNaN(parsed)) return null
+  return Number(parsed.toFixed(2))
+}
+
+const validateRateRange = (rate, label) => {
+  if (rate === null) return null
+  if (rate < 0 || rate > 100) {
+    return `${label} must be between 0 and 100`
+  }
+  return null
+}
+
+const validateCommissionPoolFields = ({
+  sellerRole,
+  commissionPoolRate,
+  personalCommissionRate,
+  overrideCommissionRate,
+}) => {
+  const errors = [
+    validateRateRange(commissionPoolRate, 'Commission pool rate'),
+    validateRateRange(personalCommissionRate, 'Personal commission rate'),
+    validateRateRange(overrideCommissionRate, 'Override commission rate'),
+  ].filter(Boolean)
+
+  if (sellerRole === 'agent' && commissionPoolRate !== null) {
+    errors.push('Agents cannot have a commission pool rate')
+  }
+
+  if (sellerRole === 'broker_network_manager' && overrideCommissionRate !== null) {
+    errors.push('Broker network managers should use commission pool rate, not override rate')
+  }
+
+  if (errors.length > 0) {
+    return {
+      isValid: false,
+      message: errors.join('. '),
+    }
+  }
+
+  return { isValid: true }
 }
 
 const normalizeMoney = (value) => {
@@ -45,6 +85,14 @@ const sellerFields = `
   seller.status,
   seller.accreditation_date,
   seller.commission_rate,
+  seller.commission_pool_rate,
+  seller.personal_commission_rate,
+  seller.override_commission_rate,
+  seller.residual_commission_rate,
+  seller.max_downline_rate,
+  seller.rate_set_by,
+  rateSetter.full_name AS rate_set_by_name,
+  seller.rate_updated_at,
   seller.created_at,
   seller.updated_at
 `
@@ -53,6 +101,7 @@ const sellerJoins = `
   FROM accredited_sellers seller
   LEFT JOIN users user ON user.id = seller.user_id
   LEFT JOIN accredited_sellers parent ON parent.id = seller.parent_seller_id
+  LEFT JOIN users rateSetter ON rateSetter.id = seller.rate_set_by
 `
 
 const getSellerById = async (sellerId, connectionOrDb = db) => {
@@ -298,7 +347,6 @@ export const getAccreditedSeller = async (req, res) => {
 
 export const createAccreditedSeller = async (req, res) => {
   const {
-    user_id,
     full_name,
     email,
     contact_no,
@@ -308,6 +356,10 @@ export const createAccreditedSeller = async (req, res) => {
     status,
     accreditation_date,
     commission_rate,
+    commission_pool_rate,
+    personal_commission_rate,
+    override_commission_rate,
+    max_downline_rate,
   } = req.body
 
   if (isMissing(full_name)) {
@@ -343,6 +395,24 @@ export const createAccreditedSeller = async (req, res) => {
     })
   }
 
+  const finalCommissionPoolRate = normalizeRate(commission_pool_rate)
+  const finalPersonalCommissionRate = normalizeRate(personal_commission_rate)
+  const finalOverrideCommissionRate = normalizeRate(override_commission_rate)
+  const finalMaxDownlineRate = normalizeRate(max_downline_rate)
+
+  const rateValidation = validateCommissionPoolFields({
+    sellerRole: finalSellerRole,
+    commissionPoolRate: finalCommissionPoolRate,
+    personalCommissionRate: finalPersonalCommissionRate,
+    overrideCommissionRate: finalOverrideCommissionRate,
+  })
+
+  if (!rateValidation.isValid) {
+    return res.status(400).json({
+      message: rateValidation.message,
+    })
+  }
+
   const connection = await db.getConnection()
 
   try {
@@ -360,8 +430,14 @@ export const createAccreditedSeller = async (req, res) => {
         custom_reports_under,
         status,
         accreditation_date,
-        commission_rate
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        commission_rate,
+        commission_pool_rate,
+        personal_commission_rate,
+        override_commission_rate,
+        max_downline_rate,
+        rate_set_by,
+        rate_updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
       `,
       [
         null,
@@ -374,6 +450,11 @@ export const createAccreditedSeller = async (req, res) => {
         finalStatus,
         nullableValue(accreditation_date),
         normalizeRate(commission_rate),
+        finalCommissionPoolRate,
+        finalPersonalCommissionRate,
+        finalOverrideCommissionRate,
+        finalMaxDownlineRate,
+        req.user?.id || null,
       ]
     )
 
@@ -406,7 +487,6 @@ export const updateAccreditedSeller = async (req, res) => {
   const { id } = req.params
 
   const {
-    user_id,
     full_name,
     email,
     contact_no,
@@ -416,6 +496,10 @@ export const updateAccreditedSeller = async (req, res) => {
     status,
     accreditation_date,
     commission_rate,
+    commission_pool_rate,
+    personal_commission_rate,
+    override_commission_rate,
+    max_downline_rate,
   } = req.body
 
   if (isMissing(full_name)) {
@@ -467,9 +551,25 @@ export const updateAccreditedSeller = async (req, res) => {
       : normalizeRate(existingSeller.commission_rate)
 
   const newRate = normalizeRate(commission_rate)
+  const finalCommissionPoolRate = normalizeRate(commission_pool_rate)
+  const finalPersonalCommissionRate = normalizeRate(personal_commission_rate)
+  const finalOverrideCommissionRate = normalizeRate(override_commission_rate)
+  const finalMaxDownlineRate = normalizeRate(max_downline_rate)
 
-  const rateChanged =
-    String(oldRate ?? '') !== String(newRate ?? '')
+  const rateValidation = validateCommissionPoolFields({
+    sellerRole: finalSellerRole,
+    commissionPoolRate: finalCommissionPoolRate,
+    personalCommissionRate: finalPersonalCommissionRate,
+    overrideCommissionRate: finalOverrideCommissionRate,
+  })
+
+  if (!rateValidation.isValid) {
+    return res.status(400).json({
+      message: rateValidation.message,
+    })
+  }
+
+  const rateChanged = String(oldRate ?? '') !== String(newRate ?? '')
 
   const connection = await db.getConnection()
 
@@ -489,7 +589,13 @@ export const updateAccreditedSeller = async (req, res) => {
         custom_reports_under = ?,
         status = ?,
         accreditation_date = ?,
-        commission_rate = ?
+        commission_rate = ?,
+        commission_pool_rate = ?,
+        personal_commission_rate = ?,
+        override_commission_rate = ?,
+        max_downline_rate = ?,
+        rate_set_by = ?,
+        rate_updated_at = NOW()
       WHERE id = ?
       `,
       [
@@ -503,6 +609,11 @@ export const updateAccreditedSeller = async (req, res) => {
         finalStatus,
         nullableValue(accreditation_date),
         newRate,
+        finalCommissionPoolRate,
+        finalPersonalCommissionRate,
+        finalOverrideCommissionRate,
+        finalMaxDownlineRate,
+        req.user?.id || null,
         id,
       ]
     )
@@ -708,3 +819,4 @@ export const deleteAccreditedSeller = async (req, res) => {
 
   res.status(200).json({ message: 'Accredited seller deleted successfully' })
 }
+

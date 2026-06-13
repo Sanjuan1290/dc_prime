@@ -34,7 +34,7 @@ type UserForm = {
   status: string
 }
 
-const roles = ["super_admin", "admin", "treasury", "broker_network_manager", "broker", "manager", "agent", "client"]
+const roles = ["super_admin", "admin", "broker_network_manager", "broker", "manager", "agent"]
 const statuses = ["active", "inactive"]
 
 const emptyForm: UserForm = {
@@ -219,3 +219,4 @@ const Users = () => {
 }
 
 export default Users
+

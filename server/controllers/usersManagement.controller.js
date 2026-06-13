@@ -6,12 +6,10 @@ import { getClientIp } from '../utils/getClientIp.js'
 const allowedRoles = [
   'super_admin',
   'admin',
-  'treasury',
   'broker_network_manager',
   'broker',
   'manager',
   'agent',
-  'client',
 ]
 
 const isMissing = (value) => value === undefined || value === null || value === ''
@@ -147,3 +145,4 @@ export const linkUserToSeller = async (req, res) => {
 
   res.status(200).json({ message: 'User linked to seller successfully' })
 }
+

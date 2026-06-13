@@ -248,7 +248,12 @@ type Seller = {
   id: number
   full_name: string
   seller_role: string
+  parent_seller_id?: number | null
   commission_rate?: number | string | null
+  commission_pool_rate?: number | string | null
+  personal_commission_rate?: number | string | null
+  override_commission_rate?: number | string | null
+  max_downline_rate?: number | string | null
   reports_under_display?: string | null
 }
 
@@ -704,12 +709,6 @@ const reserveListing = async ({
           ? Number(reserveData.monthly_amortization)
           : null,
       sale_type: reserveData.sale_type,
-      override_seller_id: reserveData.override_seller_id || null,
-      override_rate:
-        reserveData.override_rate === ""
-          ? null
-          : Number(reserveData.override_rate),
-      override_notes: reserveData.override_notes || null,
       cash_kaliwaan_amount:
         reserveData.cash_kaliwaan_amount === ""
           ? 0
@@ -865,18 +864,6 @@ const updateClientUnit = async ({
       mode_of_payment: unitData.mode_of_payment,
       regenerate_commission: unitData.regenerate_commission,
       sale_type: unitData.sale_type,
-      override_seller_id:
-        unitData.sale_type === "distributed" && unitData.override_seller_id
-          ? Number(unitData.override_seller_id)
-          : null,
-      override_rate:
-        unitData.sale_type === "distributed" && unitData.override_rate !== ""
-          ? Number(unitData.override_rate)
-          : null,
-      override_notes:
-        unitData.sale_type === "distributed"
-          ? unitData.override_notes || null
-          : null,
     }),
   })
 
@@ -1362,9 +1349,67 @@ const ClientProfile = () => {
     (seller) => Number(seller.id) === Number(reserveData.seller_id)
   )
 
-  const selectedOverrideSeller = sellers.find(
-    (seller) => Number(seller.id) === Number(reserveData.override_seller_id)
-  )
+  const sellerById = useMemo(() => {
+    return new Map(sellers.map((seller) => [Number(seller.id), seller]))
+  }, [sellers])
+
+  const reserveCommissionPreview = useMemo(() => {
+    if (!selectedMainSeller) return []
+
+    const chain: Seller[] = []
+    let current: Seller | undefined = selectedMainSeller
+    const visited = new Set<number>()
+
+    while (current && !visited.has(Number(current.id)) && chain.length < 10) {
+      visited.add(Number(current.id))
+      chain.push(current)
+      current = current.parent_seller_id
+        ? sellerById.get(Number(current.parent_seller_id))
+        : undefined
+    }
+
+    const personalRate = Number(
+      selectedMainSeller.personal_commission_rate || selectedMainSeller.commission_rate || 0
+    )
+    const manager = chain.find((seller) => seller.seller_role === "manager")
+    const broker = chain.find((seller) => seller.seller_role === "broker")
+    const bnm = chain.find((seller) => seller.seller_role === "broker_network_manager")
+    const rows = [
+      {
+        seller: selectedMainSeller,
+        label: "Main Seller",
+        rate: personalRate,
+      },
+    ]
+
+    let allocatedBelowBroker = personalRate
+
+    if (manager && Number(manager.id) !== Number(selectedMainSeller.id)) {
+      const managerRate = Number(manager.override_commission_rate || 0)
+      if (managerRate > 0) {
+        rows.push({ seller: manager, label: "Manager Override", rate: managerRate })
+        allocatedBelowBroker += managerRate
+      }
+    }
+
+    if (broker && Number(broker.id) !== Number(selectedMainSeller.id)) {
+      const brokerPool = Number(broker.commission_pool_rate || broker.commission_rate || 0)
+      const brokerResidual = Math.max(brokerPool - allocatedBelowBroker, 0)
+      if (brokerResidual > 0) {
+        rows.push({ seller: broker, label: "Broker Residual", rate: brokerResidual })
+      }
+
+      if (bnm) {
+        const bnmPool = Number(bnm.commission_pool_rate || 0)
+        const bnmResidual = Math.max(bnmPool - brokerPool, 0)
+        if (bnmResidual > 0) {
+          rows.push({ seller: bnm, label: "BNM Residual", rate: bnmResidual })
+        }
+      }
+    }
+
+    return rows.filter((row) => Number(row.rate) > 0)
+  }, [selectedMainSeller, sellerById])
 
   const selectedListing = availableListings.find(
     (listing) => Number(listing.id) === Number(reserveData.listing_id)
@@ -2739,12 +2784,6 @@ const ClientProfile = () => {
                   setReserveData({
                     ...reserveData,
                     sale_type: saleType,
-                    override_seller_id:
-                      saleType === "direct" ? "" : reserveData.override_seller_id,
-                    override_rate:
-                      saleType === "direct" ? "" : reserveData.override_rate,
-                    override_notes:
-                      saleType === "direct" ? "" : reserveData.override_notes,
                   })
                 }}
               >
@@ -2923,8 +2962,8 @@ const ClientProfile = () => {
                   <MiniDetail
                     label="Rate"
                     value={
-                      selectedMainSeller.commission_rate
-                        ? `${formatNumber(selectedMainSeller.commission_rate)}%`
+                      selectedMainSeller.personal_commission_rate || selectedMainSeller.commission_rate
+                        ? `${formatNumber(selectedMainSeller.personal_commission_rate || selectedMainSeller.commission_rate)}%`
                         : "-"
                     }
                   />
@@ -2935,83 +2974,37 @@ const ClientProfile = () => {
             {reserveData.sale_type === "distributed" ? (
               <div className="rounded-xl border border-blue-100 bg-blue-50 p-4">
                 <h3 className="text-sm font-bold text-slate-900">
-                  Optional Agent / Override Commission
+                  Automatic Hierarchy Commission Preview
                 </h3>
 
                 <p className="mt-1 text-xs text-slate-600">
-                  Use this if another seller or agent should receive a separate
-                  commission for this unit.
+                  Distributed sales now use the seller hierarchy and saved pool/split rates. Manual override seller/rate is no longer used here.
                 </p>
 
-                <div className="mt-4 grid gap-4 md:grid-cols-2">
-                  <Select
-                    label="Optional Agent / Override Seller"
-                    value={reserveData.override_seller_id}
-                    onChange={(e) =>
-                      setReserveData({
-                        ...reserveData,
-                        override_seller_id: e.target.value
-                          ? Number(e.target.value)
-                          : "",
-                      })
-                    }
-                  >
-                    <option value="">No override seller</option>
-                    {sellers
-                      .filter((seller) => Number(seller.id) !== Number(reserveData.seller_id))
-                      .map((seller) => (
-                        <option key={seller.id} value={seller.id}>
-                          {seller.full_name} - {formatText(seller.seller_role)}
-                        </option>
-                      ))}
-                  </Select>
-
-                  <Input
-                    label="Override Rate (%)"
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    value={reserveData.override_rate}
-                    onChange={(e) =>
-                      setReserveData({
-                        ...reserveData,
-                        override_rate: e.target.value,
-                      })
-                    }
-                    placeholder="Example: 2"
-                  />
-
-                  <label className="block md:col-span-2">
-                    <span className="mb-1.5 block text-sm font-semibold text-slate-700">
-                      Override Notes
-                    </span>
-                    <textarea
-                      className="min-h-24 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                      value={reserveData.override_notes}
-                      onChange={(e) =>
-                        setReserveData({
-                          ...reserveData,
-                          override_notes: e.target.value,
-                        })
-                      }
-                      placeholder="Reason for override commission"
-                    />
-                  </label>
-                </div>
-
-                {selectedOverrideSeller ? (
-                  <div className="mt-4 rounded-lg border border-blue-100 bg-white p-3">
-                    <p className="text-xs font-semibold uppercase text-slate-400">
-                      Selected Override Seller
-                    </p>
-                    <p className="mt-1 text-sm font-bold text-slate-900">
-                      {selectedOverrideSeller.full_name}
-                    </p>
-                    <p className="text-xs text-slate-500">
-                      {formatText(selectedOverrideSeller.seller_role)}
-                    </p>
+                {reserveCommissionPreview.length > 0 ? (
+                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                    {reserveCommissionPreview.map((row) => (
+                      <div
+                        key={`${row.label}-${row.seller.id}`}
+                        className="rounded-lg border border-blue-100 bg-white p-3"
+                      >
+                        <p className="text-xs font-semibold uppercase text-slate-400">
+                          {row.label}
+                        </p>
+                        <p className="mt-1 text-sm font-bold text-slate-900">
+                          {row.seller.full_name}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          {formatText(row.seller.seller_role)} • {formatNumber(row.rate)}%
+                        </p>
+                      </div>
+                    ))}
                   </div>
-                ) : null}
+                ) : (
+                  <p className="mt-3 text-sm text-amber-700">
+                    Select a seller with saved commission rates to preview the automatic split.
+                  </p>
+                )}
               </div>
             ) : null}
 
@@ -3161,12 +3154,6 @@ const ClientProfile = () => {
                 setEditUnitData({
                   ...editUnitData,
                   sale_type: saleType,
-                  override_seller_id:
-                    saleType === "direct" ? "" : editUnitData.override_seller_id,
-                  override_rate:
-                    saleType === "direct" ? "" : editUnitData.override_rate,
-                  override_notes:
-                    saleType === "direct" ? "" : editUnitData.override_notes,
                 })
               }}
             >
@@ -3192,66 +3179,12 @@ const ClientProfile = () => {
           {editUnitData.sale_type === "distributed" ? (
             <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-4">
               <h3 className="text-sm font-bold text-slate-900">
-                Optional Agent / Override Commission
+                Automatic Hierarchy Commission
               </h3>
 
               <p className="mt-1 text-xs text-slate-600">
-                Use this only when the commission should be assigned to another seller or agent.
+                Regenerating commission will use the selected seller hierarchy and saved pool/split rates. Manual override seller/rate is no longer used.
               </p>
-
-              <div className="mt-4 grid gap-4 md:grid-cols-2">
-                <Select
-                  label="Optional Agent / Override Seller"
-                  value={editUnitData.override_seller_id}
-                  onChange={(e) =>
-                    setEditUnitData({
-                      ...editUnitData,
-                      override_seller_id: e.target.value,
-                    })
-                  }
-                >
-                  <option value="">No override seller</option>
-                  {sellers
-                    .filter((seller) => String(seller.id) !== editUnitData.seller_id)
-                    .map((seller) => (
-                      <option key={seller.id} value={seller.id}>
-                        {seller.full_name} - {formatText(seller.seller_role)}
-                      </option>
-                    ))}
-                </Select>
-
-                <Input
-                  label="Override Rate (%)"
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  value={editUnitData.override_rate}
-                  onChange={(e) =>
-                    setEditUnitData({
-                      ...editUnitData,
-                      override_rate: e.target.value,
-                    })
-                  }
-                  placeholder="Example: 2"
-                />
-
-                <label className="block md:col-span-2">
-                  <span className="mb-1.5 block text-sm font-semibold text-slate-700">
-                    Override Notes
-                  </span>
-                  <textarea
-                    className="min-h-24 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                    value={editUnitData.override_notes}
-                    onChange={(e) =>
-                      setEditUnitData({
-                        ...editUnitData,
-                        override_notes: e.target.value,
-                      })
-                    }
-                    placeholder="Reason for override commission"
-                  />
-                </label>
-              </div>
             </div>
           ) : null}
 
@@ -3872,3 +3805,4 @@ const MiniDetail = ({
 }
 
 export default ClientProfile
+

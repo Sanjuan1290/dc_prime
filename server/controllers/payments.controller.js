@@ -45,6 +45,7 @@ const paymentFields = `
   py.amount,
   py.payment_type,
   py.payment_method,
+  py.reference_id,
   py.payment_date,
   py.status,
   py.verified_by,
@@ -211,11 +212,13 @@ export const getPayments = async (req, res) => {
         OR p.name LIKE ?
         OR py.payment_type LIKE ?
         OR py.payment_method LIKE ?
+        OR py.reference_id LIKE ?
         OR py.status LIKE ?
       )
     `)
 
     params.push(
+      searchTerm,
       searchTerm,
       searchTerm,
       searchTerm,
@@ -314,6 +317,7 @@ export const createPayment = async (req, res) => {
     amount,
     payment_type,
     payment_method,
+    reference_id,
     payment_date,
     status = 'pending',
   } = req.body
@@ -364,17 +368,19 @@ export const createPayment = async (req, res) => {
         amount,
         payment_type,
         payment_method,
+        reference_id,
         payment_date,
         status,
         verified_by,
         verified_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         client_unit_id,
         amountValidation.value,
         nullableValue(payment_type),
         nullableValue(payment_method),
+        nullableValue(reference_id),
         payment_date || new Date(),
         finalStatus,
         verifiedBy,
@@ -431,6 +437,7 @@ export const updatePayment = async (req, res) => {
     amount,
     payment_type,
     payment_method,
+    reference_id,
     payment_date,
     status,
   } = req.body
@@ -511,6 +518,7 @@ export const updatePayment = async (req, res) => {
         amount = ?,
         payment_type = ?,
         payment_method = ?,
+        reference_id = ?,
         payment_date = ?,
         status = ?,
         verified_by = ?,
@@ -526,6 +534,9 @@ export const updatePayment = async (req, res) => {
         !isMissing(payment_method)
           ? nullableValue(payment_method)
           : existingPayment.payment_method,
+        !isMissing(reference_id)
+          ? nullableValue(reference_id)
+          : existingPayment.reference_id,
         !isMissing(payment_date) ? payment_date : existingPayment.payment_date,
         nextStatus,
         verifiedBy,
@@ -662,3 +673,4 @@ export const deletePayment = async (req, res) => {
     connection.release()
   }
 }
+

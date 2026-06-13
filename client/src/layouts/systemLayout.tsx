@@ -173,12 +173,10 @@ const navGroups: NavGroup[] = [
 const roleAllowedPaths: Record<string, string[]> = {
   super_admin: ["/dashboard", "/projects", "/listings", "/clients", "/client", "/accreditted_sellers", "/payments", "/commissions", "/cash-advances", "/documents", "/audit-logs", "/reports", "/employees", "/attendance", "/settings", "/users"],
   admin: ["/dashboard", "/projects", "/listings", "/clients", "/client", "/accreditted_sellers", "/payments", "/commissions", "/cash-advances", "/documents", "/audit-logs", "/reports", "/employees", "/attendance", "/settings"],
-  treasury: ["/dashboard", "/payments", "/reports"],
   broker_network_manager: ["/dashboard", "/commissions", "/cash-advances"],
   broker: ["/dashboard", "/commissions", "/cash-advances"],
   manager: ["/dashboard", "/commissions", "/cash-advances"],
   agent: ["/dashboard", "/commissions", "/cash-advances"],
-  client: ["/dashboard"],
 }
 
 const canAccessPath = (role: string | undefined, path: string) => {
@@ -432,3 +430,4 @@ const SystemLayout = () => {
 }
 
 export default SystemLayout
+

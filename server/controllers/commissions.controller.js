@@ -198,6 +198,10 @@
         seller_role,
         parent_seller_id,
         commission_rate,
+        commission_pool_rate,
+        personal_commission_rate,
+        override_commission_rate,
+        max_downline_rate,
         status
       FROM accredited_sellers
       WHERE id = ?
@@ -236,10 +240,46 @@
     return rows[0]
   }
 
-  const getFinalRate = async ({ connectionOrDb = db, seller, rate }) => {
+  const getFinalRate = async ({ connectionOrDb = db, seller, rate, rateType = 'personal' }) => {
     if (!isMissing(rate)) return normalizeRate(rate)
+
+    if (rateType === 'pool' && !isMissing(seller?.commission_pool_rate)) {
+      return normalizeRate(seller.commission_pool_rate)
+    }
+
+    if (rateType === 'override' && !isMissing(seller?.override_commission_rate)) {
+      return normalizeRate(seller.override_commission_rate)
+    }
+
+    if (rateType === 'personal' && !isMissing(seller?.personal_commission_rate)) {
+      return normalizeRate(seller.personal_commission_rate)
+    }
+
     if (!isMissing(seller?.commission_rate)) return normalizeRate(seller.commission_rate)
     return getDefaultCommissionRate(connectionOrDb)
+  }
+
+  const getExplicitRate = (seller, key) => {
+    if (isMissing(seller?.[key])) return null
+    return normalizeRate(seller[key])
+  }
+
+  const sellerDisplayRole = (role) => String(role || 'seller').replaceAll('_', ' ')
+
+  const getSellerChain = async (connectionOrDb, sellerId) => {
+    const chain = []
+    let currentSellerId = sellerId
+    const visited = new Set()
+
+    while (!isMissing(currentSellerId) && !visited.has(Number(currentSellerId)) && chain.length < 10) {
+      visited.add(Number(currentSellerId))
+      const seller = await getSeller(connectionOrDb, currentSellerId)
+      if (!seller) break
+      chain.push(seller)
+      currentSellerId = seller.parent_seller_id
+    }
+
+    return chain
   }
 
   const getCommissionById = async (commissionId) => {
@@ -677,6 +717,185 @@
       retentionRequiresSuperAdmin:
         canReleaseRetention && !canPromoteRetentionEligibility(options),
     }
+  }
+
+  export const buildHierarchyCommissionPreview = async ({
+    connectionOrDb = db,
+    sellerId,
+  }) => {
+    const chain = await getSellerChain(connectionOrDb, sellerId)
+
+    if (chain.length === 0) {
+      return {
+        chain: [],
+        rows: [],
+        totalRate: 0,
+        warnings: ['Seller hierarchy was not found'],
+      }
+    }
+
+    const sellingSeller = chain[0]
+    const manager = chain.find((seller) => seller.seller_role === 'manager')
+    const broker = chain.find((seller) => seller.seller_role === 'broker')
+    const bnm = chain.find((seller) => seller.seller_role === 'broker_network_manager')
+    const warnings = []
+
+    const personalRate = !isMissing(sellingSeller.personal_commission_rate)
+      ? normalizeRate(sellingSeller.personal_commission_rate)
+      : await getFinalRate({ connectionOrDb, seller: sellingSeller, rateType: 'personal' })
+
+    const rows = [
+      {
+        seller: sellingSeller,
+        rate: personalRate,
+        sourceType: 'main',
+        commissionRole: sellingSeller.seller_role,
+        label: `${sellerDisplayRole(sellingSeller.seller_role)} main commission`,
+      },
+    ]
+
+    let allocatedBelowBroker = personalRate
+
+    if (manager && Number(manager.id) !== Number(sellingSeller.id)) {
+      const managerOverrideRate = getExplicitRate(manager, 'override_commission_rate') || 0
+      if (managerOverrideRate > 0) {
+        rows.push({
+          seller: manager,
+          rate: managerOverrideRate,
+          sourceType: 'override',
+          commissionRole: 'override',
+          label: 'Manager override',
+        })
+        allocatedBelowBroker = normalizeRate(allocatedBelowBroker + managerOverrideRate)
+      }
+    }
+
+    let brokerPoolRate = broker ? getExplicitRate(broker, 'commission_pool_rate') : null
+
+    if (broker && brokerPoolRate === null && !isMissing(broker.commission_rate)) {
+      brokerPoolRate = normalizeRate(broker.commission_rate)
+    }
+
+    if (broker && Number(broker.id) !== Number(sellingSeller.id)) {
+      if (brokerPoolRate !== null) {
+        const brokerResidualRate = normalizeRate(brokerPoolRate - allocatedBelowBroker)
+
+        if (brokerResidualRate < 0) {
+          throw new Error(
+            `Commission split exceeds broker pool. Broker pool is ${brokerPoolRate}%, but downline allocation is ${allocatedBelowBroker}%.`
+          )
+        }
+
+        if (brokerResidualRate > 0) {
+          rows.push({
+            seller: broker,
+            rate: brokerResidualRate,
+            sourceType: 'override',
+            commissionRole: 'override',
+            label: 'Broker residual commission',
+          })
+        }
+      } else {
+        warnings.push('Broker pool rate is not set, so broker residual was skipped')
+      }
+    }
+
+    if (bnm && broker) {
+      const bnmPoolRate = getExplicitRate(bnm, 'commission_pool_rate')
+
+      if (bnmPoolRate !== null && brokerPoolRate !== null) {
+        const bnmResidualRate = normalizeRate(bnmPoolRate - brokerPoolRate)
+
+        if (bnmResidualRate < 0) {
+          throw new Error(
+            `Commission split exceeds broker network manager pool. BNM pool is ${bnmPoolRate}%, but broker pool is ${brokerPoolRate}%.`
+          )
+        }
+
+        if (bnmResidualRate > 0) {
+          rows.push({
+            seller: bnm,
+            rate: bnmResidualRate,
+            sourceType: 'override',
+            commissionRole: 'override',
+            label: 'Broker network manager residual commission',
+          })
+        }
+      }
+    }
+
+    return {
+      chain,
+      rows: rows.filter((row) => normalizeRate(row.rate) > 0),
+      totalRate: normalizeRate(rows.reduce((sum, row) => sum + normalizeRate(row.rate), 0)),
+      warnings,
+    }
+  }
+
+  export const createHierarchyCommissionsForClientUnit = async ({
+    connection,
+    clientUnitId,
+    sellerId,
+    saleType = 'distributed',
+    notes = null,
+    actorRole = null,
+  }) => {
+    const connectionOrDb = connection || db
+
+    if (saleType === 'direct') {
+      const seller = await getSeller(connectionOrDb, sellerId)
+      const personalRate = !isMissing(seller?.personal_commission_rate)
+        ? normalizeRate(seller.personal_commission_rate)
+        : null
+
+      const mainCommission = await createAutoCommissionForClientUnit({
+        connection: connectionOrDb,
+        clientUnitId,
+        sellerId,
+        rateOverride: personalRate,
+        commissionRole: seller?.seller_role || null,
+        sourceType: 'main',
+        parentCommissionId: null,
+        saleType: 'direct',
+        notes,
+        actorRole,
+      })
+
+      return mainCommission ? [mainCommission] : []
+    }
+
+    const preview = await buildHierarchyCommissionPreview({
+      connectionOrDb,
+      sellerId,
+    })
+
+    const createdCommissions = []
+    let parentCommissionId = null
+
+    for (const row of preview.rows) {
+      const createdCommission = await createAutoCommissionForClientUnit({
+        connection: connectionOrDb,
+        clientUnitId,
+        sellerId: row.seller.id,
+        rateOverride: row.rate,
+        commissionRole: row.commissionRole,
+        sourceType: row.sourceType,
+        parentCommissionId: row.sourceType === 'override' ? parentCommissionId : null,
+        saleType: 'distributed',
+        overrideNotes: row.sourceType === 'override' ? row.label : null,
+        notes: notes || row.label,
+        actorRole,
+      })
+
+      if (createdCommission) {
+        createdCommissions.push(createdCommission)
+        if (row.sourceType === 'main') {
+          parentCommissionId = createdCommission.commissionId
+        }
+      }
+    }
+
+    return createdCommissions
   }
 
   export const createAutoCommissionForClientUnit = async ({
@@ -2309,3 +2528,4 @@ export const addMissingOverrideCommission = async (req, res) => {
       data: rows,
     })
   }
+
