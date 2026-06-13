@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useParams } from "react-router-dom"
 import {
@@ -34,16 +34,138 @@ type Client = {
   id: number
   full_name: string
   spouse_co_owner_name: string | null
+  buyer_type?: BuyerType | string | null
+  birth_date?: string | null
+  place_of_birth?: string | null
+  citizenship?: string | null
+  gender?: Gender | string | null
+  civil_status?: CivilStatus | string | null
   email: string | null
   contact_no: string | null
+  residence_phone_no?: string | null
+  tin?: string | null
   address: string | null
+  present_address?: string | null
+  present_zip_code?: string | null
+  permanent_address?: string | null
+  permanent_zip_code?: string | null
   region: string | null
+  profile_status?: ProfileStatus | string | null
   default_seller_id?: number | null
   default_seller_name?: string | null
   default_seller_role?: string | null
   default_seller_commission_rate?: number | string | null
   created_at: string
   updated_at: string
+}
+
+type BuyerType = "single" | "spouses" | "and_account"
+type Gender = "male" | "female" | "other"
+type CivilStatus =
+  | "single"
+  | "married"
+  | "separated"
+  | "annulled_divorced"
+  | "widower"
+type BuyerRole = "spouse" | "second_buyer"
+type ProfileStatus = "incomplete" | "complete"
+type PersonType = "principal" | "co_buyer"
+type EmploymentStatus =
+  | "employed_private"
+  | "employed_government"
+  | "employed_ngo"
+  | "self_employed_business"
+  | "self_employed_professional"
+  | "ofw_immigrant"
+  | "other"
+
+type CoBuyer = {
+  id: number
+  client_id: number
+  buyer_role: BuyerRole | string
+  full_name: string | null
+  birth_date: string | null
+  place_of_birth: string | null
+  citizenship: string | null
+  gender: Gender | string | null
+  civil_status: CivilStatus | string | null
+  present_address: string | null
+  present_zip_code: string | null
+  permanent_address: string | null
+  permanent_zip_code: string | null
+  mobile_no: string | null
+  residence_phone_no: string | null
+  email: string | null
+  tin: string | null
+}
+
+type EmploymentDetail = {
+  id: number
+  client_id: number
+  client_buyer_id: number | null
+  person_type: PersonType | string
+  employment_status: EmploymentStatus | string | null
+  employment_status_other: string | null
+  employer_business_name: string | null
+  employer_business_address: string | null
+  employer_zip_code: string | null
+  nature_of_work_business: string | null
+  occupation_position_title: string | null
+  monthly_income: number | string | null
+}
+
+type ProfileCompletion = {
+  isComplete: boolean
+  missingFields: string[]
+}
+
+type PrincipalProfileData = {
+  buyer_type: BuyerType
+  full_name: string
+  birth_date: string
+  place_of_birth: string
+  citizenship: string
+  gender: Gender | ""
+  civil_status: CivilStatus | ""
+  present_address: string
+  present_zip_code: string
+  permanent_address: string
+  permanent_zip_code: string
+  contact_no: string
+  residence_phone_no: string
+  email: string
+  tin: string
+}
+
+type CoBuyerFormData = {
+  buyer_role: BuyerRole
+  full_name: string
+  birth_date: string
+  place_of_birth: string
+  citizenship: string
+  gender: Gender | ""
+  civil_status: CivilStatus | ""
+  present_address: string
+  present_zip_code: string
+  permanent_address: string
+  permanent_zip_code: string
+  mobile_no: string
+  residence_phone_no: string
+  email: string
+  tin: string
+}
+
+type EmploymentFormData = {
+  person_type: PersonType
+  client_buyer_id: number | null
+  employment_status: EmploymentStatus | ""
+  employment_status_other: string
+  employer_business_name: string
+  employer_business_address: string
+  employer_zip_code: string
+  nature_of_work_business: string
+  occupation_position_title: string
+  monthly_income: string
 }
 
 type ClientUnit = {
@@ -144,6 +266,9 @@ type ClientDocument = {
 
 type ClientResponse = {
   client: Client
+  co_buyers?: CoBuyer[]
+  employment_details?: EmploymentDetail[]
+  profile_completion?: ProfileCompletion
   data?: Client
 }
 
@@ -264,6 +389,198 @@ const defaultCancelUnitData: CancelUnitData = {
   reason: "",
 }
 
+const emptyPrincipalProfileData = (): PrincipalProfileData => ({
+  buyer_type: "single",
+  full_name: "",
+  birth_date: "",
+  place_of_birth: "",
+  citizenship: "",
+  gender: "",
+  civil_status: "",
+  present_address: "",
+  present_zip_code: "",
+  permanent_address: "",
+  permanent_zip_code: "",
+  contact_no: "",
+  residence_phone_no: "",
+  email: "",
+  tin: "",
+})
+
+const emptyCoBuyerData = (): CoBuyerFormData => ({
+  buyer_role: "spouse",
+  full_name: "",
+  birth_date: "",
+  place_of_birth: "",
+  citizenship: "",
+  gender: "",
+  civil_status: "",
+  present_address: "",
+  present_zip_code: "",
+  permanent_address: "",
+  permanent_zip_code: "",
+  mobile_no: "",
+  residence_phone_no: "",
+  email: "",
+  tin: "",
+})
+
+const emptyEmploymentData = (
+  personType: PersonType,
+  clientBuyerId: number | null = null
+): EmploymentFormData => ({
+  person_type: personType,
+  client_buyer_id: clientBuyerId,
+  employment_status: "",
+  employment_status_other: "",
+  employer_business_name: "",
+  employer_business_address: "",
+  employer_zip_code: "",
+  nature_of_work_business: "",
+  occupation_position_title: "",
+  monthly_income: "",
+})
+
+const buyerTypeOptions = [
+  { label: "Single", value: "single" },
+  { label: "Spouses", value: "spouses" },
+  { label: "And Account", value: "and_account" },
+] as const
+
+const genderOptions = [
+  { label: "Male", value: "male" },
+  { label: "Female", value: "female" },
+  { label: "Other", value: "other" },
+] as const
+
+const civilStatusOptions = [
+  { label: "Single", value: "single" },
+  { label: "Married", value: "married" },
+  { label: "Separated", value: "separated" },
+  { label: "Annulled / Divorced", value: "annulled_divorced" },
+  { label: "Widower", value: "widower" },
+] as const
+
+const employmentStatusOptions = [
+  { label: "Employed - Private", value: "employed_private" },
+  { label: "Employed - Government", value: "employed_government" },
+  { label: "Employed - NGO", value: "employed_ngo" },
+  { label: "Self-Employed (Business)", value: "self_employed_business" },
+  { label: "Self-Employed (Professional)", value: "self_employed_professional" },
+  { label: "OFW / Immigrant", value: "ofw_immigrant" },
+  { label: "Other", value: "other" },
+] as const
+
+const normalizeBuyerType = (value: string | null | undefined): BuyerType => {
+  if (value === "spouses" || value === "and_account") return value
+  return "single"
+}
+
+const clientToPrincipalProfileData = (client: Client): PrincipalProfileData => ({
+  buyer_type: normalizeBuyerType(client.buyer_type),
+  full_name: client.full_name || "",
+  birth_date: formatDate(client.birth_date) === "-" ? "" : formatDate(client.birth_date),
+  place_of_birth: client.place_of_birth || "",
+  citizenship: client.citizenship || "",
+  gender:
+    client.gender === "male" || client.gender === "female" || client.gender === "other"
+      ? client.gender
+      : "",
+  civil_status:
+    client.civil_status === "single" ||
+    client.civil_status === "married" ||
+    client.civil_status === "separated" ||
+    client.civil_status === "annulled_divorced" ||
+    client.civil_status === "widower"
+      ? client.civil_status
+      : "",
+  present_address: client.present_address || client.address || "",
+  present_zip_code: client.present_zip_code || "",
+  permanent_address: client.permanent_address || "",
+  permanent_zip_code: client.permanent_zip_code || "",
+  contact_no: client.contact_no || "",
+  residence_phone_no: client.residence_phone_no || "",
+  email: client.email || "",
+  tin: client.tin || "",
+})
+
+const coBuyerToFormData = (buyer: CoBuyer | undefined): CoBuyerFormData => {
+  if (!buyer) return emptyCoBuyerData()
+
+  return {
+    buyer_role: buyer.buyer_role === "second_buyer" ? "second_buyer" : "spouse",
+    full_name: buyer.full_name || "",
+    birth_date: formatDate(buyer.birth_date) === "-" ? "" : formatDate(buyer.birth_date),
+    place_of_birth: buyer.place_of_birth || "",
+    citizenship: buyer.citizenship || "",
+    gender:
+      buyer.gender === "male" || buyer.gender === "female" || buyer.gender === "other"
+        ? buyer.gender
+        : "",
+    civil_status:
+      buyer.civil_status === "single" ||
+      buyer.civil_status === "married" ||
+      buyer.civil_status === "separated" ||
+      buyer.civil_status === "annulled_divorced" ||
+      buyer.civil_status === "widower"
+        ? buyer.civil_status
+        : "",
+    present_address: buyer.present_address || "",
+    present_zip_code: buyer.present_zip_code || "",
+    permanent_address: buyer.permanent_address || "",
+    permanent_zip_code: buyer.permanent_zip_code || "",
+    mobile_no: buyer.mobile_no || "",
+    residence_phone_no: buyer.residence_phone_no || "",
+    email: buyer.email || "",
+    tin: buyer.tin || "",
+  }
+}
+
+const employmentToFormData = (
+  detail: EmploymentDetail | undefined,
+  personType: PersonType,
+  clientBuyerId: number | null = null
+): EmploymentFormData => {
+  if (!detail) return emptyEmploymentData(personType, clientBuyerId)
+
+  return {
+    person_type: personType,
+    client_buyer_id: detail.client_buyer_id || clientBuyerId,
+    employment_status:
+      employmentStatusOptions.some((option) => option.value === detail.employment_status)
+        ? (detail.employment_status as EmploymentStatus)
+        : "",
+    employment_status_other: detail.employment_status_other || "",
+    employer_business_name: detail.employer_business_name || "",
+    employer_business_address: detail.employer_business_address || "",
+    employer_zip_code: detail.employer_zip_code || "",
+    nature_of_work_business: detail.nature_of_work_business || "",
+    occupation_position_title: detail.occupation_position_title || "",
+    monthly_income:
+      detail.monthly_income === null || detail.monthly_income === undefined
+        ? ""
+        : String(detail.monthly_income),
+  }
+}
+
+const calculateAge = (birthDate: string) => {
+  if (!birthDate) return "-"
+
+  const birth = new Date(`${birthDate}T00:00:00`)
+
+  if (Number.isNaN(birth.getTime())) return "-"
+
+  const today = new Date()
+  let age = today.getFullYear() - birth.getFullYear()
+  const monthDiff = today.getMonth() - birth.getMonth()
+
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
+    age -= 1
+  }
+
+  return age >= 0 ? String(age) : "-"
+}
+
 const fetchClient = async (clientId: string) => {
   const res = await fetch(`${API_URL}/clients/${clientId}`, {
     credentials: "include",
@@ -272,7 +589,15 @@ const fetchClient = async (clientId: string) => {
   if (!res.ok) throw new Error(await getErrorMessage(res))
 
   const data = (await res.json()) as ClientResponse
-  return data.client || data.data
+  return {
+    client: data.client || data.data,
+    co_buyers: data.co_buyers || [],
+    employment_details: data.employment_details || [],
+    profile_completion: data.profile_completion || {
+      isComplete: false,
+      missingFields: [],
+    },
+  }
 }
 
 const fetchClientUnits = async (clientId: string) => {
@@ -382,6 +707,127 @@ const reserveListing = async ({
   if (!res.ok) throw new Error(await getErrorMessage(res))
 
   return res.json()
+}
+
+const savePrincipalProfile = async ({
+  clientId,
+  profileData,
+  profileStatus,
+}: {
+  clientId: string
+  profileData: PrincipalProfileData
+  profileStatus?: ProfileStatus
+}) => {
+  const res = await fetch(`${API_URL}/clients/${clientId}/profile`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      ...profileData,
+      profile_status: profileStatus || undefined,
+    }),
+  })
+
+  if (!res.ok) throw new Error(await getErrorMessage(res))
+
+  return res.json()
+}
+
+const replaceCoBuyers = async ({
+  clientId,
+  coBuyers,
+}: {
+  clientId: string
+  coBuyers: CoBuyerFormData[]
+}) => {
+  const res = await fetch(`${API_URL}/clients/${clientId}/co-buyers`, {
+    method: "PUT",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ co_buyers: coBuyers }),
+  })
+
+  if (!res.ok) throw new Error(await getErrorMessage(res))
+
+  return (await res.json()) as ClientResponse
+}
+
+const replaceEmploymentDetails = async ({
+  clientId,
+  employmentDetails,
+}: {
+  clientId: string
+  employmentDetails: EmploymentFormData[]
+}) => {
+  const res = await fetch(`${API_URL}/clients/${clientId}/employment-details`, {
+    method: "PUT",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ employment_details: employmentDetails }),
+  })
+
+  if (!res.ok) throw new Error(await getErrorMessage(res))
+
+  return res.json()
+}
+
+const saveBuyerProfile = async ({
+  clientId,
+  profileData,
+  coBuyerData,
+  principalEmploymentData,
+  coBuyerEmploymentData,
+  markComplete = false,
+}: {
+  clientId: string
+  profileData: PrincipalProfileData
+  coBuyerData: CoBuyerFormData[]
+  principalEmploymentData: EmploymentFormData
+  coBuyerEmploymentData: EmploymentFormData
+  markComplete?: boolean
+}) => {
+  await savePrincipalProfile({ clientId, profileData })
+  const coBuyerResponse = await replaceCoBuyers({
+    clientId,
+    coBuyers: profileData.buyer_type === "single" ? [] : coBuyerData,
+  })
+  const savedCoBuyerId = coBuyerResponse.co_buyers?.[0]?.id || null
+  const employmentDetails: EmploymentFormData[] = [
+    {
+      ...principalEmploymentData,
+      person_type: "principal" as const,
+      client_buyer_id: null,
+    },
+  ]
+
+  if (profileData.buyer_type !== "single") {
+    employmentDetails.push({
+      ...coBuyerEmploymentData,
+      person_type: "co_buyer",
+      client_buyer_id: savedCoBuyerId,
+    })
+  }
+
+  await replaceEmploymentDetails({
+    clientId,
+    employmentDetails,
+  })
+
+  if (markComplete) {
+    return savePrincipalProfile({
+      clientId,
+      profileData,
+      profileStatus: "complete",
+    })
+  }
+
+  return savePrincipalProfile({ clientId, profileData })
 }
 
 const updateClientUnit = async ({
@@ -639,9 +1085,18 @@ const ClientProfile = () => {
     useState<ClientUnit | null>(null)
   const [successMessage, setSuccessMessage] = useState("")
   const [reserveValidationMessage, setReserveValidationMessage] = useState("")
+  const [principalProfileData, setPrincipalProfileData] =
+    useState<PrincipalProfileData>(() => emptyPrincipalProfileData())
+  const [coBuyerData, setCoBuyerData] = useState<CoBuyerFormData[]>(() => [
+    emptyCoBuyerData(),
+  ])
+  const [principalEmploymentData, setPrincipalEmploymentData] =
+    useState<EmploymentFormData>(() => emptyEmploymentData("principal"))
+  const [coBuyerEmploymentData, setCoBuyerEmploymentData] =
+    useState<EmploymentFormData>(() => emptyEmploymentData("co_buyer"))
 
   const {
-    data: client,
+    data: clientProfile,
     isLoading: isClientLoading,
     error: clientError,
   } = useQuery({
@@ -649,6 +1104,20 @@ const ClientProfile = () => {
     queryFn: () => fetchClient(clientId || ""),
     enabled: Boolean(clientId),
   })
+
+  const client = clientProfile?.client
+  const coBuyers = useMemo(
+    () => clientProfile?.co_buyers || [],
+    [clientProfile?.co_buyers]
+  )
+  const employmentDetails = useMemo(
+    () => clientProfile?.employment_details || [],
+    [clientProfile?.employment_details]
+  )
+  const profileCompletion = clientProfile?.profile_completion || {
+    isComplete: false,
+    missingFields: [],
+  }
 
   const {
     data: clientUnits = [],
@@ -680,6 +1149,40 @@ const ClientProfile = () => {
     enabled: Boolean(selectedDocumentsUnit?.id),
   })
 
+  useEffect(() => {
+    if (!client) return
+
+    const firstCoBuyer = coBuyers[0]
+    const principalEmployment = employmentDetails.find(
+      (detail) => detail.person_type === "principal"
+    )
+    const coBuyerEmployment = firstCoBuyer
+      ? employmentDetails.find(
+          (detail) =>
+            detail.person_type === "co_buyer" &&
+            Number(detail.client_buyer_id) === Number(firstCoBuyer.id)
+        ) ||
+        employmentDetails.find((detail) => detail.person_type === "co_buyer")
+      : undefined
+
+    const timeoutId = window.setTimeout(() => {
+      setPrincipalProfileData(clientToPrincipalProfileData(client))
+      setCoBuyerData([coBuyerToFormData(firstCoBuyer)])
+      setPrincipalEmploymentData(
+        employmentToFormData(principalEmployment, "principal")
+      )
+      setCoBuyerEmploymentData(
+        employmentToFormData(
+          coBuyerEmployment,
+          "co_buyer",
+          firstCoBuyer?.id || null
+        )
+      )
+    }, 0)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [client, coBuyers, employmentDetails])
+
   const invalidateClientProfile = () => {
     queryClient.invalidateQueries({ queryKey: ["client", clientId] })
     queryClient.invalidateQueries({ queryKey: ["client-units", clientId] })
@@ -705,6 +1208,22 @@ const ClientProfile = () => {
       setReserveData(createDefaultReserveData())
       setReserveValidationMessage("")
       setSuccessMessage("Listing reserved and commission generated successfully")
+    },
+  })
+
+  const saveBuyerProfileMutation = useMutation({
+    mutationFn: saveBuyerProfile,
+    onSuccess: () => {
+      invalidateClientProfile()
+      setSuccessMessage("Buyer profile saved successfully")
+    },
+  })
+
+  const markBuyerProfileCompleteMutation = useMutation({
+    mutationFn: saveBuyerProfile,
+    onSuccess: () => {
+      invalidateClientProfile()
+      setSuccessMessage("Buyer profile marked complete")
     },
   })
 
@@ -894,6 +1413,14 @@ const ClientProfile = () => {
     )
   }, [clientUnits])
 
+  const activeCoBuyerData = coBuyerData[0] || emptyCoBuyerData()
+  const showCoBuyerProfile = principalProfileData.buyer_type !== "single"
+  const currentProfileStatus: ProfileStatus =
+    client?.profile_status === "complete" ? "complete" : "incomplete"
+  const isSavingBuyerProfile =
+    saveBuyerProfileMutation.isPending ||
+    markBuyerProfileCompleteMutation.isPending
+
   const getReserveValidationMessage = () => {
     if (!reserveData.listing_id || !selectedListing) {
       return "Listing is required"
@@ -1021,6 +1548,31 @@ const ClientProfile = () => {
     })
   }
 
+  const handleSaveBuyerProfile = () => {
+    if (!clientId) return
+
+    saveBuyerProfileMutation.mutate({
+      clientId,
+      profileData: principalProfileData,
+      coBuyerData,
+      principalEmploymentData,
+      coBuyerEmploymentData,
+    })
+  }
+
+  const handleMarkBuyerProfileComplete = () => {
+    if (!clientId) return
+
+    markBuyerProfileCompleteMutation.mutate({
+      clientId,
+      profileData: principalProfileData,
+      coBuyerData,
+      principalEmploymentData,
+      coBuyerEmploymentData,
+      markComplete: true,
+    })
+  }
+
   const handleUpdateUnit = () => {
     if (!editUnit) return
 
@@ -1106,6 +1658,28 @@ const ClientProfile = () => {
             reserveMutation.error instanceof Error
               ? reserveMutation.error.message
               : "Failed to reserve listing"
+          }
+        />
+      ) : null}
+
+      {saveBuyerProfileMutation.error ? (
+        <Alert
+          variant="error"
+          title={
+            saveBuyerProfileMutation.error instanceof Error
+              ? saveBuyerProfileMutation.error.message
+              : "Failed to save buyer profile"
+          }
+        />
+      ) : null}
+
+      {markBuyerProfileCompleteMutation.error ? (
+        <Alert
+          variant="error"
+          title={
+            markBuyerProfileCompleteMutation.error instanceof Error
+              ? markBuyerProfileCompleteMutation.error.message
+              : "Failed to mark buyer profile complete"
           }
         />
       ) : null}
@@ -1204,6 +1778,500 @@ const ClientProfile = () => {
                 : "-"
             }
           />
+        </div>
+      </div>
+
+      <div className="mt-6 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2 className="text-lg font-bold text-slate-900">Buyer Profile</h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Offer to Buy and buyer profile source data.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusBadge status={currentProfileStatus} />
+            <Button
+              disabled={isSavingBuyerProfile}
+              onClick={handleSaveBuyerProfile}
+              variant="secondary"
+            >
+              {saveBuyerProfileMutation.isPending ? "Saving..." : "Save Buyer Profile"}
+            </Button>
+            <Button
+              disabled={isSavingBuyerProfile}
+              onClick={handleMarkBuyerProfileComplete}
+              variant="primary"
+            >
+              {markBuyerProfileCompleteMutation.isPending
+                ? "Checking..."
+                : "Mark Profile Complete"}
+            </Button>
+          </div>
+        </div>
+
+        {currentProfileStatus === "incomplete" &&
+        profileCompletion.missingFields.length > 0 ? (
+          <div className="mt-4">
+            <Alert
+              variant="warning"
+              title={`Missing: ${profileCompletion.missingFields.join(", ")}`}
+            />
+          </div>
+        ) : null}
+
+        <div className="mt-5 space-y-5">
+          <div className="rounded-xl border border-slate-200 p-4">
+            <h3 className="text-sm font-bold text-slate-900">
+              Principal Buyer
+            </h3>
+
+            <div className="mt-4 grid gap-4 md:grid-cols-3">
+              <Select
+                label="Buyer Type"
+                value={principalProfileData.buyer_type}
+                onChange={(e) =>
+                  setPrincipalProfileData({
+                    ...principalProfileData,
+                    buyer_type: e.target.value as BuyerType,
+                  })
+                }
+              >
+                {buyerTypeOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </Select>
+
+              <Input
+                label="Full Name"
+                value={principalProfileData.full_name}
+                onChange={(e) =>
+                  setPrincipalProfileData({
+                    ...principalProfileData,
+                    full_name: e.target.value,
+                  })
+                }
+              />
+
+              <Input
+                label="Birth Date"
+                type="date"
+                value={principalProfileData.birth_date}
+                onChange={(e) =>
+                  setPrincipalProfileData({
+                    ...principalProfileData,
+                    birth_date: e.target.value,
+                  })
+                }
+              />
+
+              <MiniDetail
+                label="Computed Age"
+                value={calculateAge(principalProfileData.birth_date)}
+              />
+
+              <Input
+                label="Place of Birth"
+                value={principalProfileData.place_of_birth}
+                onChange={(e) =>
+                  setPrincipalProfileData({
+                    ...principalProfileData,
+                    place_of_birth: e.target.value,
+                  })
+                }
+              />
+
+              <Input
+                label="Citizenship"
+                value={principalProfileData.citizenship}
+                onChange={(e) =>
+                  setPrincipalProfileData({
+                    ...principalProfileData,
+                    citizenship: e.target.value,
+                  })
+                }
+              />
+
+              <Select
+                label="Gender"
+                value={principalProfileData.gender}
+                onChange={(e) =>
+                  setPrincipalProfileData({
+                    ...principalProfileData,
+                    gender: e.target.value as Gender | "",
+                  })
+                }
+              >
+                <option value="">Select gender</option>
+                {genderOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </Select>
+
+              <Select
+                label="Civil Status"
+                value={principalProfileData.civil_status}
+                onChange={(e) =>
+                  setPrincipalProfileData({
+                    ...principalProfileData,
+                    civil_status: e.target.value as CivilStatus | "",
+                  })
+                }
+              >
+                <option value="">Select civil status</option>
+                {civilStatusOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </Select>
+
+              <Input
+                label="Mobile Number / Contact Number"
+                value={principalProfileData.contact_no}
+                onChange={(e) =>
+                  setPrincipalProfileData({
+                    ...principalProfileData,
+                    contact_no: e.target.value,
+                  })
+                }
+              />
+
+              <Input
+                label="Residence Phone Number"
+                value={principalProfileData.residence_phone_no}
+                onChange={(e) =>
+                  setPrincipalProfileData({
+                    ...principalProfileData,
+                    residence_phone_no: e.target.value,
+                  })
+                }
+              />
+
+              <Input
+                label="Email"
+                type="email"
+                value={principalProfileData.email}
+                onChange={(e) =>
+                  setPrincipalProfileData({
+                    ...principalProfileData,
+                    email: e.target.value,
+                  })
+                }
+              />
+
+              <Input
+                label="TIN"
+                value={principalProfileData.tin}
+                onChange={(e) =>
+                  setPrincipalProfileData({
+                    ...principalProfileData,
+                    tin: e.target.value,
+                  })
+                }
+              />
+
+              <Input
+                label="Present Address"
+                value={principalProfileData.present_address}
+                onChange={(e) =>
+                  setPrincipalProfileData({
+                    ...principalProfileData,
+                    present_address: e.target.value,
+                  })
+                }
+              />
+
+              <Input
+                label="Present ZIP Code"
+                value={principalProfileData.present_zip_code}
+                onChange={(e) =>
+                  setPrincipalProfileData({
+                    ...principalProfileData,
+                    present_zip_code: e.target.value,
+                  })
+                }
+              />
+
+              <Input
+                label="Permanent Address"
+                value={principalProfileData.permanent_address}
+                onChange={(e) =>
+                  setPrincipalProfileData({
+                    ...principalProfileData,
+                    permanent_address: e.target.value,
+                  })
+                }
+              />
+
+              <Input
+                label="Permanent ZIP Code"
+                value={principalProfileData.permanent_zip_code}
+                onChange={(e) =>
+                  setPrincipalProfileData({
+                    ...principalProfileData,
+                    permanent_zip_code: e.target.value,
+                  })
+                }
+              />
+            </div>
+          </div>
+
+          {showCoBuyerProfile ? (
+            <div className="rounded-xl border border-slate-200 p-4">
+              <h3 className="text-sm font-bold text-slate-900">
+                Spouse / Second Buyer
+              </h3>
+
+              <div className="mt-4 grid gap-4 md:grid-cols-3">
+                <Select
+                  label="Buyer Role"
+                  value={activeCoBuyerData.buyer_role}
+                  onChange={(e) =>
+                    setCoBuyerData([
+                      {
+                        ...activeCoBuyerData,
+                        buyer_role: e.target.value as BuyerRole,
+                      },
+                    ])
+                  }
+                >
+                  <option value="spouse">Spouse</option>
+                  <option value="second_buyer">Second Buyer</option>
+                </Select>
+
+                <Input
+                  label="Full Name"
+                  value={activeCoBuyerData.full_name}
+                  onChange={(e) =>
+                    setCoBuyerData([
+                      {
+                        ...activeCoBuyerData,
+                        full_name: e.target.value,
+                      },
+                    ])
+                  }
+                />
+
+                <Input
+                  label="Birth Date"
+                  type="date"
+                  value={activeCoBuyerData.birth_date}
+                  onChange={(e) =>
+                    setCoBuyerData([
+                      {
+                        ...activeCoBuyerData,
+                        birth_date: e.target.value,
+                      },
+                    ])
+                  }
+                />
+
+                <MiniDetail
+                  label="Computed Age"
+                  value={calculateAge(activeCoBuyerData.birth_date)}
+                />
+
+                <Input
+                  label="Place of Birth"
+                  value={activeCoBuyerData.place_of_birth}
+                  onChange={(e) =>
+                    setCoBuyerData([
+                      {
+                        ...activeCoBuyerData,
+                        place_of_birth: e.target.value,
+                      },
+                    ])
+                  }
+                />
+
+                <Input
+                  label="Citizenship"
+                  value={activeCoBuyerData.citizenship}
+                  onChange={(e) =>
+                    setCoBuyerData([
+                      {
+                        ...activeCoBuyerData,
+                        citizenship: e.target.value,
+                      },
+                    ])
+                  }
+                />
+
+                <Select
+                  label="Gender"
+                  value={activeCoBuyerData.gender}
+                  onChange={(e) =>
+                    setCoBuyerData([
+                      {
+                        ...activeCoBuyerData,
+                        gender: e.target.value as Gender | "",
+                      },
+                    ])
+                  }
+                >
+                  <option value="">Select gender</option>
+                  {genderOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </Select>
+
+                <Select
+                  label="Civil Status"
+                  value={activeCoBuyerData.civil_status}
+                  onChange={(e) =>
+                    setCoBuyerData([
+                      {
+                        ...activeCoBuyerData,
+                        civil_status: e.target.value as CivilStatus | "",
+                      },
+                    ])
+                  }
+                >
+                  <option value="">Select civil status</option>
+                  {civilStatusOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </Select>
+
+                <Input
+                  label="Mobile Number"
+                  value={activeCoBuyerData.mobile_no}
+                  onChange={(e) =>
+                    setCoBuyerData([
+                      {
+                        ...activeCoBuyerData,
+                        mobile_no: e.target.value,
+                      },
+                    ])
+                  }
+                />
+
+                <Input
+                  label="Residence Phone Number"
+                  value={activeCoBuyerData.residence_phone_no}
+                  onChange={(e) =>
+                    setCoBuyerData([
+                      {
+                        ...activeCoBuyerData,
+                        residence_phone_no: e.target.value,
+                      },
+                    ])
+                  }
+                />
+
+                <Input
+                  label="Email"
+                  type="email"
+                  value={activeCoBuyerData.email}
+                  onChange={(e) =>
+                    setCoBuyerData([
+                      {
+                        ...activeCoBuyerData,
+                        email: e.target.value,
+                      },
+                    ])
+                  }
+                />
+
+                <Input
+                  label="TIN"
+                  value={activeCoBuyerData.tin}
+                  onChange={(e) =>
+                    setCoBuyerData([
+                      {
+                        ...activeCoBuyerData,
+                        tin: e.target.value,
+                      },
+                    ])
+                  }
+                />
+
+                <Input
+                  label="Present Address"
+                  value={activeCoBuyerData.present_address}
+                  onChange={(e) =>
+                    setCoBuyerData([
+                      {
+                        ...activeCoBuyerData,
+                        present_address: e.target.value,
+                      },
+                    ])
+                  }
+                />
+
+                <Input
+                  label="Present ZIP Code"
+                  value={activeCoBuyerData.present_zip_code}
+                  onChange={(e) =>
+                    setCoBuyerData([
+                      {
+                        ...activeCoBuyerData,
+                        present_zip_code: e.target.value,
+                      },
+                    ])
+                  }
+                />
+
+                <Input
+                  label="Permanent Address"
+                  value={activeCoBuyerData.permanent_address}
+                  onChange={(e) =>
+                    setCoBuyerData([
+                      {
+                        ...activeCoBuyerData,
+                        permanent_address: e.target.value,
+                      },
+                    ])
+                  }
+                />
+
+                <Input
+                  label="Permanent ZIP Code"
+                  value={activeCoBuyerData.permanent_zip_code}
+                  onChange={(e) =>
+                    setCoBuyerData([
+                      {
+                        ...activeCoBuyerData,
+                        permanent_zip_code: e.target.value,
+                      },
+                    ])
+                  }
+                />
+              </div>
+            </div>
+          ) : null}
+
+          <div className="rounded-xl border border-slate-200 p-4">
+            <h3 className="text-sm font-bold text-slate-900">
+              Work / Business Information
+            </h3>
+
+            <div className="mt-4 grid gap-4 lg:grid-cols-2">
+              <EmploymentFields
+                data={principalEmploymentData}
+                onChange={setPrincipalEmploymentData}
+                title="Principal Buyer"
+              />
+
+              {showCoBuyerProfile ? (
+                <EmploymentFields
+                  data={coBuyerEmploymentData}
+                  onChange={setCoBuyerEmploymentData}
+                  title="Spouse / Second Buyer"
+                />
+              ) : null}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -2470,6 +3538,124 @@ const ClientProfile = () => {
           ) : null}
         </Modal>
       ) : null}
+    </div>
+  )
+}
+
+const EmploymentFields = ({
+  data,
+  onChange,
+  title,
+}: {
+  data: EmploymentFormData
+  onChange: (data: EmploymentFormData) => void
+  title: string
+}) => {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+      <h4 className="text-sm font-bold text-slate-900">{title}</h4>
+
+      <div className="mt-4 grid gap-4 md:grid-cols-2">
+        <Select
+          label="Employment Status"
+          value={data.employment_status}
+          onChange={(e) =>
+            onChange({
+              ...data,
+              employment_status: e.target.value as EmploymentStatus | "",
+            })
+          }
+        >
+          <option value="">Select status</option>
+          {employmentStatusOptions.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </Select>
+
+        <Input
+          label="Other Employment Status"
+          value={data.employment_status_other}
+          onChange={(e) =>
+            onChange({
+              ...data,
+              employment_status_other: e.target.value,
+            })
+          }
+        />
+
+        <Input
+          label="Employer / Business Name"
+          value={data.employer_business_name}
+          onChange={(e) =>
+            onChange({
+              ...data,
+              employer_business_name: e.target.value,
+            })
+          }
+        />
+
+        <Input
+          label="Employer ZIP Code"
+          value={data.employer_zip_code}
+          onChange={(e) =>
+            onChange({
+              ...data,
+              employer_zip_code: e.target.value,
+            })
+          }
+        />
+
+        <Input
+          label="Nature of Work / Business"
+          value={data.nature_of_work_business}
+          onChange={(e) =>
+            onChange({
+              ...data,
+              nature_of_work_business: e.target.value,
+            })
+          }
+        />
+
+        <Input
+          label="Occupation / Position / Title"
+          value={data.occupation_position_title}
+          onChange={(e) =>
+            onChange({
+              ...data,
+              occupation_position_title: e.target.value,
+            })
+          }
+        />
+
+        <Input
+          label="Monthly Income"
+          min={0}
+          step="0.01"
+          type="number"
+          value={data.monthly_income}
+          onChange={(e) =>
+            onChange({
+              ...data,
+              monthly_income: e.target.value,
+            })
+          }
+        />
+
+        <div className="md:col-span-2">
+          <Input
+            label="Employer / Business Address"
+            value={data.employer_business_address}
+            onChange={(e) =>
+              onChange({
+                ...data,
+                employer_business_address: e.target.value,
+              })
+            }
+          />
+        </div>
+      </div>
     </div>
   )
 }

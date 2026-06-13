@@ -18,6 +18,7 @@ import LoadingState from "../components/ui/LoadingState";
 import Modal from "../components/ui/Modal";
 import PageHeader from "../components/ui/PageHeader";
 import Pagination from "../components/ui/Pagination";
+import Select from "../components/ui/Select";
 import StatCard from "../components/ui/StatCard";
 import TableContainer from "../components/ui/TableContainer";
 import { API_URL, getErrorMessage } from "../utils/api";
@@ -28,6 +29,7 @@ type Client = {
   id: number;
   full_name: string;
   spouse_co_owner_name: string | null;
+  buyer_type?: "single" | "spouses" | "and_account" | string | null;
   email: string | null;
   contact_no: string | null;
   address: string | null;
@@ -44,6 +46,7 @@ type Client = {
 type ClientFormData = {
   full_name: string;
   spouse_co_owner_name: string;
+  buyer_type: "single" | "spouses" | "and_account";
   email: string;
   contact_no: string;
   address: string;
@@ -69,6 +72,7 @@ type AccreditedSellersResponse = {
 const emptyFormData: ClientFormData = {
   full_name: "",
   spouse_co_owner_name: "",
+  buyer_type: "single",
   email: "",
   contact_no: "",
   address: "",
@@ -156,6 +160,10 @@ const deleteClient = async (id: number) => {
 const clientToFormData = (client: Client): ClientFormData => ({
   full_name: client.full_name,
   spouse_co_owner_name: client.spouse_co_owner_name || "",
+  buyer_type:
+    client.buyer_type === "spouses" || client.buyer_type === "and_account"
+      ? client.buyer_type
+      : "single",
   email: client.email || "",
   contact_no: client.contact_no || "",
   address: client.address || "",
@@ -642,6 +650,21 @@ const ClientForm = ({
             })
           }
         />
+
+        <Select
+          label="Buyer Type"
+          value={clientData.buyer_type}
+          onChange={(e) =>
+            setClientData({
+              ...clientData,
+              buyer_type: e.target.value as ClientFormData["buyer_type"],
+            })
+          }
+        >
+          <option value="single">Single</option>
+          <option value="spouses">Spouses</option>
+          <option value="and_account">And Account</option>
+        </Select>
 
         <Input
           label="Email"

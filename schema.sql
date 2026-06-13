@@ -106,7 +106,7 @@ CREATE TABLE `audit_logs` (
   PRIMARY KEY (`id`),
   KEY `fk_audit_logs_user` (`user_id`),
   CONSTRAINT `fk_audit_logs_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=60 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=79 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -115,7 +115,7 @@ CREATE TABLE `audit_logs` (
 
 LOCK TABLES `audit_logs` WRITE;
 /*!40000 ALTER TABLE `audit_logs` DISABLE KEYS */;
-INSERT INTO `audit_logs` VALUES (1,1,'create','Projects','Created project Bailen','::1','2026-06-12 06:23:49'),(2,1,'create','Projects','Created project Maragondon','::1','2026-06-12 06:24:05'),(3,1,'create','Listings','Created listing LA-1602','127.0.0.1','2026-06-12 06:25:11'),(4,1,'create','Listings','Created listing LA-0315','127.0.0.1','2026-06-12 06:25:50'),(5,1,'create','Accredited Sellers','Created accredited seller NEPOMUCENO, ERWIN','127.0.0.1','2026-06-12 06:26:34'),(6,1,'create','Accredited Sellers','Created accredited seller PARROCHO, JOSEPH E.','127.0.0.1','2026-06-12 06:27:02'),(7,1,'update','Accredited Sellers','Updated accredited seller NEPOMUCENO, ERWIN. Synced 0 open commission(s).','127.0.0.1','2026-06-12 06:27:08'),(8,1,'create','Clients','Created client AQUINO, JAYMILYN BERNARDO','127.0.0.1','2026-06-12 06:28:09'),(9,1,'reserve','Client Units','Reserved LA-1602 for AQUINO, JAYMILYN BERNARDO','127.0.0.1','2026-06-12 06:31:49'),(10,1,'create','Documents','Created document client registration form seller\'s copy','127.0.0.1','2026-06-12 06:32:14'),(11,1,'create','Documents','Created document client registration form administrator copy','127.0.0.1','2026-06-12 06:32:16'),(12,1,'create','Documents','Created document intent to buy','127.0.0.1','2026-06-12 06:32:21'),(13,1,'create','Documents','Created document offer to buy & buyer\'s profile','127.0.0.1','2026-06-12 06:32:24'),(14,1,'create','Documents','Created document reservation agreement','127.0.0.1','2026-06-12 06:32:29'),(15,1,'create','Documents','Created document deed of sale','127.0.0.1','2026-06-12 06:32:36'),(16,1,'payment','Payments','Added payment for client unit 1','127.0.0.1','2026-06-12 06:33:05'),(17,1,'update','Payments','Updated payment 1','127.0.0.1','2026-06-12 06:33:13'),(18,1,'payment','Payments','Added payment for client unit 1','127.0.0.1','2026-06-12 06:35:08'),(19,1,'create','Client Documents','Created document checklist for client unit 1','127.0.0.1','2026-06-12 06:50:42'),(20,1,'document_check','Client Documents','Updated client document 1 to approved','127.0.0.1','2026-06-12 06:50:47'),(21,1,'document_check','Client Documents','Updated client document 1 to submitted','127.0.0.1','2026-06-12 06:50:48'),(22,1,'document_check','Client Documents','Updated client document 2 to submitted','127.0.0.1','2026-06-12 06:50:49'),(23,1,'document_check','Client Documents','Updated client document 2 to approved','127.0.0.1','2026-06-12 06:50:51'),(24,1,'document_check','Client Documents','Updated client document 3 to submitted','127.0.0.1','2026-06-12 06:50:57'),(25,1,'document_check','Client Documents','Updated client document 3 to approved','127.0.0.1','2026-06-12 06:51:03'),(26,1,'document_check','Client Documents','Updated client document 4 to approved','127.0.0.1','2026-06-12 06:51:06'),(27,1,'document_check','Client Documents','Updated client document 4 to not_submitted','127.0.0.1','2026-06-12 06:51:09'),(28,1,'document_check','Client Documents','Updated client document 3 to not_submitted','127.0.0.1','2026-06-12 06:51:10'),(29,1,'document_check','Client Documents','Updated client document 3 to submitted','127.0.0.1','2026-06-12 06:51:19'),(30,1,'document_check','Client Documents','Updated client document 4 to submitted','127.0.0.1','2026-06-12 06:51:20'),(31,1,'document_check','Client Documents','Updated client document 5 to submitted','127.0.0.1','2026-06-12 06:51:21'),(32,1,'document_check','Client Documents','Updated client document 6 to submitted','127.0.0.1','2026-06-12 06:51:22'),(33,1,'document_check','Client Documents','Updated client document 2 to rejected','127.0.0.1','2026-06-12 06:51:27'),(34,1,'document_check','Client Documents','Updated client document 2 to not_submitted','127.0.0.1','2026-06-12 06:51:30'),(35,1,'document_check','Client Documents','Updated client document 3 to not_submitted','127.0.0.1','2026-06-12 06:51:31'),(36,1,'document_check','Client Documents','Updated client document 4 to not_submitted','127.0.0.1','2026-06-12 06:51:32'),(37,1,'document_check','Client Documents','Updated client document 5 to not_submitted','127.0.0.1','2026-06-12 06:51:33'),(38,1,'document_check','Client Documents','Updated client document 6 to not_submitted','127.0.0.1','2026-06-12 06:51:34'),(39,1,'update','Accredited Sellers','Updated accredited seller PARROCHO, JOSEPH E.. Synced 0 open commission(s).','127.0.0.1','2026-06-12 07:19:06'),(40,1,'document_check','Client Documents','Updated client document 2 to submitted','127.0.0.1','2026-06-12 08:13:44'),(41,1,'document_check','Client Documents','Updated client document 2 to approved','127.0.0.1','2026-06-12 08:14:31'),(42,1,'release','Commission Releases','Marked release 1 as released','127.0.0.1','2026-06-12 08:22:44'),(43,1,'create','Cash Advances','Created cash advance for PARROCHO, JOSEPH E.','127.0.0.1','2026-06-12 08:31:40'),(44,1,'approve','Cash Advances','Approved cash advance 1','127.0.0.1','2026-06-12 08:31:41'),(45,1,'deduct','Commission Releases','Deducted 1000 cash advance from release 7','127.0.0.1','2026-06-12 08:32:09'),(46,1,'create','Cash Advances','Created cash advance for PARROCHO, JOSEPH E.','127.0.0.1','2026-06-12 08:33:17'),(47,1,'approve','Cash Advances','Approved cash advance 2','127.0.0.1','2026-06-12 08:33:18'),(48,1,'deduct','Commission Releases','Deducted 864 cash advance from release 7','127.0.0.1','2026-06-12 08:33:39'),(49,1,'deduct','Commission Releases','Deducted 1864 cash advance from release 8','127.0.0.1','2026-06-12 08:33:49'),(50,1,'deduct','Commission Releases','Deducted 272 cash advance from release 9','127.0.0.1','2026-06-12 08:33:53'),(51,1,'create','Cash Advances','Created cash advance for PARROCHO, JOSEPH E.','127.0.0.1','2026-06-12 08:41:51'),(52,1,'approve','Cash Advances','Approved cash advance 3','127.0.0.1','2026-06-12 08:41:54'),(53,1,'payment','Payments','Added payment for client unit 1','127.0.0.1','2026-06-12 08:48:52'),(54,1,'document_check','Client Documents','Updated client document 1 to approved','127.0.0.1','2026-06-12 09:15:55'),(55,1,'document_check','Client Documents','Updated client document 3 to submitted','127.0.0.1','2026-06-12 10:00:14'),(56,1,'document_check','Client Documents','Updated client document 4 to submitted','127.0.0.1','2026-06-12 10:00:18'),(57,1,'document_check','Client Documents','Updated client document 5 to submitted','127.0.0.1','2026-06-12 10:00:21'),(58,1,'document_check','Client Documents','Updated client document 6 to submitted','127.0.0.1','2026-06-12 10:00:23'),(59,1,'update','Settings','Updated system settings','127.0.0.1','2026-06-12 10:02:47');
+INSERT INTO `audit_logs` VALUES (1,1,'create','Projects','Created project Bailen','::1','2026-06-12 06:23:49'),(2,1,'create','Projects','Created project Maragondon','::1','2026-06-12 06:24:05'),(3,1,'create','Listings','Created listing LA-1602','127.0.0.1','2026-06-12 06:25:11'),(4,1,'create','Listings','Created listing LA-0315','127.0.0.1','2026-06-12 06:25:50'),(5,1,'create','Accredited Sellers','Created accredited seller NEPOMUCENO, ERWIN','127.0.0.1','2026-06-12 06:26:34'),(6,1,'create','Accredited Sellers','Created accredited seller PARROCHO, JOSEPH E.','127.0.0.1','2026-06-12 06:27:02'),(7,1,'update','Accredited Sellers','Updated accredited seller NEPOMUCENO, ERWIN. Synced 0 open commission(s).','127.0.0.1','2026-06-12 06:27:08'),(8,1,'create','Clients','Created client AQUINO, JAYMILYN BERNARDO','127.0.0.1','2026-06-12 06:28:09'),(9,1,'reserve','Client Units','Reserved LA-1602 for AQUINO, JAYMILYN BERNARDO','127.0.0.1','2026-06-12 06:31:49'),(10,1,'create','Documents','Created document client registration form seller\'s copy','127.0.0.1','2026-06-12 06:32:14'),(11,1,'create','Documents','Created document client registration form administrator copy','127.0.0.1','2026-06-12 06:32:16'),(12,1,'create','Documents','Created document intent to buy','127.0.0.1','2026-06-12 06:32:21'),(13,1,'create','Documents','Created document offer to buy & buyer\'s profile','127.0.0.1','2026-06-12 06:32:24'),(14,1,'create','Documents','Created document reservation agreement','127.0.0.1','2026-06-12 06:32:29'),(15,1,'create','Documents','Created document deed of sale','127.0.0.1','2026-06-12 06:32:36'),(16,1,'payment','Payments','Added payment for client unit 1','127.0.0.1','2026-06-12 06:33:05'),(17,1,'update','Payments','Updated payment 1','127.0.0.1','2026-06-12 06:33:13'),(18,1,'payment','Payments','Added payment for client unit 1','127.0.0.1','2026-06-12 06:35:08'),(19,1,'create','Client Documents','Created document checklist for client unit 1','127.0.0.1','2026-06-12 06:50:42'),(20,1,'document_check','Client Documents','Updated client document 1 to approved','127.0.0.1','2026-06-12 06:50:47'),(21,1,'document_check','Client Documents','Updated client document 1 to submitted','127.0.0.1','2026-06-12 06:50:48'),(22,1,'document_check','Client Documents','Updated client document 2 to submitted','127.0.0.1','2026-06-12 06:50:49'),(23,1,'document_check','Client Documents','Updated client document 2 to approved','127.0.0.1','2026-06-12 06:50:51'),(24,1,'document_check','Client Documents','Updated client document 3 to submitted','127.0.0.1','2026-06-12 06:50:57'),(25,1,'document_check','Client Documents','Updated client document 3 to approved','127.0.0.1','2026-06-12 06:51:03'),(26,1,'document_check','Client Documents','Updated client document 4 to approved','127.0.0.1','2026-06-12 06:51:06'),(27,1,'document_check','Client Documents','Updated client document 4 to not_submitted','127.0.0.1','2026-06-12 06:51:09'),(28,1,'document_check','Client Documents','Updated client document 3 to not_submitted','127.0.0.1','2026-06-12 06:51:10'),(29,1,'document_check','Client Documents','Updated client document 3 to submitted','127.0.0.1','2026-06-12 06:51:19'),(30,1,'document_check','Client Documents','Updated client document 4 to submitted','127.0.0.1','2026-06-12 06:51:20'),(31,1,'document_check','Client Documents','Updated client document 5 to submitted','127.0.0.1','2026-06-12 06:51:21'),(32,1,'document_check','Client Documents','Updated client document 6 to submitted','127.0.0.1','2026-06-12 06:51:22'),(33,1,'document_check','Client Documents','Updated client document 2 to rejected','127.0.0.1','2026-06-12 06:51:27'),(34,1,'document_check','Client Documents','Updated client document 2 to not_submitted','127.0.0.1','2026-06-12 06:51:30'),(35,1,'document_check','Client Documents','Updated client document 3 to not_submitted','127.0.0.1','2026-06-12 06:51:31'),(36,1,'document_check','Client Documents','Updated client document 4 to not_submitted','127.0.0.1','2026-06-12 06:51:32'),(37,1,'document_check','Client Documents','Updated client document 5 to not_submitted','127.0.0.1','2026-06-12 06:51:33'),(38,1,'document_check','Client Documents','Updated client document 6 to not_submitted','127.0.0.1','2026-06-12 06:51:34'),(39,1,'update','Accredited Sellers','Updated accredited seller PARROCHO, JOSEPH E.. Synced 0 open commission(s).','127.0.0.1','2026-06-12 07:19:06'),(40,1,'document_check','Client Documents','Updated client document 2 to submitted','127.0.0.1','2026-06-12 08:13:44'),(41,1,'document_check','Client Documents','Updated client document 2 to approved','127.0.0.1','2026-06-12 08:14:31'),(42,1,'release','Commission Releases','Marked release 1 as released','127.0.0.1','2026-06-12 08:22:44'),(43,1,'create','Cash Advances','Created cash advance for PARROCHO, JOSEPH E.','127.0.0.1','2026-06-12 08:31:40'),(44,1,'approve','Cash Advances','Approved cash advance 1','127.0.0.1','2026-06-12 08:31:41'),(45,1,'deduct','Commission Releases','Deducted 1000 cash advance from release 7','127.0.0.1','2026-06-12 08:32:09'),(46,1,'create','Cash Advances','Created cash advance for PARROCHO, JOSEPH E.','127.0.0.1','2026-06-12 08:33:17'),(47,1,'approve','Cash Advances','Approved cash advance 2','127.0.0.1','2026-06-12 08:33:18'),(48,1,'deduct','Commission Releases','Deducted 864 cash advance from release 7','127.0.0.1','2026-06-12 08:33:39'),(49,1,'deduct','Commission Releases','Deducted 1864 cash advance from release 8','127.0.0.1','2026-06-12 08:33:49'),(50,1,'deduct','Commission Releases','Deducted 272 cash advance from release 9','127.0.0.1','2026-06-12 08:33:53'),(51,1,'create','Cash Advances','Created cash advance for PARROCHO, JOSEPH E.','127.0.0.1','2026-06-12 08:41:51'),(52,1,'approve','Cash Advances','Approved cash advance 3','127.0.0.1','2026-06-12 08:41:54'),(53,1,'payment','Payments','Added payment for client unit 1','127.0.0.1','2026-06-12 08:48:52'),(54,1,'document_check','Client Documents','Updated client document 1 to approved','127.0.0.1','2026-06-12 09:15:55'),(55,1,'document_check','Client Documents','Updated client document 3 to submitted','127.0.0.1','2026-06-12 10:00:14'),(56,1,'document_check','Client Documents','Updated client document 4 to submitted','127.0.0.1','2026-06-12 10:00:18'),(57,1,'document_check','Client Documents','Updated client document 5 to submitted','127.0.0.1','2026-06-12 10:00:21'),(58,1,'document_check','Client Documents','Updated client document 6 to submitted','127.0.0.1','2026-06-12 10:00:23'),(59,1,'update','Settings','Updated system settings','127.0.0.1','2026-06-12 10:02:47'),(60,1,'update','Buyer Profile','Updated buyer profile for AQUINO, JAYMILYN BERNARDO','127.0.0.1','2026-06-13 06:48:17'),(61,1,'update','Buyer Profile','Updated co-buyers for AQUINO, JAYMILYN BERNARDO','127.0.0.1','2026-06-13 06:48:17'),(62,1,'update','Buyer Profile','Updated employment details for AQUINO, JAYMILYN BERNARDO','127.0.0.1','2026-06-13 06:48:17'),(63,1,'update','Buyer Profile','Updated buyer profile for AQUINO, JAYMILYN BERNARDO','127.0.0.1','2026-06-13 06:48:18'),(64,1,'update','Buyer Profile','Updated co-buyers for AQUINO, JAYMILYN BERNARDO','127.0.0.1','2026-06-13 06:48:18'),(65,1,'update','Buyer Profile','Updated employment details for AQUINO, JAYMILYN BERNARDO','127.0.0.1','2026-06-13 06:48:18'),(66,1,'update','Buyer Profile','Updated buyer profile for AQUINO, JAYMILYN BERNARDO','127.0.0.1','2026-06-13 06:48:19'),(67,1,'update','Buyer Profile','Updated co-buyers for AQUINO, JAYMILYN BERNARDO','127.0.0.1','2026-06-13 06:48:19'),(68,1,'update','Buyer Profile','Updated employment details for AQUINO, JAYMILYN BERNARDO','127.0.0.1','2026-06-13 06:48:19'),(69,1,'update','Buyer Profile','Updated buyer profile for AQUINO, JAYMILYN BERNARDO','127.0.0.1','2026-06-13 06:48:19'),(70,1,'update','Buyer Profile','Updated co-buyers for AQUINO, JAYMILYN BERNARDO','127.0.0.1','2026-06-13 06:48:19'),(71,1,'update','Buyer Profile','Updated employment details for AQUINO, JAYMILYN BERNARDO','127.0.0.1','2026-06-13 06:48:19'),(72,1,'update','Buyer Profile','Updated buyer profile for AQUINO, JAYMILYN BERNARDO','127.0.0.1','2026-06-13 06:48:19'),(73,1,'update','Buyer Profile','Updated co-buyers for AQUINO, JAYMILYN BERNARDO','127.0.0.1','2026-06-13 06:48:19'),(74,1,'update','Buyer Profile','Updated employment details for AQUINO, JAYMILYN BERNARDO','127.0.0.1','2026-06-13 06:48:19'),(75,1,'update','Buyer Profile','Updated buyer profile for AQUINO, JAYMILYN BERNARDO','127.0.0.1','2026-06-13 06:48:20'),(76,1,'update','Buyer Profile','Updated co-buyers for AQUINO, JAYMILYN BERNARDO','127.0.0.1','2026-06-13 06:48:20'),(77,1,'update','Buyer Profile','Updated employment details for AQUINO, JAYMILYN BERNARDO','127.0.0.1','2026-06-13 06:48:20'),(78,1,'update','Buyer Profile','Updated buyer profile for AQUINO, JAYMILYN BERNARDO','127.0.0.1','2026-06-13 06:48:20');
 /*!40000 ALTER TABLE `audit_logs` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -199,6 +199,48 @@ INSERT INTO `cash_advances` VALUES (1,2,1,2,1000.00,0.00,'deducted','2026-06-12 
 UNLOCK TABLES;
 
 --
+-- Table structure for table `client_buyers`
+--
+
+DROP TABLE IF EXISTS `client_buyers`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `client_buyers` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `client_id` int NOT NULL,
+  `buyer_role` enum('spouse','second_buyer') NOT NULL DEFAULT 'spouse',
+  `full_name` varchar(255) DEFAULT NULL,
+  `birth_date` date DEFAULT NULL,
+  `place_of_birth` varchar(255) DEFAULT NULL,
+  `citizenship` varchar(100) DEFAULT NULL,
+  `gender` enum('male','female','other') DEFAULT NULL,
+  `civil_status` enum('single','married','separated','annulled_divorced','widower') DEFAULT NULL,
+  `present_address` varchar(500) DEFAULT NULL,
+  `present_zip_code` varchar(20) DEFAULT NULL,
+  `permanent_address` varchar(500) DEFAULT NULL,
+  `permanent_zip_code` varchar(20) DEFAULT NULL,
+  `mobile_no` varchar(50) DEFAULT NULL,
+  `residence_phone_no` varchar(50) DEFAULT NULL,
+  `email` varchar(255) DEFAULT NULL,
+  `tin` varchar(50) DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_client_buyers_client_id` (`client_id`),
+  CONSTRAINT `fk_client_buyers_client` FOREIGN KEY (`client_id`) REFERENCES `clients` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Dumping data for table `client_buyers`
+--
+
+LOCK TABLES `client_buyers` WRITE;
+/*!40000 ALTER TABLE `client_buyers` DISABLE KEYS */;
+/*!40000 ALTER TABLE `client_buyers` ENABLE KEYS */;
+UNLOCK TABLES;
+
+--
 -- Table structure for table `client_document_list`
 --
 
@@ -236,6 +278,45 @@ INSERT INTO `client_document_list` VALUES (1,1,1,NULL,'approved',1,'2026-06-12 1
 UNLOCK TABLES;
 
 --
+-- Table structure for table `client_employment_details`
+--
+
+DROP TABLE IF EXISTS `client_employment_details`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `client_employment_details` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `client_id` int NOT NULL,
+  `client_buyer_id` int DEFAULT NULL,
+  `person_type` enum('principal','co_buyer') NOT NULL DEFAULT 'principal',
+  `employment_status` enum('employed_private','employed_government','employed_ngo','self_employed_business','self_employed_professional','ofw_immigrant','other') DEFAULT NULL,
+  `employment_status_other` varchar(255) DEFAULT NULL,
+  `employer_business_name` varchar(255) DEFAULT NULL,
+  `employer_business_address` varchar(500) DEFAULT NULL,
+  `employer_zip_code` varchar(20) DEFAULT NULL,
+  `nature_of_work_business` varchar(255) DEFAULT NULL,
+  `occupation_position_title` varchar(255) DEFAULT NULL,
+  `monthly_income` decimal(15,2) DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_client_employment_details_client_id` (`client_id`),
+  KEY `idx_client_employment_details_client_buyer_id` (`client_buyer_id`),
+  CONSTRAINT `fk_client_employment_details_buyer` FOREIGN KEY (`client_buyer_id`) REFERENCES `client_buyers` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_client_employment_details_client` FOREIGN KEY (`client_id`) REFERENCES `clients` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Dumping data for table `client_employment_details`
+--
+
+LOCK TABLES `client_employment_details` WRITE;
+/*!40000 ALTER TABLE `client_employment_details` DISABLE KEYS */;
+/*!40000 ALTER TABLE `client_employment_details` ENABLE KEYS */;
+UNLOCK TABLES;
+
+--
 -- Table structure for table `client_units`
 --
 
@@ -252,6 +333,17 @@ CREATE TABLE `client_units` (
   `mode_of_payment` enum('cash','installment') NOT NULL DEFAULT 'installment',
   `balance` decimal(15,2) NOT NULL DEFAULT '0.00',
   `due_day` tinyint DEFAULT NULL,
+  `starting_date` date DEFAULT NULL,
+  `due_date` date DEFAULT NULL,
+  `offer_purchase_price` decimal(15,2) DEFAULT NULL,
+  `reservation_fee_amount` decimal(15,2) DEFAULT NULL,
+  `downpayment_amount` decimal(15,2) NOT NULL DEFAULT '0.00',
+  `deferred_cash_amount` decimal(15,2) NOT NULL DEFAULT '0.00',
+  `offer_balance_amount` decimal(15,2) DEFAULT NULL,
+  `payment_terms_months` int DEFAULT NULL,
+  `interest_rate` decimal(5,2) NOT NULL DEFAULT '0.00',
+  `monthly_amortization` decimal(15,2) DEFAULT NULL,
+  `contract_processing_status` enum('pending_profile','profile_complete','docs_complete','ready_for_contract','contract_signed') NOT NULL DEFAULT 'pending_profile',
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
@@ -259,6 +351,10 @@ CREATE TABLE `client_units` (
   KEY `fk_client_units_listing` (`listing_id`),
   KEY `fk_client_units_assigned_user` (`assigned_user_id`),
   KEY `fk_client_units_seller` (`seller_id`),
+  KEY `idx_client_units_due_date` (`due_date`),
+  KEY `idx_client_units_starting_date` (`starting_date`),
+  KEY `idx_client_units_payment_terms` (`mode_of_payment`,`payment_terms_months`),
+  KEY `idx_client_units_contract_processing_status` (`contract_processing_status`),
   CONSTRAINT `fk_client_units_assigned_user` FOREIGN KEY (`assigned_user_id`) REFERENCES `users` (`id`),
   CONSTRAINT `fk_client_units_client` FOREIGN KEY (`client_id`) REFERENCES `clients` (`id`),
   CONSTRAINT `fk_client_units_listing` FOREIGN KEY (`listing_id`) REFERENCES `listings` (`id`),
@@ -273,7 +369,7 @@ CREATE TABLE `client_units` (
 
 LOCK TABLES `client_units` WRITE;
 /*!40000 ALTER TABLE `client_units` DISABLE KEYS */;
-INSERT INTO `client_units` VALUES (1,1,1,1,1,'fully_paid','installment',0.00,12,'2026-06-12 06:31:49','2026-06-12 08:48:52');
+INSERT INTO `client_units` VALUES (1,1,1,1,1,'fully_paid','installment',462600.00,12,'2026-06-12',NULL,512600.00,50000.00,0.00,0.00,462600.00,36,0.00,12850.00,'pending_profile','2026-06-12 06:31:49','2026-06-13 06:22:49');
 /*!40000 ALTER TABLE `client_units` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -288,9 +384,22 @@ CREATE TABLE `clients` (
   `id` int NOT NULL AUTO_INCREMENT,
   `full_name` varchar(255) NOT NULL,
   `spouse_co_owner_name` varchar(255) DEFAULT NULL,
+  `buyer_type` enum('single','spouses','and_account') NOT NULL DEFAULT 'single',
+  `birth_date` date DEFAULT NULL,
+  `place_of_birth` varchar(255) DEFAULT NULL,
+  `citizenship` varchar(100) DEFAULT NULL,
+  `gender` enum('male','female','other') DEFAULT NULL,
+  `civil_status` enum('single','married','separated','annulled_divorced','widower') DEFAULT NULL,
   `email` varchar(255) DEFAULT NULL,
   `contact_no` varchar(50) DEFAULT NULL,
+  `residence_phone_no` varchar(50) DEFAULT NULL,
+  `tin` varchar(50) DEFAULT NULL,
+  `profile_status` enum('incomplete','complete') NOT NULL DEFAULT 'incomplete',
   `address` varchar(255) DEFAULT NULL,
+  `present_address` varchar(500) DEFAULT NULL,
+  `present_zip_code` varchar(20) DEFAULT NULL,
+  `permanent_address` varchar(500) DEFAULT NULL,
+  `permanent_zip_code` varchar(20) DEFAULT NULL,
   `region` varchar(255) DEFAULT NULL,
   `default_seller_id` int DEFAULT NULL,
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -307,7 +416,7 @@ CREATE TABLE `clients` (
 
 LOCK TABLES `clients` WRITE;
 /*!40000 ALTER TABLE `clients` DISABLE KEYS */;
-INSERT INTO `clients` VALUES (1,'AQUINO, JAYMILYN BERNARDO','n/a','jaymilynaquino011788@gmail.com','0997-419-7271','BACOOR, CAVITE','REGION IV-A',1,'2026-06-12 06:28:09','2026-06-12 06:28:09');
+INSERT INTO `clients` VALUES (1,'AQUINO, JAYMILYN BERNARDO','n/a','single',NULL,NULL,NULL,NULL,NULL,'jaymilynaquino011788@gmail.com','0997-419-7271',NULL,NULL,'incomplete','BACOOR, CAVITE','BACOOR, CAVITE',NULL,NULL,NULL,'REGION IV-A',1,'2026-06-12 06:28:09','2026-06-13 06:47:37');
 /*!40000 ALTER TABLE `clients` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -548,6 +657,7 @@ CREATE TABLE `projects` (
   `id` int NOT NULL AUTO_INCREMENT,
   `name` varchar(255) NOT NULL,
   `location` varchar(255) DEFAULT NULL,
+  `location_code` varchar(10) NOT NULL DEFAULT '',
   `administrator` varchar(255) DEFAULT NULL,
   `tax_declaration_no` varchar(255) DEFAULT NULL,
   `pin` varchar(255) DEFAULT NULL,
@@ -555,7 +665,8 @@ CREATE TABLE `projects` (
   `ended_at` date DEFAULT NULL,
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`)
+  PRIMARY KEY (`id`),
+  KEY `idx_projects_location_code` (`location_code`)
 ) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -565,7 +676,7 @@ CREATE TABLE `projects` (
 
 LOCK TABLES `projects` WRITE;
 /*!40000 ALTER TABLE `projects` DISABLE KEYS */;
-INSERT INTO `projects` VALUES (1,'Bailen','Bailen, Cavite','IMELDA B. VILLALOBOS','AA-06-0005-00105','022-06-0005-003-04','active',NULL,'2026-06-12 06:23:49','2026-06-12 06:23:49'),(2,'Maragondon','Maragondon, Cavite','n/a','n/a','n/a','active',NULL,'2026-06-12 06:24:05','2026-06-12 06:24:05');
+INSERT INTO `projects` VALUES (1,'Bailen','Bailen, Cavite','LA','IMELDA B. VILLALOBOS','AA-06-0005-00105','022-06-0005-003-04','active',NULL,'2026-06-12 06:23:49','2026-06-13 06:04:57'),(2,'Maragondon','Maragondon, Cavite','PE','n/a','n/a','n/a','active',NULL,'2026-06-12 06:24:05','2026-06-13 06:04:57');
 /*!40000 ALTER TABLE `projects` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -665,4 +776,4 @@ UNLOCK TABLES;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2026-06-13 10:28:58
+-- Dump completed on 2026-06-13 14:49:39
