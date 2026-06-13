@@ -2,6 +2,41 @@ import { db } from '../db/connect.js'
 import { createAuditLog } from '../utils/createAuditLog.js'
 import { getClientIp } from '../utils/getClientIp.js'
 
+const isMissing = (value) => {
+  return value === undefined || value === null || value === ''
+}
+
+const normalizeLocationCode = (value) => {
+  if (isMissing(value)) return ''
+  return String(value).trim().toUpperCase()
+}
+
+const validateLocationCode = (value) => {
+  const locationCode = normalizeLocationCode(value)
+
+  if (locationCode.length === 0) {
+    return {
+      isValid: false,
+      message: 'Location code is required',
+      value: locationCode
+    }
+  }
+
+  if (locationCode.length > 10) {
+    return {
+      isValid: false,
+      message: 'Location code must be 1 to 10 characters',
+      value: locationCode
+    }
+  }
+
+  return {
+    isValid: true,
+    message: null,
+    value: locationCode
+  }
+}
+
 export const getProjects = async (req, res) => {
   const [projects] = await db.query(
     `
@@ -9,6 +44,7 @@ export const getProjects = async (req, res) => {
       id,
       name,
       location,
+      location_code,
       administrator,
       tax_declaration_no,
       pin,
@@ -35,6 +71,7 @@ export const getProject = async (req, res) => {
       id,
       name,
       location,
+      location_code,
       administrator,
       tax_declaration_no,
       pin,
@@ -66,6 +103,7 @@ export const createProject = async (req, res) => {
   const {
     name,
     location,
+    location_code,
     administrator,
     tax_declaration_no,
     pin,
@@ -78,11 +116,20 @@ export const createProject = async (req, res) => {
     })
   }
 
+  const locationCodeValidation = validateLocationCode(location_code)
+
+  if (!locationCodeValidation.isValid) {
+    return res.status(400).json({
+      message: locationCodeValidation.message
+    })
+  }
+
   const [result] = await db.query(
     `
     INSERT INTO projects (
       name,
       location,
+      location_code,
       administrator,
       tax_declaration_no,
       pin,
@@ -92,6 +139,7 @@ export const createProject = async (req, res) => {
     [
       name,
       location || null,
+      locationCodeValidation.value,
       administrator || null,
       tax_declaration_no || null,
       pin || null,
@@ -119,6 +167,7 @@ export const updateProject = async (req, res) => {
   const {
     name,
     location,
+    location_code,
     administrator,
     tax_declaration_no,
     pin,
@@ -132,12 +181,50 @@ export const updateProject = async (req, res) => {
     })
   }
 
+  const [existingRows] = await db.query(
+    `
+    SELECT id, location_code
+    FROM projects
+    WHERE id = ?
+    LIMIT 1
+    `,
+    [id]
+  )
+
+  const existingProject = existingRows[0]
+
+  if (!existingProject) {
+    return res.status(404).json({
+      message: 'Project not found'
+    })
+  }
+
+  const hasLocationCode = Object.prototype.hasOwnProperty.call(
+    req.body,
+    'location_code'
+  )
+
+  let finalLocationCode = existingProject.location_code || ''
+
+  if (hasLocationCode) {
+    const locationCodeValidation = validateLocationCode(location_code)
+
+    if (!locationCodeValidation.isValid) {
+      return res.status(400).json({
+        message: locationCodeValidation.message
+      })
+    }
+
+    finalLocationCode = locationCodeValidation.value
+  }
+
   const [result] = await db.query(
     `
     UPDATE projects
     SET
       name = ?,
       location = ?,
+      location_code = ?,
       administrator = ?,
       tax_declaration_no = ?,
       pin = ?,
@@ -148,6 +235,7 @@ export const updateProject = async (req, res) => {
     [
       name,
       location || null,
+      finalLocationCode,
       administrator || null,
       tax_declaration_no || null,
       pin || null,

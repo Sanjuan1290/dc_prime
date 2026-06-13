@@ -183,6 +183,7 @@ const listingFields = `
   l.project_id,
   p.name AS project_name,
   p.location AS project_location,
+  p.location_code AS project_location_code,
   p.administrator AS project_administrator,
   l.cadastral_lot_no,
   l.unit_id,

@@ -29,6 +29,7 @@ type Project = {
   id: number;
   name: string;
   location: string | null;
+  location_code: string;
   administrator: string | null;
   tax_declaration_no: string | null;
   pin: string | null;
@@ -41,6 +42,7 @@ type Project = {
 type ProjectFormData = {
   name: string;
   location: string;
+  location_code: string;
   administrator: string;
   tax_declaration_no: string;
   pin: string;
@@ -54,6 +56,7 @@ type ProjectsResponse = {
 const emptyFormData: ProjectFormData = {
   name: "",
   location: "",
+  location_code: "",
   administrator: "",
   tax_declaration_no: "",
   pin: "",
@@ -124,6 +127,7 @@ const deleteProject = async (id: number) => {
 const projectToFormData = (project: Project): ProjectFormData => ({
   name: project.name,
   location: project.location ?? "",
+  location_code: project.location_code ?? "",
   administrator: project.administrator ?? "",
   tax_declaration_no: project.tax_declaration_no ?? "",
   pin: project.pin ?? "",
@@ -213,6 +217,7 @@ const Projects = () => {
       search === "" ||
       project.name.toLowerCase().includes(search) ||
       (project.location ?? "").toLowerCase().includes(search) ||
+      (project.location_code ?? "").toLowerCase().includes(search) ||
       (project.administrator ?? "").toLowerCase().includes(search) ||
       (project.tax_declaration_no ?? "").toLowerCase().includes(search) ||
       (project.pin ?? "").toLowerCase().includes(search) ||
@@ -247,6 +252,18 @@ const Projects = () => {
         label="Location"
         onChange={(e) => setData({ ...data, location: e.target.value })}
         value={data.location}
+      />
+      <Input
+        label="Location Code"
+        maxLength={10}
+        onChange={(e) =>
+          setData({
+            ...data,
+            location_code: e.target.value.toUpperCase(),
+          })
+        }
+        required
+        value={data.location_code}
       />
       <Input
         label="Administrator"
@@ -361,6 +378,7 @@ const Projects = () => {
                     {[
                       "Name",
                       "Location",
+                      "Location Code",
                       "Administrator",
                       "Tax Declaration No.",
                       "PIN",
@@ -387,6 +405,11 @@ const Projects = () => {
                       </td>
                       <td className="px-4 py-3 text-slate-600">
                         {project.location || "-"}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="inline-flex rounded border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-bold tracking-wide text-slate-700">
+                          {project.location_code || "-"}
+                        </span>
                       </td>
                       <td className="px-4 py-3 text-slate-600">
                         {project.administrator || "-"}
@@ -471,6 +494,9 @@ const Projects = () => {
             </p>
             <p>
               <b>Location:</b> {viewProject.location || "-"}
+            </p>
+            <p>
+              <b>Location Code:</b> {viewProject.location_code || "-"}
             </p>
             <p>
               <b>Administrator:</b> {viewProject.administrator || "-"}

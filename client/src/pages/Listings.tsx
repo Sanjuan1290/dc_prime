@@ -45,6 +45,7 @@ type Listing = {
   project_id: number;
   project_name: string;
   project_location?: string | null;
+  project_location_code?: string | null;
   project_administrator?: string | null;
   cadastral_lot_no: string | null;
   unit_id: string;
@@ -73,6 +74,7 @@ type Listing = {
 type Project = {
   id: number;
   name: string;
+  location_code: string;
 };
 
 type ClientUnitFullDetails = {
@@ -405,6 +407,13 @@ const didLmfRateChange = (
   );
 };
 
+const getProjectLocationPrefix = (projects: Project[], projectId: number) => {
+  const project = projects.find((item) => Number(item.id) === Number(projectId));
+  const locationCode = (project?.location_code || "").trim().toUpperCase();
+
+  return locationCode ? `${locationCode}-` : "";
+};
+
 const Listings = () => {
   const queryClient = useQueryClient();
 
@@ -512,18 +521,24 @@ const Listings = () => {
   const projectFormDefault = () => projects[0]?.id ?? 0;
 
   const resetForm = () => {
+    const projectId = projectFormDefault();
+
     setFormData({
       ...defaultListingFormData,
-      project_id: projectFormDefault(),
+      project_id: projectId,
+      unit_id: getProjectLocationPrefix(projects, projectId),
     });
     setLotTypeMode("inner");
     setCustomLotType("");
   };
 
   const openAddModal = () => {
+    const projectId = projectFormDefault();
+
     setFormData({
       ...defaultListingFormData,
-      project_id: projectFormDefault(),
+      project_id: projectId,
+      unit_id: getProjectLocationPrefix(projects, projectId),
     });
     setLotTypeMode("inner");
     setCustomLotType("");
@@ -932,6 +947,7 @@ const Listings = () => {
           onClose={() => setIsAddOpen(false)}
           isPending={createListingMutation.isPending}
           submitLabel="Add Listing"
+          autoPrefixUnitId
         />
       ) : null}
 
@@ -1019,6 +1035,7 @@ type ListingFormModalProps = {
   onClose: () => void;
   isPending: boolean;
   submitLabel: string;
+  autoPrefixUnitId?: boolean;
 };
 
 const ListingFormModal = ({
@@ -1034,6 +1051,7 @@ const ListingFormModal = ({
   onClose,
   isPending,
   submitLabel,
+  autoPrefixUnitId = false,
 }: ListingFormModalProps) => {
   const formId = `${title.replaceAll(" ", "-").toLowerCase()}-form`;
   const breakdown = calculateListingBreakdown(formData);
@@ -1078,18 +1096,33 @@ const ListingFormModal = ({
         <Select
           label="Project Name"
           value={formData.project_id}
-          onChange={(e) =>
+          onChange={(e) => {
+            const nextProjectId = Number(e.target.value);
+            const oldPrefix = getProjectLocationPrefix(
+              projects,
+              formData.project_id,
+            );
+            const nextPrefix = getProjectLocationPrefix(projects, nextProjectId);
+            const currentUnitId = formData.unit_id.trim();
+            const shouldReplacePrefix =
+              autoPrefixUnitId &&
+              (currentUnitId === "" ||
+                (oldPrefix !== "" && currentUnitId === oldPrefix));
+
             setFormData({
               ...formData,
-              project_id: Number(e.target.value),
-            })
-          }
+              project_id: nextProjectId,
+              unit_id: shouldReplacePrefix ? nextPrefix : formData.unit_id,
+            });
+          }}
           required
         >
           <option value={0}>Select project</option>
           {projects.map((project) => (
             <option key={project.id} value={project.id}>
-              {project.name}
+              {project.location_code
+                ? `${project.location_code} - ${project.name}`
+                : project.name}
             </option>
           ))}
         </Select>
