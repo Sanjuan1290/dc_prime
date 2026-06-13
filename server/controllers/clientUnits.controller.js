@@ -16,6 +16,8 @@ const allowedClientUnitStatuses = [
 
 const allowedSaleTypes = ['distributed', 'direct']
 const allowedModeOfPayments = ['cash', 'installment']
+const allowedPaymentTermsMonths = [36, 60]
+const defaultContractProcessingStatus = 'pending_profile'
 
 const isMissing = (value) => {
   return value === undefined || value === null || value === ''
@@ -28,6 +30,89 @@ const nullableValue = (value) => {
 
 const normalizeMoney = (value) => {
   return Number(Number(value || 0).toFixed(2))
+}
+
+const parseDateOnly = (value) => {
+  if (isMissing(value)) return null
+
+  const dateString = String(value).trim()
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateString)) return null
+
+  const [year, month, day] = dateString.split('-').map(Number)
+  const parsedDate = new Date(year, month - 1, day)
+
+  if (
+    parsedDate.getFullYear() !== year ||
+    parsedDate.getMonth() !== month - 1 ||
+    parsedDate.getDate() !== day
+  ) {
+    return null
+  }
+
+  return dateString
+}
+
+const getDueDayFromDate = (dateString) => {
+  if (!dateString) return null
+  return Number(dateString.slice(8, 10))
+}
+
+const validateNonNegativeMoney = (
+  value,
+  fieldName,
+  { required = false, defaultValue = 0 } = {}
+) => {
+  if (isMissing(value)) {
+    if (required) {
+      return {
+        isValid: false,
+        message: `${fieldName} is required`,
+      }
+    }
+
+    return {
+      isValid: true,
+      value: normalizeMoney(defaultValue),
+    }
+  }
+
+  const parsedValue = Number(value)
+
+  if (!Number.isFinite(parsedValue) || parsedValue < 0) {
+    return {
+      isValid: false,
+      message: `${fieldName} must be a non-negative amount`,
+    }
+  }
+
+  return {
+    isValid: true,
+    value: normalizeMoney(parsedValue),
+  }
+}
+
+const validateNonNegativeRate = (value, fieldName, defaultValue = 0) => {
+  if (isMissing(value)) {
+    return {
+      isValid: true,
+      value: normalizeMoney(defaultValue),
+    }
+  }
+
+  const parsedValue = Number(value)
+
+  if (!Number.isFinite(parsedValue) || parsedValue < 0) {
+    return {
+      isValid: false,
+      message: `${fieldName} must be a non-negative percentage`,
+    }
+  }
+
+  return {
+    isValid: true,
+    value: normalizeMoney(parsedValue),
+  }
 }
 
 const validateDueDay = (dueDay) => {
@@ -71,6 +156,186 @@ const validateModeOfPayment = (modeOfPayment) => {
   return modeOfPayment
 }
 
+const getListingPurchasePrice = (listing) => {
+  const totalContractPrice = normalizeMoney(listing.total_contract_price)
+
+  if (totalContractPrice > 0) return totalContractPrice
+
+  return normalizeMoney(
+    Number(listing.net_selling_price || 0) + Number(listing.legal_misc_fee || 0)
+  )
+}
+
+const calculateMonthlyAmortization = ({
+  balance,
+  termsMonths,
+  interestRate,
+}) => {
+  if (!termsMonths) return null
+
+  const balanceWithInterest = normalizeMoney(
+    balance + balance * (Number(interestRate || 0) / 100)
+  )
+
+  return normalizeMoney(balanceWithInterest / termsMonths)
+}
+
+const buildReservationTerms = ({
+  listing,
+  modeOfPayment,
+  startingDate,
+  dueDate,
+  reservationFeeAmount,
+  downpaymentAmount,
+  deferredCashAmount,
+  paymentTermsMonths,
+  interestRate,
+  monthlyAmortization,
+}) => {
+  if (isMissing(modeOfPayment) || !allowedModeOfPayments.includes(modeOfPayment)) {
+    return {
+      isValid: false,
+      message: 'Mode of payment is required',
+    }
+  }
+
+  const finalStartingDate = parseDateOnly(startingDate)
+
+  if (!finalStartingDate) {
+    return {
+      isValid: false,
+      message: 'Starting date is required',
+    }
+  }
+
+  const finalDueDate = parseDateOnly(dueDate)
+
+  if (!finalDueDate) {
+    return {
+      isValid: false,
+      message: 'First due date is required',
+    }
+  }
+
+  const reservationFeeValidation = validateNonNegativeMoney(
+    reservationFeeAmount,
+    'Reservation fee',
+    { required: true }
+  )
+
+  if (!reservationFeeValidation.isValid) {
+    return reservationFeeValidation
+  }
+
+  const purchasePrice = getListingPurchasePrice(listing)
+  const isInstallment = modeOfPayment === 'installment'
+
+  const downpaymentValidation = isInstallment
+    ? validateNonNegativeMoney(downpaymentAmount, 'Downpayment')
+    : {
+        isValid: true,
+        value: 0,
+      }
+
+  if (!downpaymentValidation.isValid) {
+    return downpaymentValidation
+  }
+
+  const deferredCashValidation =
+    modeOfPayment === 'cash'
+      ? validateNonNegativeMoney(deferredCashAmount, 'Deferred cash amount')
+      : {
+          isValid: true,
+          value: 0,
+        }
+
+  if (!deferredCashValidation.isValid) {
+    return deferredCashValidation
+  }
+
+  let finalPaymentTermsMonths = null
+  let finalInterestRate = 0
+  let finalMonthlyAmortization = null
+
+  if (isInstallment) {
+    const parsedTermsMonths = Number(paymentTermsMonths)
+
+    if (!allowedPaymentTermsMonths.includes(parsedTermsMonths)) {
+      return {
+        isValid: false,
+        message: 'Payment terms must be 36 or 60 months',
+      }
+    }
+
+    finalPaymentTermsMonths = parsedTermsMonths
+
+    const interestRateValidation = validateNonNegativeRate(
+      interestRate,
+      'Interest rate'
+    )
+
+    if (!interestRateValidation.isValid) {
+      return interestRateValidation
+    }
+
+    finalInterestRate = interestRateValidation.value
+  }
+
+  const offerBalanceAmount = normalizeMoney(
+    purchasePrice -
+      reservationFeeValidation.value -
+      downpaymentValidation.value -
+      deferredCashValidation.value
+  )
+
+  if (offerBalanceAmount < 0) {
+    return {
+      isValid: false,
+      message:
+        'Reservation fee, downpayment, and deferred cash amount cannot exceed purchase price',
+    }
+  }
+
+  if (isInstallment) {
+    const computedMonthlyAmortization = calculateMonthlyAmortization({
+      balance: offerBalanceAmount,
+      termsMonths: finalPaymentTermsMonths,
+      interestRate: finalInterestRate,
+    })
+
+    const monthlyAmortizationValidation = isMissing(monthlyAmortization)
+      ? {
+          isValid: true,
+          value: computedMonthlyAmortization,
+        }
+      : validateNonNegativeMoney(monthlyAmortization, 'Monthly amortization')
+
+    if (!monthlyAmortizationValidation.isValid) {
+      return monthlyAmortizationValidation
+    }
+
+    finalMonthlyAmortization = monthlyAmortizationValidation.value
+  }
+
+  return {
+    isValid: true,
+    value: {
+      startingDate: finalStartingDate,
+      dueDate: finalDueDate,
+      dueDay: getDueDayFromDate(finalDueDate),
+      offerPurchasePrice: purchasePrice,
+      reservationFeeAmount: reservationFeeValidation.value,
+      downpaymentAmount: downpaymentValidation.value,
+      deferredCashAmount: deferredCashValidation.value,
+      offerBalanceAmount,
+      paymentTermsMonths: finalPaymentTermsMonths,
+      interestRate: finalInterestRate,
+      monthlyAmortization: finalMonthlyAmortization,
+      contractProcessingStatus: defaultContractProcessingStatus,
+    },
+  }
+}
+
 const clientUnitFields = `
   cu.id,
   cu.client_id,
@@ -97,6 +362,17 @@ const clientUnitFields = `
   END AS payment_percentage,
   cu.mode_of_payment,
   cu.due_day,
+  cu.starting_date,
+  cu.due_date,
+  cu.offer_purchase_price,
+  cu.reservation_fee_amount,
+  cu.downpayment_amount,
+  cu.deferred_cash_amount,
+  cu.offer_balance_amount,
+  cu.payment_terms_months,
+  cu.interest_rate,
+  cu.monthly_amortization,
+  cu.contract_processing_status,
   cu.status,
   cu.assigned_user_id,
   u.full_name AS assigned_user_name,
@@ -676,9 +952,16 @@ export const reserveListing = async (req, res) => {
   const {
     listing_id,
     seller_id,
-    due_day,
     status = 'reserved',
-    mode_of_payment = 'installment',
+    mode_of_payment,
+    starting_date,
+    due_date,
+    reservation_fee_amount,
+    downpayment_amount = 0,
+    deferred_cash_amount = 0,
+    payment_terms_months,
+    interest_rate = 0,
+    monthly_amortization,
     assigned_user_id,
     main_commission_rate_override,
     sale_type = 'distributed',
@@ -702,11 +985,9 @@ export const reserveListing = async (req, res) => {
     })
   }
 
-  const dueDayValidation = validateDueDay(due_day)
-
-  if (!dueDayValidation.isValid) {
+  if (isMissing(mode_of_payment) || !allowedModeOfPayments.includes(mode_of_payment)) {
     return res.status(400).json({
-      message: 'Due day must be between 1 and 31',
+      message: 'Mode of payment is required',
     })
   }
 
@@ -726,7 +1007,7 @@ export const reserveListing = async (req, res) => {
   }
 
   const finalSaleType = validateSaleType(sale_type)
-  const finalModeOfPayment = validateModeOfPayment(mode_of_payment)
+  const finalModeOfPayment = mode_of_payment
 
   const connection = await db.getConnection()
 
@@ -757,6 +1038,28 @@ export const reserveListing = async (req, res) => {
         message: 'Listing is not available',
       })
     }
+
+    const reservationTerms = buildReservationTerms({
+      listing,
+      modeOfPayment: finalModeOfPayment,
+      startingDate: starting_date,
+      dueDate: due_date,
+      reservationFeeAmount: reservation_fee_amount,
+      downpaymentAmount: downpayment_amount,
+      deferredCashAmount: deferred_cash_amount,
+      paymentTermsMonths: payment_terms_months,
+      interestRate: interest_rate,
+      monthlyAmortization: monthly_amortization,
+    })
+
+    if (!reservationTerms.isValid) {
+      await connection.rollback()
+      return res.status(400).json({
+        message: reservationTerms.message,
+      })
+    }
+
+    const terms = reservationTerms.value
 
     const finalSellerId = !isMissing(seller_id)
       ? seller_id
@@ -814,8 +1117,6 @@ export const reserveListing = async (req, res) => {
       })
     }
 
-    const totalContractPrice = normalizeMoney(listing.total_contract_price)
-
     const [result] = await connection.query(
       `
       INSERT INTO client_units (
@@ -826,8 +1127,19 @@ export const reserveListing = async (req, res) => {
         status,
         mode_of_payment,
         balance,
-        due_day
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        due_day,
+        starting_date,
+        due_date,
+        offer_purchase_price,
+        reservation_fee_amount,
+        downpayment_amount,
+        deferred_cash_amount,
+        offer_balance_amount,
+        payment_terms_months,
+        interest_rate,
+        monthly_amortization,
+        contract_processing_status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         clientId,
@@ -836,8 +1148,19 @@ export const reserveListing = async (req, res) => {
         finalSellerId,
         status,
         finalModeOfPayment,
-        totalContractPrice,
-        dueDayValidation.value,
+        terms.offerBalanceAmount,
+        terms.dueDay,
+        terms.startingDate,
+        terms.dueDate,
+        terms.offerPurchasePrice,
+        terms.reservationFeeAmount,
+        terms.downpaymentAmount,
+        terms.deferredCashAmount,
+        terms.offerBalanceAmount,
+        terms.paymentTermsMonths,
+        terms.interestRate,
+        terms.monthlyAmortization,
+        terms.contractProcessingStatus,
       ]
     )
 
@@ -891,6 +1214,18 @@ export const reserveListing = async (req, res) => {
       data: {
         clientUnitId,
         commissions: createdCommissions,
+        starting_date: terms.startingDate,
+        due_date: terms.dueDate,
+        due_day: terms.dueDay,
+        offer_purchase_price: terms.offerPurchasePrice,
+        reservation_fee_amount: terms.reservationFeeAmount,
+        downpayment_amount: terms.downpaymentAmount,
+        deferred_cash_amount: terms.deferredCashAmount,
+        offer_balance_amount: terms.offerBalanceAmount,
+        payment_terms_months: terms.paymentTermsMonths,
+        interest_rate: terms.interestRate,
+        monthly_amortization: terms.monthlyAmortization,
+        contract_processing_status: terms.contractProcessingStatus,
       },
     })
   } catch (err) {

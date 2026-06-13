@@ -27,6 +27,7 @@ import {
   formatMoney,
   formatNumber,
   formatText,
+  getLocalDate,
 } from "../utils/formatters"
 
 type Client = {
@@ -64,6 +65,17 @@ type ClientUnit = {
   payment_percentage?: number | string
   mode_of_payment?: string | null
   due_day: number | null
+  starting_date?: string | null
+  due_date?: string | null
+  offer_purchase_price?: number | string | null
+  reservation_fee_amount?: number | string | null
+  downpayment_amount?: number | string | null
+  deferred_cash_amount?: number | string | null
+  offer_balance_amount?: number | string | null
+  payment_terms_months?: number | string | null
+  interest_rate?: number | string | null
+  monthly_amortization?: number | string | null
+  contract_processing_status?: string | null
   status: string
   assigned_user_id: number | null
   assigned_user_name: string | null
@@ -163,9 +175,16 @@ type ClientDocumentsResponse = {
 type ReserveListingData = {
   listing_id: number | ""
   seller_id: number | ""
-  due_day: number | ""
   status: string
   mode_of_payment: "cash" | "installment"
+  starting_date: string
+  due_date: string
+  reservation_fee_amount: string
+  downpayment_amount: string
+  deferred_cash_amount: string
+  payment_terms_months: 36 | 60 | ""
+  interest_rate: string
+  monthly_amortization: string
   sale_type: "distributed" | "direct"
   override_seller_id: number | ""
   override_rate: string
@@ -199,12 +218,19 @@ type CancelUnitData = {
   reason: string
 }
 
-const defaultReserveData: ReserveListingData = {
+const createDefaultReserveData = (): ReserveListingData => ({
   listing_id: "",
   seller_id: "",
-  due_day: "",
   status: "reserved",
   mode_of_payment: "installment",
+  starting_date: getLocalDate(),
+  due_date: getLocalDate(),
+  reservation_fee_amount: "",
+  downpayment_amount: "0",
+  deferred_cash_amount: "0",
+  payment_terms_months: 36,
+  interest_rate: "0",
+  monthly_amortization: "",
   sale_type: "distributed",
   override_seller_id: "",
   override_rate: "",
@@ -212,7 +238,7 @@ const defaultReserveData: ReserveListingData = {
   cash_kaliwaan_amount: "",
   cash_kaliwaan_date: "",
   cash_kaliwaan_notes: "",
-}
+})
 
 const defaultEditUnitData: EditUnitData = {
   seller_id: "",
@@ -311,9 +337,32 @@ const reserveListing = async ({
     body: JSON.stringify({
       listing_id: reserveData.listing_id,
       seller_id: reserveData.seller_id || null,
-      due_day: reserveData.due_day || null,
       status: reserveData.status,
       mode_of_payment: reserveData.mode_of_payment,
+      starting_date: reserveData.starting_date,
+      due_date: reserveData.due_date,
+      reservation_fee_amount: Number(reserveData.reservation_fee_amount || 0),
+      downpayment_amount:
+        reserveData.mode_of_payment === "installment"
+          ? Number(reserveData.downpayment_amount || 0)
+          : 0,
+      deferred_cash_amount:
+        reserveData.mode_of_payment === "cash"
+          ? Number(reserveData.deferred_cash_amount || 0)
+          : 0,
+      payment_terms_months:
+        reserveData.mode_of_payment === "installment"
+          ? Number(reserveData.payment_terms_months)
+          : null,
+      interest_rate:
+        reserveData.mode_of_payment === "installment"
+          ? Number(reserveData.interest_rate || 0)
+          : 0,
+      monthly_amortization:
+        reserveData.mode_of_payment === "installment" &&
+        reserveData.monthly_amortization !== ""
+          ? Number(reserveData.monthly_amortization)
+          : null,
       sale_type: reserveData.sale_type,
       override_seller_id: reserveData.override_seller_id || null,
       override_rate:
@@ -522,6 +571,22 @@ const countValue = (value: number | string | null | undefined) => {
   return Number(value || 0)
 }
 
+const moneyInputValue = (value: string) => {
+  if (value === "") return 0
+
+  const parsedValue = Number(value)
+
+  return Number.isFinite(parsedValue) ? parsedValue : 0
+}
+
+const isPresentMoneyInputValid = (value: string) => {
+  if (value === "") return true
+
+  const parsedValue = Number(value)
+
+  return Number.isFinite(parsedValue) && parsedValue >= 0
+}
+
 const getUnitDocumentSummary = (unit: ClientUnit) => {
   const checklistCount = countValue(unit.document_checklist_count)
   const totalCount = countValue(unit.document_total_count)
@@ -556,7 +621,7 @@ const ClientProfile = () => {
 
   const [isReserveOpen, setIsReserveOpen] = useState(false)
   const [reserveData, setReserveData] = useState<ReserveListingData>(
-    defaultReserveData
+    () => createDefaultReserveData()
   )
   const [listingSearch, setListingSearch] = useState("")
   const [editUnit, setEditUnit] = useState<ClientUnit | null>(null)
@@ -573,6 +638,7 @@ const ClientProfile = () => {
   const [selectedDocumentsUnit, setSelectedDocumentsUnit] =
     useState<ClientUnit | null>(null)
   const [successMessage, setSuccessMessage] = useState("")
+  const [reserveValidationMessage, setReserveValidationMessage] = useState("")
 
   const {
     data: client,
@@ -636,7 +702,8 @@ const ClientProfile = () => {
     onSuccess: () => {
       invalidateClientProfile()
       setIsReserveOpen(false)
-      setReserveData(defaultReserveData)
+      setReserveData(createDefaultReserveData())
+      setReserveValidationMessage("")
       setSuccessMessage("Listing reserved and commission generated successfully")
     },
   })
@@ -716,6 +783,43 @@ const ClientProfile = () => {
     (listing) => Number(listing.id) === Number(reserveData.listing_id)
   )
 
+  const reservePurchasePrice = selectedListing
+    ? Number(selectedListing.total_contract_price || 0)
+    : 0
+  const reserveReservationFee = moneyInputValue(
+    reserveData.reservation_fee_amount
+  )
+  const reserveDownpayment =
+    reserveData.mode_of_payment === "installment"
+      ? moneyInputValue(reserveData.downpayment_amount)
+      : 0
+  const reserveDeferredCash =
+    reserveData.mode_of_payment === "cash"
+      ? moneyInputValue(reserveData.deferred_cash_amount)
+      : 0
+  const reserveBalanceRaw =
+    reservePurchasePrice -
+    reserveReservationFee -
+    reserveDownpayment -
+    reserveDeferredCash
+  const reserveOfferBalance = Math.max(reserveBalanceRaw, 0)
+  const reserveTermsMonths =
+    reserveData.mode_of_payment === "installment"
+      ? Number(reserveData.payment_terms_months || 0)
+      : 0
+  const reserveInterestRate = moneyInputValue(reserveData.interest_rate)
+  const reserveBalanceWithInterest =
+    reserveOfferBalance + reserveOfferBalance * (reserveInterestRate / 100)
+  const computedMonthlyAmortization =
+    reserveData.mode_of_payment === "installment" && reserveTermsMonths > 0
+      ? reserveBalanceWithInterest / reserveTermsMonths
+      : 0
+  const displayedMonthlyAmortization =
+    reserveData.monthly_amortization ||
+    (computedMonthlyAmortization > 0
+      ? computedMonthlyAmortization.toFixed(2)
+      : "")
+
   const filteredReserveListings = availableListings.filter((listing) => {
     const search = listingSearch.toLowerCase().trim()
 
@@ -790,13 +894,70 @@ const ClientProfile = () => {
     )
   }, [clientUnits])
 
+  const getReserveValidationMessage = () => {
+    if (!reserveData.listing_id || !selectedListing) {
+      return "Listing is required"
+    }
+
+    if (!reserveData.mode_of_payment) {
+      return "Mode of payment is required"
+    }
+
+    if (!reserveData.starting_date) {
+      return "Starting date is required"
+    }
+
+    if (!reserveData.due_date) {
+      return "First due date is required"
+    }
+
+    if (
+      reserveData.reservation_fee_amount === "" ||
+      !isPresentMoneyInputValid(reserveData.reservation_fee_amount)
+    ) {
+      return "Reservation fee must be a non-negative amount"
+    }
+
+    if (
+      reserveData.mode_of_payment === "cash" &&
+      !isPresentMoneyInputValid(reserveData.deferred_cash_amount)
+    ) {
+      return "Deferred cash amount must be a non-negative amount"
+    }
+
+    if (reserveData.mode_of_payment === "installment") {
+      if (![36, 60].includes(Number(reserveData.payment_terms_months))) {
+        return "Payment terms must be 36 or 60 months"
+      }
+
+      if (!isPresentMoneyInputValid(reserveData.downpayment_amount)) {
+        return "Downpayment must be a non-negative amount"
+      }
+
+      if (!isPresentMoneyInputValid(reserveData.interest_rate)) {
+        return "Interest rate must be a non-negative percentage"
+      }
+
+      if (!isPresentMoneyInputValid(reserveData.monthly_amortization)) {
+        return "Monthly amortization must be a non-negative amount"
+      }
+    }
+
+    if (reserveBalanceRaw < 0) {
+      return "Reservation fee, downpayment, and deferred cash cannot exceed TCP"
+    }
+
+    return ""
+  }
+
   const openReserveModal = () => {
     setReserveData({
-      ...defaultReserveData,
+      ...createDefaultReserveData(),
       seller_id: client?.default_seller_id || "",
     })
     setListingSearch("")
     setSuccessMessage("")
+    setReserveValidationMessage("")
     setIsReserveOpen(true)
   }
 
@@ -844,6 +1005,15 @@ const ClientProfile = () => {
 
   const handleReserveListing = () => {
     if (!clientId || !reserveData.listing_id) return
+
+    const validationMessage = getReserveValidationMessage()
+
+    if (validationMessage) {
+      setReserveValidationMessage(validationMessage)
+      return
+    }
+
+    setReserveValidationMessage("")
 
     reserveMutation.mutate({
       clientId,
@@ -1067,7 +1237,10 @@ const ClientProfile = () => {
                   <th className="px-4 py-3 text-left">Payment %</th>
                   <th className="px-4 py-3 text-left">Seller</th>
                   <th className="px-4 py-3 text-left">Sale Type</th>
-                  <th className="px-4 py-3 text-left">Due Day</th>
+                  <th className="px-4 py-3 text-left">Starting Date</th>
+                  <th className="px-4 py-3 text-left">First Due Date</th>
+                  <th className="px-4 py-3 text-left">Terms</th>
+                  <th className="px-4 py-3 text-left">Monthly</th>
                   <th className="px-4 py-3 text-left">Documents</th>
                   <th className="px-4 py-3 text-left">Status</th>
                   <th className="px-4 py-3 text-left">Actions</th>
@@ -1121,7 +1294,28 @@ const ClientProfile = () => {
                     </td>
 
                     <td className="px-4 py-3 text-slate-600">
-                      {unit.due_day || "-"}
+                      {formatDate(unit.starting_date)}
+                    </td>
+
+                    <td className="px-4 py-3 text-slate-600">
+                      {formatDate(unit.due_date)}
+                    </td>
+
+                    <td className="px-4 py-3 text-slate-600">
+                      {unit.mode_of_payment === "cash"
+                        ? "Cash"
+                        : unit.payment_terms_months
+                          ? `${formatNumber(unit.payment_terms_months)} months`
+                          : "-"}
+                    </td>
+
+                    <td className="px-4 py-3 text-slate-600">
+                      {unit.mode_of_payment === "cash"
+                        ? "-"
+                        : unit.monthly_amortization !== null &&
+                            unit.monthly_amortization !== undefined
+                          ? formatMoney(unit.monthly_amortization)
+                          : "-"}
                     </td>
 
                     <td className="min-w-56 px-4 py-3">
@@ -1209,6 +1403,10 @@ const ClientProfile = () => {
           }
         >
           <div className="space-y-5">
+            {reserveValidationMessage ? (
+              <Alert variant="error" title={reserveValidationMessage} />
+            ) : null}
+
             <div className="space-y-2">
               <Input
                 label="Search Available Listing"
@@ -1218,7 +1416,10 @@ const ClientProfile = () => {
                   setReserveData({
                     ...reserveData,
                     listing_id: "",
+                    reservation_fee_amount: "",
+                    monthly_amortization: "",
                   })
+                  setReserveValidationMessage("")
                 }}
                 placeholder="Search unit, project, or lot type"
               />
@@ -1241,7 +1442,12 @@ const ClientProfile = () => {
                           setReserveData({
                             ...reserveData,
                             listing_id: listing.id,
+                            reservation_fee_amount: String(
+                              Number(listing.reservation_fee || 0)
+                            ),
+                            monthly_amortization: "",
                           })
+                          setReserveValidationMessage("")
                           setListingSearch(label)
                         }}
                         type="button"
@@ -1300,30 +1506,36 @@ const ClientProfile = () => {
               <Select
                 label="Mode of Payment"
                 value={reserveData.mode_of_payment}
-                onChange={(e) =>
+                onChange={(e) => {
+                  const paymentMode = e.target.value as "cash" | "installment"
+
                   setReserveData({
                     ...reserveData,
-                    mode_of_payment: e.target.value as "cash" | "installment",
+                    mode_of_payment: paymentMode,
+                    downpayment_amount:
+                      paymentMode === "installment"
+                        ? reserveData.downpayment_amount
+                        : "0",
+                    deferred_cash_amount:
+                      paymentMode === "cash"
+                        ? reserveData.deferred_cash_amount
+                        : "0",
+                    payment_terms_months:
+                      paymentMode === "installment"
+                        ? reserveData.payment_terms_months || 36
+                        : "",
+                    interest_rate:
+                      paymentMode === "installment"
+                        ? reserveData.interest_rate || "0"
+                        : "0",
+                    monthly_amortization: "",
                   })
-                }
+                  setReserveValidationMessage("")
+                }}
               >
                 <option value="installment">Installment</option>
                 <option value="cash">Cash</option>
               </Select>
-
-              <Input
-                label="Due Day"
-                type="number"
-                min={1}
-                max={31}
-                value={reserveData.due_day}
-                onChange={(e) =>
-                  setReserveData({
-                    ...reserveData,
-                    due_day: e.target.value ? Number(e.target.value) : "",
-                  })
-                }
-              />
 
               <Select
                 label="Status"
@@ -1360,6 +1572,162 @@ const ClientProfile = () => {
                 <option value="distributed">Distributed</option>
                 <option value="direct">Direct</option>
               </Select>
+            </div>
+
+            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <h3 className="text-sm font-bold text-slate-900">
+                Payment Terms
+              </h3>
+
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                <Input
+                  label="Reservation Fee"
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={reserveData.reservation_fee_amount}
+                  onChange={(e) => {
+                    setReserveData({
+                      ...reserveData,
+                      reservation_fee_amount: e.target.value,
+                      monthly_amortization: "",
+                    })
+                    setReserveValidationMessage("")
+                  }}
+                />
+
+                <Input
+                  label="Starting Date"
+                  type="date"
+                  value={reserveData.starting_date}
+                  onChange={(e) => {
+                    setReserveData({
+                      ...reserveData,
+                      starting_date: e.target.value,
+                    })
+                    setReserveValidationMessage("")
+                  }}
+                />
+
+                <Input
+                  label="First Due Date"
+                  type="date"
+                  value={reserveData.due_date}
+                  onChange={(e) => {
+                    setReserveData({
+                      ...reserveData,
+                      due_date: e.target.value,
+                    })
+                    setReserveValidationMessage("")
+                  }}
+                />
+
+                {reserveData.mode_of_payment === "cash" ? (
+                  <Input
+                    label="Deferred Cash Amount"
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={reserveData.deferred_cash_amount}
+                    onChange={(e) => {
+                      setReserveData({
+                        ...reserveData,
+                        deferred_cash_amount: e.target.value,
+                        monthly_amortization: "",
+                      })
+                      setReserveValidationMessage("")
+                    }}
+                  />
+                ) : null}
+
+                {reserveData.mode_of_payment === "installment" ? (
+                  <>
+                    <Input
+                      label="Downpayment"
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={reserveData.downpayment_amount}
+                      onChange={(e) => {
+                        setReserveData({
+                          ...reserveData,
+                          downpayment_amount: e.target.value,
+                          monthly_amortization: "",
+                        })
+                        setReserveValidationMessage("")
+                      }}
+                    />
+
+                    <Select
+                      label="Terms"
+                      value={reserveData.payment_terms_months}
+                      onChange={(e) => {
+                        setReserveData({
+                          ...reserveData,
+                          payment_terms_months: Number(e.target.value) as 36 | 60,
+                          monthly_amortization: "",
+                        })
+                        setReserveValidationMessage("")
+                      }}
+                    >
+                      <option value={36}>36 months</option>
+                      <option value={60}>60 months</option>
+                    </Select>
+
+                    <Input
+                      label="Interest Rate (%)"
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={reserveData.interest_rate}
+                      onChange={(e) => {
+                        setReserveData({
+                          ...reserveData,
+                          interest_rate: e.target.value,
+                          monthly_amortization: "",
+                        })
+                        setReserveValidationMessage("")
+                      }}
+                    />
+
+                    <Input
+                      label="Monthly Amortization"
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={displayedMonthlyAmortization}
+                      onChange={(e) => {
+                        setReserveData({
+                          ...reserveData,
+                          monthly_amortization: e.target.value,
+                        })
+                        setReserveValidationMessage("")
+                      }}
+                    />
+                  </>
+                ) : null}
+              </div>
+
+              {selectedListing ? (
+                <div className="mt-4 grid gap-3 rounded-lg border border-slate-100 bg-slate-50 p-3 md:grid-cols-3">
+                  <MiniDetail
+                    label="Offer Purchase Price"
+                    value={formatMoney(reservePurchasePrice)}
+                  />
+                  <MiniDetail
+                    label="Offer Balance"
+                    value={formatMoney(reserveOfferBalance)}
+                  />
+                  <MiniDetail
+                    label="Monthly Preview"
+                    value={
+                      reserveData.mode_of_payment === "installment"
+                        ? formatMoney(computedMonthlyAmortization)
+                        : "-"
+                    }
+                  />
+                </div>
+              ) : null}
             </div>
 
             {selectedMainSeller ? (
