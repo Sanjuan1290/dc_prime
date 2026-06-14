@@ -47,14 +47,10 @@ export const getSellerDashboard = async (req, res) => {
     SELECT
       COUNT(DISTINCT cu.id) AS total_sales,
       COUNT(DISTINCT cu.client_id) AS total_clients,
-      COALESCE(SUM(COALESCE(l.total_contract_price, l.net_selling_price + l.legal_misc_fee, 0)), 0) AS total_tcp,
-      COALESCE(SUM(cm.gross_commission), 0) AS total_commission,
-      COALESCE(SUM(CASE WHEN cm.status IN ('released', 'partially_released') THEN cm.released_amount ELSE 0 END), 0) AS released_commission,
-      COALESCE(SUM(CASE WHEN cm.status NOT IN ('released', 'cancelled') THEN GREATEST(cm.gross_commission - cm.released_amount, 0) ELSE 0 END), 0) AS pending_commission
+      COALESCE(SUM(COALESCE(l.total_contract_price, l.net_selling_price + l.legal_misc_fee, 0)), 0) AS total_tcp
     FROM accredited_sellers seller
     LEFT JOIN client_units cu ON cu.seller_id = seller.id
     LEFT JOIN listings l ON l.id = cu.listing_id
-    LEFT JOIN commissions cm ON cm.seller_id = seller.id
     WHERE ${scope.clause}
     `,
     scope.params
@@ -108,9 +104,6 @@ export const getSellerDashboard = async (req, res) => {
       total_sales: Number(summary.total_sales || 0),
       total_clients: Number(summary.total_clients || 0),
       total_tcp: money(summary.total_tcp),
-      total_commission: money(summary.total_commission),
-      released_commission: money(summary.released_commission),
-      pending_commission: money(summary.pending_commission),
       available_units: Number(availableRows[0]?.available_units || 0),
     },
     teamCounts: teamRows,
@@ -166,7 +159,9 @@ export const getSellerTeam = async (req, res) => {
       parent.full_name AS parent_seller_name,
       seller.commission_pool_rate,
       seller.personal_commission_rate,
+      seller.commission_rate,
       seller.override_commission_rate,
+      seller.direct_to_developer_rate,
       seller.status,
       COUNT(DISTINCT cu.id) AS total_sales,
       COALESCE(SUM(COALESCE(l.total_contract_price, l.net_selling_price + l.legal_misc_fee, 0)), 0) AS total_tcp
@@ -183,6 +178,90 @@ export const getSellerTeam = async (req, res) => {
   )
 
   res.status(200).json({ message: 'Team fetched successfully', team: rows, data: rows })
+}
+
+
+const getAllowedEditableRoles = (role) => {
+  if (role === 'broker_network_manager') return ['broker']
+  if (role === 'broker') return ['manager', 'agent']
+  if (role === 'manager') return ['agent']
+  return []
+}
+
+const normalizeRate = (value) => {
+  if (value === undefined || value === null || value === '') return null
+  const parsed = Number(value)
+  if (Number.isNaN(parsed)) return null
+  return Number(parsed.toFixed(2))
+}
+
+const getSellerById = async (sellerId) => {
+  const [rows] = await db.query(
+    `SELECT * FROM accredited_sellers WHERE id = ? LIMIT 1`,
+    [sellerId]
+  )
+  return rows[0] || null
+}
+
+export const updateSellerTeamRate = async (req, res) => {
+  const access = await requireSellerAccess(req, res)
+  if (!access || access.isOffice) {
+    return res.status(403).json({ message: 'Only seller accounts can manage team rates from this page.' })
+  }
+
+  const { sellerId } = req.params
+  const rate = normalizeRate(req.body.rate)
+
+  if (rate === null || rate < 0 || rate > 100) {
+    return res.status(400).json({ message: 'Rate must be between 0 and 100' })
+  }
+
+  const targetSeller = await getSellerById(sellerId)
+  if (!targetSeller) return res.status(404).json({ message: 'Seller not found' })
+
+  const visibleIds = await getVisibleSellerIdsForUser(req.user)
+  if (!visibleIds.includes(Number(targetSeller.id)) || Number(targetSeller.id) === Number(access.seller.id)) {
+    return res.status(403).json({ message: 'You can only edit sellers under your team.' })
+  }
+
+  const allowedRoles = getAllowedEditableRoles(req.user.role)
+  if (!allowedRoles.includes(targetSeller.seller_role)) {
+    return res.status(403).json({ message: `You cannot edit ${targetSeller.seller_role} rates.` })
+  }
+
+  if (targetSeller.seller_role === 'broker') {
+    const parentBnm = access.seller.seller_role === 'broker_network_manager' ? access.seller : null
+    if (parentBnm?.commission_pool_rate !== null && parentBnm?.commission_pool_rate !== undefined && rate > Number(parentBnm.commission_pool_rate)) {
+      return res.status(400).json({ message: `Broker pool cannot exceed your BNM pool of ${parentBnm.commission_pool_rate}%` })
+    }
+
+    await db.query(
+      `UPDATE accredited_sellers SET commission_pool_rate = ?, rate_set_by = ?, rate_updated_at = NOW() WHERE id = ?`,
+      [rate, req.user.id, targetSeller.id]
+    )
+  } else if (targetSeller.seller_role === 'manager') {
+    const broker = await getSellerById(targetSeller.parent_seller_id)
+    if (broker?.commission_pool_rate !== null && broker?.commission_pool_rate !== undefined && rate > Number(broker.commission_pool_rate)) {
+      return res.status(400).json({ message: `Manager rate cannot exceed broker pool of ${broker.commission_pool_rate}%` })
+    }
+
+    await db.query(
+      `UPDATE accredited_sellers SET commission_rate = ?, personal_commission_rate = ?, override_commission_rate = NULL, rate_set_by = ?, rate_updated_at = NOW() WHERE id = ?`,
+      [rate, rate, req.user.id, targetSeller.id]
+    )
+  } else if (targetSeller.seller_role === 'agent') {
+    const manager = await getSellerById(targetSeller.parent_seller_id)
+    if (manager?.personal_commission_rate !== null && manager?.personal_commission_rate !== undefined && rate > Number(manager.personal_commission_rate)) {
+      return res.status(400).json({ message: `Agent rate cannot exceed manager rate of ${manager.personal_commission_rate}%` })
+    }
+
+    await db.query(
+      `UPDATE accredited_sellers SET commission_rate = ?, personal_commission_rate = ?, direct_to_developer_rate = ?, rate_set_by = ?, rate_updated_at = NOW() WHERE id = ?`,
+      [rate, rate, rate, req.user.id, targetSeller.id]
+    )
+  }
+
+  res.status(200).json({ message: 'Team rate updated successfully' })
 }
 
 export const getSellerSales = async (req, res) => {
@@ -205,15 +284,12 @@ export const getSellerSales = async (req, res) => {
       seller.full_name AS seller_name,
       seller.seller_role,
       COALESCE(listing.total_contract_price, listing.net_selling_price + listing.legal_misc_fee, 0) AS total_contract_price,
-      COALESCE(cm.gross_commission, 0) AS seller_commission,
-      COALESCE(cm.released_amount, 0) AS released_commission,
       cu.created_at
     FROM client_units cu
     INNER JOIN accredited_sellers seller ON seller.id = cu.seller_id
     INNER JOIN clients client ON client.id = cu.client_id
     INNER JOIN listings listing ON listing.id = cu.listing_id
     INNER JOIN projects project ON project.id = listing.project_id
-    LEFT JOIN commissions cm ON cm.client_unit_id = cu.id AND cm.seller_id = seller.id
     WHERE ${scope.clause}
     ORDER BY cu.id DESC
     `,
@@ -222,3 +298,4 @@ export const getSellerSales = async (req, res) => {
 
   res.status(200).json({ message: 'Sales fetched successfully', sales: rows, data: rows })
 }
+

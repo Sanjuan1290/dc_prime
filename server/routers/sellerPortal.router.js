@@ -5,13 +5,20 @@ import {
   getSellerDashboard,
   getSellerSales,
   getSellerTeam,
+  updateSellerTeamRate,
 } from '../controllers/sellerPortal.controller.js'
 
 const router = express.Router()
 
-router.get('/seller/dashboard', auth, getSellerDashboard)
-router.get('/seller/available-units', auth, getSellerAvailableUnits)
-router.get('/seller/team', auth, getSellerTeam)
-router.get('/seller/sales', auth, getSellerSales)
+// Seller portal routes are intentionally NOT admin-only.
+// They are used by broker_network_manager, broker, manager, and agent accounts.
+// Office users can also open them for testing/monitoring.
+router.use(auth)
+
+router.get('/seller/dashboard', getSellerDashboard)
+router.get('/seller/available-units', getSellerAvailableUnits)
+router.get('/seller/team', getSellerTeam)
+router.patch('/seller/team/:sellerId/rate', updateSellerTeamRate)
+router.get('/seller/sales', getSellerSales)
 
 export default router

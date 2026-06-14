@@ -86,9 +86,8 @@ type SellerProfileForm = {
   accreditation_date: string
   parent_seller_id: string
   commission_pool_rate: string
+  manager_rate: string
   agent_commission_rate: string
-  override_commission_rate: string
-  direct_to_developer_rate: string
   max_downline_rate: string
 }
 
@@ -103,9 +102,6 @@ type UserForm = {
 type DefaultsForm = {
   bnm_pool_rate: string
   broker_pool_rate: string
-  manager_override_rate: string
-  agent_commission_rate: string
-  agent_direct_to_developer_rate: string
 }
 
 const allRoles: UserRole[] = ["super_admin", "admin", "broker_network_manager", "broker", "manager", "agent"]
@@ -114,11 +110,8 @@ const sellerRoles: UserRole[] = ["broker_network_manager", "broker", "manager", 
 const statuses = ["active", "inactive"]
 
 const defaultDefaultsForm: DefaultsForm = {
-  bnm_pool_rate: "10",
-  broker_pool_rate: "8",
-  manager_override_rate: "2",
-  agent_commission_rate: "5",
-  agent_direct_to_developer_rate: "5",
+  bnm_pool_rate: "8",
+  broker_pool_rate: "7",
 }
 
 const emptySellerProfile: SellerProfileForm = {
@@ -126,9 +119,8 @@ const emptySellerProfile: SellerProfileForm = {
   accreditation_date: "",
   parent_seller_id: "",
   commission_pool_rate: "",
+  manager_rate: "",
   agent_commission_rate: "",
-  override_commission_rate: "",
-  direct_to_developer_rate: "",
   max_downline_rate: "",
 }
 
@@ -177,13 +169,8 @@ const getDefaultsFormFromRows = (rows: CommissionDefault[]): DefaultsForm => {
 const getDefaultForRole = (role: UserRole, defaults: DefaultsForm): Partial<SellerProfileForm> => {
   if (role === "broker_network_manager") return { commission_pool_rate: defaults.bnm_pool_rate }
   if (role === "broker") return { commission_pool_rate: defaults.broker_pool_rate }
-  if (role === "manager") return { override_commission_rate: defaults.manager_override_rate }
-  if (role === "agent") {
-    return {
-      agent_commission_rate: defaults.agent_commission_rate,
-      direct_to_developer_rate: defaults.agent_direct_to_developer_rate,
-    }
-  }
+  if (role === "manager") return {}
+  if (role === "agent") return {}
   return {}
 }
 
@@ -203,10 +190,14 @@ const getPayload = (form: UserForm) => {
       accreditation_date: form.seller_profile.accreditation_date || null,
       parent_seller_id: form.seller_profile.parent_seller_id || null,
       commission_pool_rate: toNumberOrNull(form.seller_profile.commission_pool_rate),
+      manager_rate: toNumberOrNull(form.seller_profile.manager_rate),
       agent_commission_rate: toNumberOrNull(form.seller_profile.agent_commission_rate),
-      personal_commission_rate: toNumberOrNull(form.seller_profile.agent_commission_rate),
-      override_commission_rate: toNumberOrNull(form.seller_profile.override_commission_rate),
-      direct_to_developer_rate: toNumberOrNull(form.seller_profile.direct_to_developer_rate),
+      personal_commission_rate: form.role === "manager"
+        ? toNumberOrNull(form.seller_profile.manager_rate)
+        : toNumberOrNull(form.seller_profile.agent_commission_rate),
+      direct_to_developer_rate: form.role === "agent"
+        ? toNumberOrNull(form.seller_profile.agent_commission_rate)
+        : null,
       max_downline_rate: toNumberOrNull(form.seller_profile.max_downline_rate),
       status: form.status,
     }
@@ -276,8 +267,8 @@ const getParentLabel = (role: string) => {
 const getSellerSetupNote = (role: string) => {
   if (role === "broker_network_manager") return "BNM has no parent. Only the BNM pool rate is needed."
   if (role === "broker") return "Select BNM if this broker belongs to a network. Broker pool cannot exceed the BNM pool."
-  if (role === "manager") return "Select only the broker. Manager override cannot exceed the broker pool."
-  if (role === "agent") return "Select only the manager. Agent commission plus manager override cannot exceed the broker pool. Direct-to-developer creates no override release."
+  if (role === "manager") return "Select only the broker. Manager rate cannot exceed the broker pool. Broker can edit this later in My Team."
+  if (role === "agent") return "Select only the manager. Agent rate cannot exceed the manager rate. Direct-to-developer creates no override release."
   return ""
 }
 
@@ -286,14 +277,20 @@ const sellerProfileFromUser = (user: User): SellerProfileForm => ({
   accreditation_date: user.accreditation_date ? user.accreditation_date.slice(0, 10) : "",
   parent_seller_id: user.parent_seller_id ? String(user.parent_seller_id) : "",
   commission_pool_rate: user.commission_pool_rate === null || user.commission_pool_rate === undefined ? "" : String(user.commission_pool_rate),
-  agent_commission_rate:
-    user.personal_commission_rate === null || user.personal_commission_rate === undefined
+  manager_rate: user.role === "manager"
+    ? user.personal_commission_rate === null || user.personal_commission_rate === undefined
       ? user.commission_rate === null || user.commission_rate === undefined
         ? ""
         : String(user.commission_rate)
-      : String(user.personal_commission_rate),
-  override_commission_rate: user.override_commission_rate === null || user.override_commission_rate === undefined ? "" : String(user.override_commission_rate),
-  direct_to_developer_rate: user.direct_to_developer_rate === null || user.direct_to_developer_rate === undefined ? "" : String(user.direct_to_developer_rate),
+      : String(user.personal_commission_rate)
+    : "",
+  agent_commission_rate: user.role === "agent"
+    ? user.personal_commission_rate === null || user.personal_commission_rate === undefined
+      ? user.commission_rate === null || user.commission_rate === undefined
+        ? ""
+        : String(user.commission_rate)
+      : String(user.personal_commission_rate)
+    : "",
   max_downline_rate: user.max_downline_rate === null || user.max_downline_rate === undefined ? "" : String(user.max_downline_rate),
 })
 
@@ -439,9 +436,9 @@ const Users = () => {
   const rateSummary = (user: User) => {
     if (user.role === "broker_network_manager") return `BNM Pool: ${formatRate(user.commission_pool_rate)}`
     if (user.role === "broker") return `Broker Pool: ${formatRate(user.commission_pool_rate)}`
-    if (user.role === "manager") return `Manager Override: ${formatRate(user.override_commission_rate)}`
+    if (user.role === "manager") return `Manager Rate: ${formatRate(user.personal_commission_rate || user.commission_rate)}`
     if (user.role === "agent") {
-      return `Agent: ${formatRate(user.personal_commission_rate || user.commission_rate)} · Direct Dev: ${formatRate(user.direct_to_developer_rate)}`
+      return `Agent Rate: ${formatRate(user.personal_commission_rate || user.commission_rate)}`
     }
     return "-"
   }
@@ -602,14 +599,11 @@ const Users = () => {
                 ) : null}
 
                 {form.role === "manager" ? (
-                  <Input label="Manager Override Rate (%)" type="number" min={0} max={100} step="0.01" value={form.seller_profile.override_commission_rate} onChange={(e) => updateSellerProfile({ override_commission_rate: e.target.value })} />
+                  <Input label="Manager Rate (%)" type="number" min={0} max={100} step="0.01" value={form.seller_profile.manager_rate} onChange={(e) => updateSellerProfile({ manager_rate: e.target.value })} />
                 ) : null}
 
                 {form.role === "agent" ? (
-                  <>
-                    <Input label="Agent Commission Rate (%)" type="number" min={0} max={100} step="0.01" value={form.seller_profile.agent_commission_rate} onChange={(e) => updateSellerProfile({ agent_commission_rate: e.target.value })} />
-                    <Input label="Direct-to-Developer Rate (%)" type="number" min={0} max={100} step="0.01" value={form.seller_profile.direct_to_developer_rate} onChange={(e) => updateSellerProfile({ direct_to_developer_rate: e.target.value })} />
-                  </>
+                  <Input label="Agent Rate (%)" type="number" min={0} max={100} step="0.01" value={form.seller_profile.agent_commission_rate} onChange={(e) => updateSellerProfile({ agent_commission_rate: e.target.value })} />
                 ) : null}
               </div>
 
@@ -621,7 +615,7 @@ const Users = () => {
                     {selectedParent.parent_seller_name ? ` → ${selectedParent.parent_seller_name}` : ""}
                   </p>
                   <p className="mt-1 text-xs text-slate-500">
-                    Parent rates: pool {formatRate(selectedParent.commission_pool_rate)}, agent {formatRate(selectedParent.personal_commission_rate)}, override {formatRate(selectedParent.override_commission_rate)}
+                    Parent rates: pool {formatRate(selectedParent.commission_pool_rate)}, assigned rate {formatRate(selectedParent.personal_commission_rate || selectedParent.commission_pool_rate)}
                   </p>
                 </div>
               ) : null}
@@ -644,13 +638,10 @@ const Users = () => {
             </div>
           }
         >
-          <Alert variant="warning" title="Only super admin can update default rates. These defaults auto-fill new seller accounts, but each seller can still have their own assigned rate." />
+          <Alert variant="warning" title="Only super admin can update default rates. Only BNM and Broker have system defaults. Manager and Agent rates are assigned by their upline or edited per account." />
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <Input label="Default BNM Pool Rate (%)" type="number" min={0} max={100} step="0.01" value={defaultsForm.bnm_pool_rate} onChange={(e) => setDefaultsForm({ ...defaultsForm, bnm_pool_rate: e.target.value })} />
             <Input label="Default Broker Pool Rate (%)" type="number" min={0} max={100} step="0.01" value={defaultsForm.broker_pool_rate} onChange={(e) => setDefaultsForm({ ...defaultsForm, broker_pool_rate: e.target.value })} />
-            <Input label="Default Manager Override Rate (%)" type="number" min={0} max={100} step="0.01" value={defaultsForm.manager_override_rate} onChange={(e) => setDefaultsForm({ ...defaultsForm, manager_override_rate: e.target.value })} />
-            <Input label="Default Agent Commission Rate (%)" type="number" min={0} max={100} step="0.01" value={defaultsForm.agent_commission_rate} onChange={(e) => setDefaultsForm({ ...defaultsForm, agent_commission_rate: e.target.value })} />
-            <Input label="Default Direct-to-Developer Agent Rate (%)" type="number" min={0} max={100} step="0.01" value={defaultsForm.agent_direct_to_developer_rate} onChange={(e) => setDefaultsForm({ ...defaultsForm, agent_direct_to_developer_rate: e.target.value })} />
           </div>
         </Modal>
       ) : null}
@@ -659,3 +650,4 @@ const Users = () => {
 }
 
 export default Users
+

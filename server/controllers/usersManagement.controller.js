@@ -131,11 +131,8 @@ const getSellerByUserId = async (userId, connectionOrDb = db) => {
 
 
 const defaultCommissionRows = [
-  ['bnm_pool_rate', 'Broker Network Manager Pool Rate', 'broker_network_manager', 'pool', 10],
-  ['broker_pool_rate', 'Broker Pool Rate', 'broker', 'pool', 8],
-  ['manager_override_rate', 'Manager Override Rate', 'manager', 'override', 2],
-  ['agent_commission_rate', 'Agent Commission Rate', 'agent', 'commission', 5],
-  ['agent_direct_to_developer_rate', 'Agent Direct-to-Developer Rate', 'agent', 'direct_to_developer', 5],
+  ['bnm_pool_rate', 'Broker Network Manager Pool Rate', 'broker_network_manager', 'pool', 8],
+  ['broker_pool_rate', 'Broker Pool Rate', 'broker', 'pool', 7],
 ]
 
 const seedCommissionDefaults = async (connectionOrDb = db) => {
@@ -182,8 +179,6 @@ const getDefaultRateForSellerRole = async (role, key, connectionOrDb = db) => {
 
   if (role === 'broker_network_manager') return normalizeRate(defaults.bnm_pool_rate?.default_rate || 0)
   if (role === 'broker') return normalizeRate(defaults.broker_pool_rate?.default_rate || 0)
-  if (role === 'manager') return normalizeRate(defaults.manager_override_rate?.default_rate || 0)
-  if (role === 'agent') return normalizeRate(defaults.agent_commission_rate?.default_rate || 0)
 
   return null
 }
@@ -240,22 +235,21 @@ const normalizeSellerProfile = ({ role, body, userFullName, userEmail, userStatu
   const commissionPoolRate = ['broker_network_manager', 'broker'].includes(role)
     ? normalizeRate(sellerProfile.commission_pool_rate)
     : null
+  const managerAssignedRate = role === 'manager'
+    ? normalizeRate(sellerProfile.manager_rate ?? sellerProfile.personal_commission_rate ?? sellerProfile.override_commission_rate)
+    : null
   const agentCommissionRate = role === 'agent'
     ? normalizeRate(sellerProfile.agent_commission_rate ?? sellerProfile.personal_commission_rate)
     : null
-  const overrideCommissionRate = role === 'manager'
-    ? normalizeRate(sellerProfile.override_commission_rate)
-    : null
   const directToDeveloperRate = role === 'agent'
-    ? normalizeRate(sellerProfile.direct_to_developer_rate)
+    ? agentCommissionRate
     : null
   const maxDownlineRate = normalizeRate(sellerProfile.max_downline_rate)
 
   const rateErrors = [
     validateRate(commissionPoolRate, 'Commission pool rate'),
+    validateRate(managerAssignedRate, 'Manager rate'),
     validateRate(agentCommissionRate, 'Agent commission rate'),
-    validateRate(overrideCommissionRate, 'Manager override rate'),
-    validateRate(directToDeveloperRate, 'Direct-to-developer rate'),
     validateRate(maxDownlineRate, 'Max downline rate'),
   ].filter(Boolean)
 
@@ -273,10 +267,10 @@ const normalizeSellerProfile = ({ role, body, userFullName, userEmail, userStatu
       parent_seller_id: nullableValue(sellerProfile.parent_seller_id),
       status: finalStatus,
       accreditation_date: nullableValue(sellerProfile.accreditation_date),
-      commission_rate: agentCommissionRate,
+      commission_rate: role === 'manager' ? managerAssignedRate : agentCommissionRate,
       commission_pool_rate: commissionPoolRate,
-      personal_commission_rate: agentCommissionRate,
-      override_commission_rate: overrideCommissionRate,
+      personal_commission_rate: role === 'manager' ? managerAssignedRate : agentCommissionRate,
+      override_commission_rate: null,
       direct_to_developer_rate: directToDeveloperRate,
       max_downline_rate: maxDownlineRate,
     },
@@ -297,30 +291,26 @@ const validateSellerRatesAgainstParent = async ({ role, sellerProfile, parentSel
 
   if (role === 'manager' && parentSeller?.commission_pool_rate !== null && parentSeller?.commission_pool_rate !== undefined) {
     const brokerPool = Number(parentSeller.commission_pool_rate || 0)
-    const managerOverride = Number(sellerProfile.override_commission_rate || 0)
-    if (managerOverride > brokerPool) {
+    const managerRate = Number(sellerProfile.personal_commission_rate || 0)
+    if (managerRate > brokerPool) {
       return {
         isValid: false,
-        message: `Manager override cannot exceed the broker pool of ${brokerPool}%`,
+        message: `Manager rate cannot exceed the broker pool of ${brokerPool}%`,
       }
     }
   }
 
   if (role === 'agent') {
     const manager = parentSeller
-    const broker = manager?.parent_seller_id
-      ? await getSellerById(manager.parent_seller_id, connection)
-      : null
 
-    if (broker?.commission_pool_rate !== null && broker?.commission_pool_rate !== undefined) {
-      const brokerPool = Number(broker.commission_pool_rate || 0)
-      const managerOverride = Number(manager.override_commission_rate || 0)
+    if (manager?.personal_commission_rate !== null && manager?.personal_commission_rate !== undefined) {
+      const managerRate = Number(manager.personal_commission_rate || 0)
       const agentRate = Number(sellerProfile.personal_commission_rate || 0)
 
-      if (managerOverride + agentRate > brokerPool) {
+      if (agentRate > managerRate) {
         return {
           isValid: false,
-          message: `Agent rate plus manager override cannot exceed broker pool. Broker pool: ${brokerPool}%, manager override: ${managerOverride}%, max agent rate: ${Math.max(brokerPool - managerOverride, 0)}%`,
+          message: `Agent rate cannot exceed manager rate. Manager rate: ${managerRate}%, max agent rate: ${managerRate}%`,
         }
       }
     }
@@ -574,17 +564,8 @@ export const createUser = async (req, res) => {
       if (finalRole === 'broker' && normalizedSeller.commission_pool_rate === null) {
         normalizedSeller.commission_pool_rate = await getDefaultRateForSellerRole(finalRole, 'broker_pool_rate', connection)
       }
-      if (finalRole === 'manager' && normalizedSeller.override_commission_rate === null) {
-        normalizedSeller.override_commission_rate = await getDefaultRateForSellerRole(finalRole, 'manager_override_rate', connection)
-      }
       if (finalRole === 'agent') {
-        if (normalizedSeller.personal_commission_rate === null) {
-          normalizedSeller.personal_commission_rate = await getDefaultRateForSellerRole(finalRole, 'agent_commission_rate', connection)
-          normalizedSeller.commission_rate = normalizedSeller.personal_commission_rate
-        }
-        if (normalizedSeller.direct_to_developer_rate === null) {
-          normalizedSeller.direct_to_developer_rate = await getDefaultRateForSellerRole(finalRole, 'agent_direct_to_developer_rate', connection)
-        }
+        normalizedSeller.direct_to_developer_rate = normalizedSeller.personal_commission_rate
       }
 
       const parentValidation = await validateParentSeller({
@@ -751,17 +732,8 @@ export const updateUser = async (req, res) => {
       if (finalRole === 'broker' && normalizedSeller.commission_pool_rate === null) {
         normalizedSeller.commission_pool_rate = await getDefaultRateForSellerRole(finalRole, 'broker_pool_rate', connection)
       }
-      if (finalRole === 'manager' && normalizedSeller.override_commission_rate === null) {
-        normalizedSeller.override_commission_rate = await getDefaultRateForSellerRole(finalRole, 'manager_override_rate', connection)
-      }
       if (finalRole === 'agent') {
-        if (normalizedSeller.personal_commission_rate === null) {
-          normalizedSeller.personal_commission_rate = await getDefaultRateForSellerRole(finalRole, 'agent_commission_rate', connection)
-          normalizedSeller.commission_rate = normalizedSeller.personal_commission_rate
-        }
-        if (normalizedSeller.direct_to_developer_rate === null) {
-          normalizedSeller.direct_to_developer_rate = await getDefaultRateForSellerRole(finalRole, 'agent_direct_to_developer_rate', connection)
-        }
+        normalizedSeller.direct_to_developer_rate = normalizedSeller.personal_commission_rate
       }
 
       const parentValidation = await validateParentSeller({
@@ -973,3 +945,4 @@ export const linkUserToSeller = async (req, res) => {
 
   res.status(200).json({ message: 'User linked to seller successfully' })
 }
+

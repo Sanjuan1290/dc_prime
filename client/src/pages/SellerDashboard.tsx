@@ -14,9 +14,6 @@ type SellerDashboardData = {
     total_sales: number
     total_clients: number
     total_tcp: number
-    total_commission: number
-    released_commission: number
-    pending_commission: number
     available_units: number
   }
   teamCounts: { seller_role: string; count: number }[]
@@ -58,20 +55,17 @@ const SellerDashboard = () => {
       <PageHeader
         icon={<FiBarChart2 />}
         title="Seller Dashboard"
-        subtitle={data?.seller ? `${data.seller.full_name} — ${formatText(data.seller.seller_role)}` : "Team and commission summary"}
+        subtitle={data?.seller ? `${data.seller.full_name} — ${formatText(data.seller.seller_role)}` : "Team and sales summary"}
       />
 
       <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         <StatCard icon={<FiUsers />} label="Sales" value={summary?.total_sales || 0} />
         <StatCard icon={<FiGrid />} label="Available Units" value={summary?.available_units || 0} />
         <StatCard icon={<FiDollarSign />} label="Total TCP" value={formatMoney(summary?.total_tcp || 0)} />
-        <StatCard icon={<FiDollarSign />} label="Total Commission" value={formatMoney(summary?.total_commission || 0)} />
       </div>
 
       <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3">
         <StatCard label="Clients" value={summary?.total_clients || 0} />
-        <StatCard label="Released Commission" value={formatMoney(summary?.released_commission || 0)} />
-        <StatCard label="Pending Commission" value={formatMoney(summary?.pending_commission || 0)} />
       </div>
 
       <div className="mb-6 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -117,3 +111,4 @@ const SellerDashboard = () => {
 }
 
 export default SellerDashboard
+

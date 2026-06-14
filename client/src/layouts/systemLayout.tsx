@@ -182,6 +182,14 @@ const navGroups: NavGroup[] = [
 ]
 
 
+const sellerRoles = ["broker_network_manager", "broker", "manager", "agent"]
+const officeRoles = ["super_admin", "admin"]
+
+const roleHomePath = (role?: string) => {
+  if (role && sellerRoles.includes(role)) return "/seller-dashboard"
+  return "/dashboard"
+}
+
 const roleAllowedPaths: Record<string, string[]> = {
   super_admin: ["/dashboard", "/projects", "/listings", "/clients", "/client", "/accreditted_sellers", "/payments", "/commissions", "/cash-advances", "/documents", "/audit-logs", "/reports", "/employees", "/attendance", "/settings", "/users", "/change-password"],
   admin: ["/dashboard", "/projects", "/listings", "/clients", "/client", "/accreditted_sellers", "/payments", "/commissions", "/cash-advances", "/documents", "/audit-logs", "/reports", "/employees", "/attendance", "/settings", "/users", "/change-password"],
@@ -193,7 +201,8 @@ const roleAllowedPaths: Record<string, string[]> = {
 
 const canAccessPath = (role: string | undefined, path: string) => {
   if (!role) return false
-  const allowed = roleAllowedPaths[role] || roleAllowedPaths.agent
+  const normalizedRole = role.toLowerCase().trim()
+  const allowed = roleAllowedPaths[normalizedRole] || []
   return allowed.some((allowedPath) => path === allowedPath || path.startsWith(`${allowedPath}/`))
 }
 
@@ -250,10 +259,10 @@ const SystemLayout = () => {
     return <Navigate to="/change-password" replace />
   }
 
-  const sellerRoles = ["broker_network_manager", "broker", "manager", "agent"]
-  const defaultPath = sellerRoles.includes(currentUser.role || "") ? "/seller-dashboard" : "/dashboard"
+  const normalizedRole = currentUser.role?.toLowerCase().trim()
+  const defaultPath = roleHomePath(normalizedRole)
 
-  if (!canAccessPath(currentUser.role, location.pathname)) {
+  if (!canAccessPath(normalizedRole, location.pathname)) {
     return <Navigate to={defaultPath} replace />
   }
 
@@ -449,4 +458,5 @@ const SystemLayout = () => {
 }
 
 export default SystemLayout
+
 

@@ -725,6 +725,19 @@
     }
   }
 
+  const getAssignedSaleRate = (seller) => {
+    if (!seller) return null
+    if (seller.seller_role === 'broker_network_manager') return getExplicitRate(seller, 'commission_pool_rate')
+    if (seller.seller_role === 'broker') return getExplicitRate(seller, 'commission_pool_rate')
+    if (seller.seller_role === 'manager') {
+      return getExplicitRate(seller, 'personal_commission_rate') ?? getExplicitRate(seller, 'override_commission_rate')
+    }
+    if (seller.seller_role === 'agent') {
+      return getExplicitRate(seller, 'personal_commission_rate') ?? getExplicitRate(seller, 'commission_rate')
+    }
+    return getExplicitRate(seller, 'personal_commission_rate') ?? getExplicitRate(seller, 'commission_rate')
+  }
+
   export const buildHierarchyCommissionPreview = async ({
     connectionOrDb = db,
     sellerId,
@@ -745,50 +758,64 @@
     const broker = chain.find((seller) => seller.seller_role === 'broker')
     const bnm = chain.find((seller) => seller.seller_role === 'broker_network_manager')
     const warnings = []
+    const rows = []
 
-    const personalRate = !isMissing(sellingSeller.personal_commission_rate)
-      ? normalizeRate(sellingSeller.personal_commission_rate)
-      : await getFinalRate({ connectionOrDb, seller: sellingSeller, rateType: 'personal' })
+    const sellingRate = getAssignedSaleRate(sellingSeller) ?? await getFinalRate({
+      connectionOrDb,
+      seller: sellingSeller,
+      rateType: 'personal',
+    })
 
-    const rows = [
-      {
+    if (sellingRate === null || Number(sellingRate) <= 0) {
+      warnings.push(`${sellerDisplayRole(sellingSeller.seller_role)} rate is not set`)
+    } else {
+      rows.push({
         seller: sellingSeller,
-        rate: personalRate,
+        rate: normalizeRate(sellingRate),
         sourceType: 'main',
         commissionRole: sellingSeller.seller_role,
         label: `${sellerDisplayRole(sellingSeller.seller_role)} main commission`,
-      },
-    ]
+      })
+    }
 
-    let allocatedBelowBroker = personalRate
-
-    if (manager && Number(manager.id) !== Number(sellingSeller.id)) {
-      const managerOverrideRate = getExplicitRate(manager, 'override_commission_rate') || 0
-      if (managerOverrideRate > 0) {
-        rows.push({
-          seller: manager,
-          rate: managerOverrideRate,
-          sourceType: 'override',
-          commissionRole: 'manager',
-          label: 'Manager release milestone',
-        })
-        allocatedBelowBroker = normalizeRate(allocatedBelowBroker + managerOverrideRate)
+    if (sellingSeller.seller_role === 'agent' && manager) {
+      const managerRate = getAssignedSaleRate(manager)
+      if (managerRate !== null) {
+        const managerResidualRate = normalizeRate(managerRate - sellingRate)
+        if (managerResidualRate < 0) {
+          throw new Error(
+            `Commission split exceeds manager rate. Manager rate is ${managerRate}%, but agent rate is ${sellingRate}%.`
+          )
+        }
+        if (managerResidualRate > 0) {
+          rows.push({
+            seller: manager,
+            rate: managerResidualRate,
+            sourceType: 'override',
+            commissionRole: 'manager',
+            label: 'Manager residual release milestone',
+          })
+        }
+      } else {
+        warnings.push('Manager rate is not set, so manager residual was skipped')
       }
     }
 
-    let brokerPoolRate = broker ? getExplicitRate(broker, 'commission_pool_rate') : null
-
-    if (broker && brokerPoolRate === null && !isMissing(broker.commission_rate)) {
-      brokerPoolRate = normalizeRate(broker.commission_rate)
-    }
+    const downlineRateUnderBroker = sellingSeller.seller_role === 'agent'
+      ? getAssignedSaleRate(manager)
+      : sellingSeller.seller_role === 'manager'
+        ? getAssignedSaleRate(sellingSeller)
+        : null
 
     if (broker && Number(broker.id) !== Number(sellingSeller.id)) {
-      if (brokerPoolRate !== null) {
-        const brokerResidualRate = normalizeRate(brokerPoolRate - allocatedBelowBroker)
+      const brokerPoolRate = getAssignedSaleRate(broker)
+
+      if (brokerPoolRate !== null && downlineRateUnderBroker !== null) {
+        const brokerResidualRate = normalizeRate(brokerPoolRate - downlineRateUnderBroker)
 
         if (brokerResidualRate < 0) {
           throw new Error(
-            `Commission split exceeds broker pool. Broker pool is ${brokerPoolRate}%, but downline allocation is ${allocatedBelowBroker}%.`
+            `Commission split exceeds broker pool. Broker pool is ${brokerPoolRate}%, but downline allocation is ${downlineRateUnderBroker}%.`
           )
         }
 
@@ -798,23 +825,24 @@
             rate: brokerResidualRate,
             sourceType: 'override',
             commissionRole: 'broker',
-            label: 'Broker release milestone',
+            label: 'Broker residual release milestone',
           })
         }
-      } else {
+      } else if (brokerPoolRate === null) {
         warnings.push('Broker pool rate is not set, so broker residual was skipped')
       }
     }
 
     if (bnm && broker) {
-      const bnmPoolRate = getExplicitRate(bnm, 'commission_pool_rate')
+      const bnmPoolRate = getAssignedSaleRate(bnm)
+      const brokerPoolRate = getAssignedSaleRate(broker)
 
       if (bnmPoolRate !== null && brokerPoolRate !== null) {
         const bnmResidualRate = normalizeRate(bnmPoolRate - brokerPoolRate)
 
         if (bnmResidualRate < 0) {
           throw new Error(
-            `Commission split exceeds broker network manager pool. BNM pool is ${bnmPoolRate}%, but broker pool is ${brokerPoolRate}%.`
+            `Commission split exceeds BNM pool. BNM pool is ${bnmPoolRate}%, but broker pool is ${brokerPoolRate}%.`
           )
         }
 
@@ -824,7 +852,7 @@
             rate: bnmResidualRate,
             sourceType: 'override',
             commissionRole: 'broker_network_manager',
-            label: 'Broker Network Manager release milestone',
+            label: 'Broker Network Manager residual release milestone',
           })
         }
       }
@@ -850,11 +878,11 @@
 
     if (saleType === 'direct' || saleType === 'direct_to_developer') {
       const seller = await getSeller(connectionOrDb, sellerId)
-      const personalRate = saleType === 'direct_to_developer'
+      const personalRate = getAssignedSaleRate(seller) ?? (saleType === 'direct_to_developer'
         ? await getFinalRate({ connectionOrDb, seller, rateType: 'direct_to_developer' })
         : (!isMissing(seller?.personal_commission_rate)
           ? normalizeRate(seller.personal_commission_rate)
-          : null)
+          : null))
 
       const mainCommission = await createAutoCommissionForClientUnit({
         connection: connectionOrDb,
@@ -2637,4 +2665,5 @@ export const addMissingOverrideCommission = async (req, res) => {
       data: rows,
     })
   }
+
 

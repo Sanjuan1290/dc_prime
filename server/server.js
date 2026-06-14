@@ -53,6 +53,11 @@ app.use('/api/v1', clientUnitsRouter)
 app.use('/api/v1', documentsRouter)
 app.use('/api/v1', paymentsRouter)
 app.use('/api/v1', accreditedSellersRouter)
+
+// Seller portal must be mounted before finance/admin routers so seller role pages
+// never accidentally pass through admin-only middleware in future route changes.
+app.use('/api/v1', sellerPortalRouter)
+
 app.use('/api/v1', commissionsRouter)
 app.use('/api/v1', employeesRouter)
 app.use('/api/v1', attendanceRouter)
@@ -63,7 +68,6 @@ app.use('/api/v1', settingsRouter)
 app.use('/api/v1', cashAdvancesRouter)
 app.use('/api/v1', printFormsRouter)
 app.use('/api/v1', usersManagementRouter)
-app.use('/api/v1', sellerPortalRouter)
 
 app.use((req, res) => {
   res.status(404).json({
@@ -97,3 +101,4 @@ app.listen(PORT, async () => {
     process.exit(1)
   }
 })
+
