@@ -208,6 +208,23 @@ const listingFields = `
       AND cu.status IN ('reserved', 'active', 'fully_paid')
     LIMIT 1
   ) AS has_active_client_unit,
+  (
+    SELECT COUNT(*)
+    FROM listing_document_requirements ldr
+    INNER JOIN documents d ON d.id = ldr.document_id
+    WHERE ldr.listing_id = l.id
+      AND ldr.status = 'active'
+      AND d.status = 'active'
+  ) AS document_count,
+  (
+    SELECT COUNT(*)
+    FROM listing_document_requirements ldr
+    INNER JOIN documents d ON d.id = ldr.document_id
+    WHERE ldr.listing_id = l.id
+      AND ldr.status = 'active'
+      AND d.status = 'active'
+      AND ldr.is_required = TRUE
+  ) AS required_document_count,
   l.created_at,
   l.updated_at
 `
@@ -530,7 +547,12 @@ export const getListingFullDetails = async (req, res) => {
     }
   }
 
-  const listingDocumentRequirements = await loadListingDocumentRequirements(db, id)
+  let listingDocumentRequirements = await loadListingDocumentRequirements(db, id)
+
+  if (listingDocumentRequirements.length === 0 && mappedListing.project_id) {
+    await copyProjectRequirementsToListing(db, id, mappedListing.project_id, { overwrite: false })
+    listingDocumentRequirements = await loadListingDocumentRequirements(db, id)
+  }
 
   if (!clientUnit) {
     const requiredDocuments = listingDocumentRequirements.filter((document) => Boolean(document.is_required)).length
@@ -784,7 +806,7 @@ export const getListingDocumentRequirements = async (req, res) => {
   const { id } = req.params
 
   const [listingRows] = await db.query(
-    `SELECT id FROM listings WHERE id = ? LIMIT 1`,
+    `SELECT id, project_id FROM listings WHERE id = ? LIMIT 1`,
     [id]
   )
 
@@ -792,7 +814,12 @@ export const getListingDocumentRequirements = async (req, res) => {
     return res.status(404).json({ message: 'Listing not found' })
   }
 
-  const requirements = await loadListingDocumentRequirements(db, id)
+  let requirements = await loadListingDocumentRequirements(db, id)
+
+  if (requirements.length === 0 && listingRows[0].project_id) {
+    await copyProjectRequirementsToListing(db, id, listingRows[0].project_id, { overwrite: false })
+    requirements = await loadListingDocumentRequirements(db, id)
+  }
 
   return res.status(200).json({
     message: 'Listing document requirements fetched successfully',

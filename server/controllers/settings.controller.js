@@ -2,12 +2,37 @@ import { db } from '../db/connect.js'
 import { createAuditLog } from '../utils/createAuditLog.js'
 import { getClientIp } from '../utils/getClientIp.js'
 
+
+const defaultSettingsMap = {
+  company_name: 'D&C Prime Realty',
+  company_email: 'admin@gmail.com',
+  company_contact: '09000000000',
+  company_address: '',
+  system_status: 'active',
+  reservation_contact_name: 'Admin',
+  reservation_contact_email: 'admin@gmail.com',
+  reservation_contact_no: '09000000000',
+}
+
+const withDefaultSettings = (settingsMap) => {
+  return Object.entries(defaultSettingsMap).reduce((result, [key, defaultValue]) => {
+    const currentValue = result[key]
+    if (currentValue === undefined || currentValue === null || String(currentValue).trim() === '') {
+      result[key] = defaultValue
+    }
+    return result
+  }, { ...settingsMap })
+}
+
 const allowedSettingKeys = [
   'company_name',
   'company_email',
   'company_contact',
   'company_address',
-  'system_status'
+  'system_status',
+  'reservation_contact_name',
+  'reservation_contact_email',
+  'reservation_contact_no'
 ]
 
 const hasOwn = (object, key) => {
@@ -82,7 +107,7 @@ export const getSettings = async (req, res) => {
 
   res.status(200).json({
     settings,
-    settingsMap: settingsRowsToObject(settings)
+    settingsMap: withDefaultSettings(settingsRowsToObject(settings))
   })
 }
 

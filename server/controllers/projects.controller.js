@@ -11,6 +11,10 @@ const isMissing = (value) => {
   return value === undefined || value === null || value === ''
 }
 
+const nullableValue = (value) => {
+  return isMissing(value) ? null : value
+}
+
 const normalizeLocationCode = (value) => {
   if (isMissing(value)) return ''
   return String(value).trim().toUpperCase()

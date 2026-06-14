@@ -575,6 +575,10 @@ const Projects = () => {
     setCurrentDocumentSearch: (value: string) => void,
   ) => {
     const activeTemplates = documentTemplates.filter((template) => template.status === "active");
+    const selectedTemplateIds = new Set((data.document_template_ids || []).map(Number));
+    const selectedTemplates = activeTemplates.filter((template) =>
+      selectedTemplateIds.has(Number(template.id)),
+    );
     const filteredTemplates = activeTemplates.filter((template) =>
       [template.name, template.description]
         .filter(Boolean)
@@ -595,83 +599,95 @@ const Projects = () => {
         .toLowerCase()
         .includes(currentDocumentSearch.toLowerCase().trim()),
     );
+    const requiredCount = data.document_requirements.filter(
+      (requirement) => Boolean(requirement.is_required) && requirement.status !== "inactive",
+    ).length;
+    const optionalCount = data.document_requirements.filter(
+      (requirement) => !Boolean(requirement.is_required) && requirement.status !== "inactive",
+    ).length;
+    const hasManualOrLibraryDocs =
+      selectedTemplates.length === 0 && data.document_requirements.length > 0;
 
     return (
-    <div className="space-y-5">
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-        <Input
-          label="Project name"
-          onChange={(e) => setData({ ...data, name: e.target.value })}
-          required
-          value={data.name}
-        />
-        <Input
-          label="Location"
-          onChange={(e) => setData({ ...data, location: e.target.value })}
-          value={data.location}
-        />
-        <Input
-          label="Location Code"
-          maxLength={10}
-          onChange={(e) =>
-            setData({
-              ...data,
-              location_code: e.target.value.toUpperCase(),
-            })
-          }
-          required
-          value={data.location_code}
-        />
-        <Input
-          label="Administrator"
-          onChange={(e) => setData({ ...data, administrator: e.target.value })}
-          value={data.administrator}
-        />
-        <Input
-          label="Tax declaration no."
-          onChange={(e) =>
-            setData({ ...data, tax_declaration_no: e.target.value })
-          }
-          value={data.tax_declaration_no}
-        />
-        <Input
-          label="PIN"
-          onChange={(e) => setData({ ...data, pin: e.target.value })}
-          value={data.pin}
-        />
-        <Select
-          label="Status"
-          onChange={(e) =>
-            setData({
-              ...data,
-              status: e.target.value as ProjectFormData["status"],
-            })
-          }
-          value={data.status}
-        >
-          <option value="active">Active</option>
-          <option value="inactive">Inactive</option>
-        </Select>
-      </div>
-
-      <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-        <div className="mb-3 flex flex-col gap-1">
-          <h3 className="flex items-center gap-2 text-base font-bold text-slate-900">
-            <FiFileText /> Default Document Requirements
-          </h3>
-          <p className="text-sm text-slate-500">
-            These documents become the default checklist for listings created under this project. Listings can still be customized later.
-          </p>
-        </div>
-
-        <div className="mb-4 rounded-lg border border-slate-200 bg-white p-3">
-          <div className="mb-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-            <div>
-              <p className="text-sm font-bold text-slate-900">Select Document Templates</p>
-              <p className="text-xs text-slate-500">You can select multiple templates. Duplicate documents are merged automatically.</p>
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.25fr)]">
+        <div className="space-y-5">
+          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="mb-4">
+              <h3 className="text-base font-bold text-slate-900">Project Information</h3>
+              <p className="text-sm text-slate-500">Basic project details and status.</p>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <Button onClick={() => applyAllTemplatesToForm(data, setData)}>Select All Templates</Button>
+
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-1">
+              <Input
+                label="Project name"
+                onChange={(e) => setData({ ...data, name: e.target.value })}
+                required
+                value={data.name}
+              />
+              <Input
+                label="Location"
+                onChange={(e) => setData({ ...data, location: e.target.value })}
+                value={data.location}
+              />
+              <Input
+                label="Location Code"
+                maxLength={10}
+                onChange={(e) =>
+                  setData({
+                    ...data,
+                    location_code: e.target.value.toUpperCase(),
+                  })
+                }
+                required
+                value={data.location_code}
+              />
+              <Input
+                label="Administrator"
+                onChange={(e) => setData({ ...data, administrator: e.target.value })}
+                value={data.administrator}
+              />
+              <Input
+                label="Tax declaration no."
+                onChange={(e) =>
+                  setData({ ...data, tax_declaration_no: e.target.value })
+                }
+                value={data.tax_declaration_no}
+              />
+              <Input
+                label="PIN"
+                onChange={(e) => setData({ ...data, pin: e.target.value })}
+                value={data.pin}
+              />
+              <Select
+                label="Status"
+                onChange={(e) =>
+                  setData({
+                    ...data,
+                    status: e.target.value as ProjectFormData["status"],
+                  })
+                }
+                value={data.status}
+              >
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </Select>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <div className="mb-3 flex flex-col gap-1">
+              <h3 className="flex items-center gap-2 text-base font-bold text-slate-900">
+                <FiFileText /> Document Templates
+              </h3>
+              <p className="text-sm text-slate-500">
+                Select one or more templates. The selected documents appear on the right immediately.
+              </p>
+            </div>
+
+            <div className="mb-3 flex flex-wrap gap-2">
+              <Button onClick={() => applyAllTemplatesToForm(data, setData)}>
+                Select All Templates
+              </Button>
               <Button
                 onClick={() =>
                   setData({
@@ -697,126 +713,208 @@ const Projects = () => {
                 Use All Library Docs
               </Button>
             </div>
-          </div>
-          <Input
-            icon={<FiSearch />}
-            onChange={(e) => setCurrentTemplateSearch(e.target.value)}
-            placeholder="Search templates..."
-            value={currentTemplateSearch}
-          />
-          <div className="mt-3 grid max-h-52 grid-cols-1 gap-2 overflow-y-auto md:grid-cols-2">
-            {filteredTemplates.map((template) => (
-              <label
-                className="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm"
-                key={template.id}
-              >
-                <input
-                  checked={(data.document_template_ids || []).includes(Number(template.id))}
-                  className="mt-1"
-                  onChange={(e) => toggleTemplateForForm(Number(template.id), e.target.checked, data, setData)}
-                  type="checkbox"
-                />
-                <span>
-                  <span className="block font-semibold text-slate-900">{template.name}</span>
-                  <span className="block text-xs text-slate-500">{template.description || "No description"}</span>
-                  <span className="block text-xs text-slate-500">{Number(template.required_document_count || 0)} required / {Number(template.document_count || 0)} docs</span>
-                </span>
-              </label>
-            ))}
+
+            <Input
+              icon={<FiSearch />}
+              onChange={(e) => setCurrentTemplateSearch(e.target.value)}
+              placeholder="Search templates..."
+              value={currentTemplateSearch}
+            />
+
+            <div className="mt-3 max-h-80 space-y-2 overflow-y-auto pr-1">
+              {filteredTemplates.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-slate-300 bg-white p-4 text-sm text-slate-500">
+                  No templates found.
+                </div>
+              ) : null}
+
+              {filteredTemplates.map((template) => {
+                const isSelected = selectedTemplateIds.has(Number(template.id));
+
+                return (
+                  <label
+                    className={[
+                      "flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-sm transition",
+                      isSelected
+                        ? "border-blue-300 bg-blue-50 ring-2 ring-blue-100"
+                        : "border-slate-200 bg-white hover:border-blue-200 hover:bg-slate-50",
+                    ].join(" ")}
+                    key={template.id}
+                  >
+                    <input
+                      checked={isSelected}
+                      className="mt-1"
+                      onChange={(e) =>
+                        toggleTemplateForForm(Number(template.id), e.target.checked, data, setData)
+                      }
+                      type="checkbox"
+                    />
+                    <span className="min-w-0">
+                      <span className="block font-semibold text-slate-900">{template.name}</span>
+                      <span className="block text-xs text-slate-500">
+                        {template.description || "No description"}
+                      </span>
+                      <span className="mt-1 inline-flex rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+                        {Number(template.required_document_count || 0)} required / {Number(template.document_count || 0)} docs
+                      </span>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
           </div>
         </div>
 
-        <div className="mb-3 rounded-lg border border-slate-200 bg-white p-3">
-          <div className="mb-2 flex flex-col gap-1">
-            <p className="text-sm font-bold text-slate-900">Add Existing Documents</p>
-            <p className="text-xs text-slate-500">New documents should be created in the Document Library first, then selected here.</p>
-          </div>
-          <Input
-            icon={<FiSearch />}
-            onChange={(e) => setCurrentDocumentSearch(e.target.value)}
-            placeholder="Search document library..."
-            value={currentDocumentSearch}
-          />
-          <div className="mt-3 grid max-h-52 grid-cols-1 gap-2 overflow-y-auto md:grid-cols-2">
-            {filteredLibraryDocuments.map((document) => {
-              const alreadySelected = selectedDocumentIds.has(Number(document.id));
-              return (
-                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3" key={document.id}>
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-slate-900">{document.name}</p>
-                      <p className="text-xs text-slate-500">{document.description || "No description"}</p>
-                    </div>
-                    <Button
-                      disabled={alreadySelected}
-                      onClick={() => addLibraryRequirement(document, data, setData)}
+        <div className="space-y-5">
+          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <h3 className="flex items-center gap-2 text-base font-bold text-slate-900">
+                  <FiFileText /> Default Document Requirements
+                </h3>
+                <p className="text-sm text-slate-500">
+                  These become the default checklist for listings created under this project. Listings can still be customized later.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2 text-xs">
+                <span className="rounded-full bg-blue-50 px-3 py-1 font-semibold text-blue-700">
+                  {hasManualOrLibraryDocs
+                    ? "Library/manual docs"
+                    : `${selectedTemplates.length} templates`}
+                </span>
+                <span className="rounded-full bg-emerald-50 px-3 py-1 font-semibold text-emerald-700">
+                  {requiredCount} required
+                </span>
+                <span className="rounded-full bg-slate-100 px-3 py-1 font-semibold text-slate-700">
+                  {optionalCount} optional
+                </span>
+              </div>
+            </div>
+
+            {selectedTemplates.length > 0 ? (
+              <div className="mb-3 flex flex-wrap gap-2">
+                {selectedTemplates.map((template) => (
+                  <span
+                    className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700"
+                    key={template.id}
+                  >
+                    {template.name}
+                    <button
+                      className="text-blue-500 hover:text-blue-700"
+                      onClick={() =>
+                        toggleTemplateForForm(Number(template.id), false, data, setData)
+                      }
+                      type="button"
                     >
-                      {alreadySelected ? "Added" : "Add"}
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+            ) : hasManualOrLibraryDocs ? (
+              <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700">
+                Using selected Document Library items. You can still remove documents, mark them required/optional, or add more from the library below.
+              </div>
+            ) : (
+              <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-700">
+                No document requirements selected yet. Choose templates on the left or add documents from the library below.
+              </div>
+            )}
+
+            <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <div className="mb-2 flex flex-col gap-1">
+                <p className="text-sm font-bold text-slate-900">Add Existing Documents</p>
+                <p className="text-xs text-slate-500">
+                  Create missing documents in Document Library first, then search and add them here.
+                </p>
+              </div>
+              <Input
+                icon={<FiSearch />}
+                onChange={(e) => setCurrentDocumentSearch(e.target.value)}
+                placeholder="Search document library..."
+                value={currentDocumentSearch}
+              />
+              <div className="mt-3 grid max-h-48 grid-cols-1 gap-2 overflow-y-auto lg:grid-cols-2">
+                {filteredLibraryDocuments.map((document) => {
+                  const alreadySelected = selectedDocumentIds.has(Number(document.id));
+                  return (
+                    <div className="rounded-lg border border-slate-200 bg-white p-3" key={document.id}>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-slate-900">{document.name}</p>
+                          <p className="text-xs text-slate-500">{document.description || "No description"}</p>
+                        </div>
+                        <Button
+                          disabled={alreadySelected}
+                          onClick={() => addLibraryRequirement(document, data, setData)}
+                        >
+                          {alreadySelected ? "Added" : "Add"}
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {data.document_requirements.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-slate-300 bg-white p-4 text-sm text-slate-500">
+                No default documents selected yet.
+              </div>
+            ) : (
+              <div className="max-h-[620px] space-y-2 overflow-y-auto pr-1">
+                {data.document_requirements.map((requirement, index) => (
+                  <div
+                    className="grid grid-cols-1 items-center gap-2 rounded-lg border border-slate-200 bg-white p-3 lg:grid-cols-[1fr_150px_120px_auto]"
+                    key={`${requirement.document_id || requirement.name}-${index}`}
+                  >
+                    <div className="min-w-0">
+                      <p className="font-semibold text-slate-900">{requirement.name}</p>
+                      <p className="text-xs text-slate-500">
+                        {requirement.description ||
+                          (requirement.document_id
+                            ? "From library"
+                            : "From selected template or library")}
+                      </p>
+                    </div>
+                    <Select
+                      label="Requirement"
+                      onChange={(e) =>
+                        updateRequirement(
+                          index,
+                          { is_required: e.target.value === "true" },
+                          data,
+                          setData,
+                        )
+                      }
+                      value={String(requirement.is_required)}
+                    >
+                      <option value="true">Required</option>
+                      <option value="false">Optional</option>
+                    </Select>
+                    <Select
+                      label="Status"
+                      onChange={(e) =>
+                        updateRequirement(index, { status: e.target.value }, data, setData)
+                      }
+                      value={requirement.status}
+                    >
+                      <option value="active">Active</option>
+                      <option value="inactive">Inactive</option>
+                    </Select>
+                    <Button
+                      onClick={() => removeRequirement(index, data, setData)}
+                      variant="danger"
+                    >
+                      Remove
                     </Button>
                   </div>
-                </div>
-              );
-            })}
+                ))}
+              </div>
+            )}
           </div>
         </div>
-
-        {data.document_requirements.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-slate-300 bg-white p-4 text-sm text-slate-500">
-            No default documents selected yet.
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {data.document_requirements.map((requirement, index) => (
-              <div
-                className="grid grid-cols-1 items-center gap-2 rounded-lg border border-slate-200 bg-white p-3 md:grid-cols-[1fr_160px_110px_auto]"
-                key={`${requirement.document_id || requirement.name}-${index}`}
-              >
-                <div>
-                  <p className="font-semibold text-slate-900">{requirement.name}</p>
-                  <p className="text-xs text-slate-500">
-                    {requirement.description ||
-                      (requirement.document_id
-                        ? "From library"
-                        : "From selected template or library")}
-                  </p>
-                </div>
-                <Select
-                  label="Requirement"
-                  onChange={(e) =>
-                    updateRequirement(
-                      index,
-                      { is_required: e.target.value === "true" },
-                      data,
-                      setData,
-                    )
-                  }
-                  value={String(requirement.is_required)}
-                >
-                  <option value="true">Required</option>
-                  <option value="false">Optional</option>
-                </Select>
-                <Select
-                  label="Status"
-                  onChange={(e) =>
-                    updateRequirement(index, { status: e.target.value }, data, setData)
-                  }
-                  value={requirement.status}
-                >
-                  <option value="active">Active</option>
-                  <option value="inactive">Inactive</option>
-                </Select>
-                <Button
-                  onClick={() => removeRequirement(index, data, setData)}
-                  variant="danger"
-                >
-                  Remove
-                </Button>
-              </div>
-            ))}
-          </div>
-        )}
       </div>
-    </div>
     );
   };
 

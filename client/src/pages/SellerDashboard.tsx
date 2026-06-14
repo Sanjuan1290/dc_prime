@@ -1,12 +1,15 @@
+import { useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { FiBarChart2, FiDollarSign, FiGrid, FiUsers } from "react-icons/fi"
 import Alert from "../components/ui/Alert"
 import LoadingState from "../components/ui/LoadingState"
 import PageHeader from "../components/ui/PageHeader"
+import Pagination from "../components/ui/Pagination"
 import StatCard from "../components/ui/StatCard"
 import TableContainer from "../components/ui/TableContainer"
 import { API_URL, getErrorMessage } from "../utils/api"
 import { formatDate, formatMoney, formatText } from "../utils/formatters"
+import { paginateRows } from "../utils/pagination"
 
 type SellerDashboardData = {
   seller?: { full_name?: string; seller_role?: string } | null
@@ -37,10 +40,19 @@ const fetchSellerDashboard = async () => {
 }
 
 const SellerDashboard = () => {
+  const [salesPage, setSalesPage] = useState(1)
+  const [salesRowsPerPage, setSalesRowsPerPage] = useState(10)
+
   const { data, isLoading, error } = useQuery({
     queryKey: ["seller-dashboard"],
     queryFn: fetchSellerDashboard,
   })
+
+  const recentSales = data?.recentSales || []
+  const paginatedRecentSales = useMemo(
+    () => paginateRows(recentSales, salesPage, salesRowsPerPage),
+    [recentSales, salesPage, salesRowsPerPage]
+  )
 
   if (isLoading) return <LoadingState label="Loading seller dashboard..." />
 
@@ -62,9 +74,6 @@ const SellerDashboard = () => {
         <StatCard icon={<FiUsers />} label="Sales" value={summary?.total_sales || 0} />
         <StatCard icon={<FiGrid />} label="Available Units" value={summary?.available_units || 0} />
         <StatCard icon={<FiDollarSign />} label="Total TCP" value={formatMoney(summary?.total_tcp || 0)} />
-      </div>
-
-      <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3">
         <StatCard label="Clients" value={summary?.total_clients || 0} />
       </div>
 
@@ -77,6 +86,16 @@ const SellerDashboard = () => {
               <p className="mt-1 text-xl font-bold text-slate-900">{row.count}</p>
             </div>
           ))}
+          {!data?.teamCounts?.length ? (
+            <p className="col-span-full text-sm text-slate-500">No active team members found.</p>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h2 className="text-base font-bold text-slate-900">Recent Sales</h2>
+          <p className="text-sm text-slate-500">Latest sales under your visible team.</p>
         </div>
       </div>
 
@@ -93,7 +112,7 @@ const SellerDashboard = () => {
             </tr>
           </thead>
           <tbody>
-            {(data?.recentSales || []).map((sale) => (
+            {paginatedRecentSales.map((sale) => (
               <tr className="border-b border-slate-100" key={sale.id}>
                 <td className="px-4 py-3 font-semibold text-slate-900">{sale.client_name}</td>
                 <td className="px-4 py-3 text-slate-600">{sale.unit_id}<br/><span className="text-xs text-slate-400">{sale.project_name}</span></td>
@@ -103,12 +122,23 @@ const SellerDashboard = () => {
                 <td className="px-4 py-3 text-slate-600">{formatDate(sale.created_at)}</td>
               </tr>
             ))}
+            {!paginatedRecentSales.length ? (
+              <tr>
+                <td colSpan={6} className="px-4 py-8 text-center text-sm text-slate-500">No recent sales found.</td>
+              </tr>
+            ) : null}
           </tbody>
         </table>
       </TableContainer>
+      <Pagination
+        page={salesPage}
+        rowsPerPage={salesRowsPerPage}
+        totalRows={recentSales.length}
+        onPageChange={setSalesPage}
+        onRowsPerPageChange={setSalesRowsPerPage}
+      />
     </div>
   )
 }
 
 export default SellerDashboard
-

@@ -183,7 +183,7 @@ export const getSellerTeam = async (req, res) => {
 
 const getAllowedEditableRoles = (role) => {
   if (role === 'broker_network_manager') return ['broker']
-  if (role === 'broker') return ['manager', 'agent']
+  if (role === 'broker') return ['manager']
   if (role === 'manager') return ['agent']
   return []
 }
@@ -298,4 +298,5 @@ export const getSellerSales = async (req, res) => {
 
   res.status(200).json({ message: 'Sales fetched successfully', sales: rows, data: rows })
 }
+
 

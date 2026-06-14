@@ -68,6 +68,8 @@ type Listing = {
   twenty_months?: number | string;
   status: ListingStatus;
   has_active_client_unit?: boolean | number | string;
+  document_count?: number | string;
+  required_document_count?: number | string;
   created_at: string;
   updated_at: string;
 };
@@ -494,6 +496,7 @@ const Listings = () => {
 
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [viewListingId, setViewListingId] = useState<number | null>(null);
+  const [documentListingId, setDocumentListingId] = useState<number | null>(null);
   const [editListing, setEditListing] = useState<Listing | null>(null);
   const [listingToDelete, setListingToDelete] = useState<Listing | null>(null);
   const [pendingLmfUpdate, setPendingLmfUpdate] = useState<{
@@ -540,6 +543,16 @@ const Listings = () => {
     queryKey: ["listing-full-details", viewListingId],
     queryFn: () => fetchListingFullDetails(viewListingId || 0),
     enabled: Boolean(viewListingId),
+  });
+
+  const {
+    data: documentListingDetails,
+    isLoading: isDocumentDetailsLoading,
+    error: documentDetailsError,
+  } = useQuery({
+    queryKey: ["listing-full-details", documentListingId],
+    queryFn: () => fetchListingFullDetails(documentListingId || 0),
+    enabled: Boolean(documentListingId),
   });
 
   const createListingMutation = useMutation({
@@ -972,13 +985,6 @@ const Listings = () => {
                     </Button>
 
                     <Button
-                      icon={<FiFileText />}
-                      onClick={() => setViewListingId(listing.id)}
-                    >
-                      Edit Docs
-                    </Button>
-
-                    <Button
                       disabled={!["available", "hold"].includes(listing.status)}
                       icon={<FiTrash2 />}
                       onClick={() => setListingToDelete(listing)}
@@ -1061,6 +1067,8 @@ const Listings = () => {
           }}
           isPending={updateListingMutation.isPending}
           submitLabel="Save Changes"
+          onEditDocuments={() => setDocumentListingId(editListing.id)}
+          documentSummaryText={Number(editListing.document_count || 0) > 0 ? `${Number(editListing.document_count || 0)} docs / ${Number(editListing.required_document_count || 0)} required` : "No listing docs yet. Click Edit Documents to load project defaults or add documents."}
         />
       ) : null}
 
@@ -1095,6 +1103,15 @@ const Listings = () => {
           onClose={() => setViewListingId(null)}
         />
       ) : null}
+
+      {documentListingId ? (
+        <ListingDocumentRequirementsModal
+          details={documentListingDetails}
+          error={documentDetailsError}
+          isLoading={isDocumentDetailsLoading}
+          onClose={() => setDocumentListingId(null)}
+        />
+      ) : null}
     </div>
   );
 };
@@ -1113,6 +1130,8 @@ type ListingFormModalProps = {
   isPending: boolean;
   submitLabel: string;
   autoPrefixUnitId?: boolean;
+  onEditDocuments?: () => void;
+  documentSummaryText?: string;
 };
 
 const ListingFormModal = ({
@@ -1129,6 +1148,8 @@ const ListingFormModal = ({
   isPending,
   submitLabel,
   autoPrefixUnitId = false,
+  onEditDocuments,
+  documentSummaryText,
 }: ListingFormModalProps) => {
   const formId = `${title.replaceAll(" ", "-").toLowerCase()}-form`;
   const breakdown = calculateListingBreakdown(formData);
@@ -1336,6 +1357,24 @@ const ListingFormModal = ({
           <option value="inactive">Inactive</option>
         </Select>
 
+        {onEditDocuments ? (
+          <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 md:col-span-2">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">
+                  Listing Document Requirements
+                </h3>
+                <p className="text-xs text-slate-600">
+                  {documentSummaryText || "Open a focused modal to customize this listing's documents."}
+                </p>
+              </div>
+              <Button icon={<FiFileText />} onClick={onEditDocuments} variant="primary">
+                Edit Documents
+              </Button>
+            </div>
+          </div>
+        ) : null}
+
         <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 md:col-span-2">
           <h3 className="mb-3 text-sm font-bold text-slate-900">
             Live Price Breakdown
@@ -1369,104 +1408,21 @@ type ListingDetailsModalProps = {
   onClose: () => void;
 };
 
+const getRequirementsFromDetails = (details?: ListingFullDetails) =>
+  (details?.listingDocumentRequirements || details?.documentRequirements || []).map(
+    (requirement, index) => ({
+      ...requirement,
+      is_required: Boolean(requirement.is_required),
+      sort_order: Number(requirement.sort_order || index + 1),
+    }),
+  );
+
 const ListingDetailsModal = ({
   details,
   error,
   isLoading,
   onClose,
 }: ListingDetailsModalProps) => {
-  const queryClient = useQueryClient();
-  const [requirements, setRequirements] = useState<ListingDocumentRequirement[]>([]);
-  const [successMessage, setSuccessMessage] = useState("");
-  const [documentSearch, setDocumentSearch] = useState("");
-
-  const { data: documentLibrary = [] } = useQuery({
-    queryKey: ["documents", "library", "active"],
-    queryFn: fetchDocumentLibrary,
-  });
-
-  useEffect(() => {
-    setRequirements(
-      (details?.listingDocumentRequirements || details?.documentRequirements || []).map(
-        (requirement, index) => ({
-          ...requirement,
-          is_required: Boolean(requirement.is_required),
-          sort_order: Number(requirement.sort_order || index + 1),
-        }),
-      ),
-    );
-  }, [details]);
-
-  const saveRequirementsMutation = useMutation({
-    mutationFn: updateListingDocumentRequirements,
-    onSuccess: () => {
-      if (details?.listing.id) {
-        queryClient.invalidateQueries({ queryKey: ["listing-full-details", details.listing.id] });
-        queryClient.invalidateQueries({ queryKey: ["listings"] });
-      }
-      setSuccessMessage("Listing document requirements saved");
-    },
-  });
-
-  const resetRequirementsMutation = useMutation({
-    mutationFn: resetListingDocumentRequirements,
-    onSuccess: () => {
-      if (details?.listing.id) {
-        queryClient.invalidateQueries({ queryKey: ["listing-full-details", details.listing.id] });
-        queryClient.invalidateQueries({ queryKey: ["listings"] });
-      }
-      setSuccessMessage("Listing document requirements reset to project defaults");
-    },
-  });
-
-  const updateRequirement = (index: number, updates: Partial<ListingDocumentRequirement>) => {
-    setRequirements((current) =>
-      current.map((requirement, i) =>
-        i === index ? { ...requirement, ...updates } : requirement,
-      ),
-    );
-  };
-
-  const removeRequirement = (index: number) => {
-    setRequirements((current) => current.filter((_, i) => i !== index));
-  };
-
-  const addLibraryRequirement = (documentId: string) => {
-    const document = documentLibrary.find((item) => String(item.id) === documentId);
-    if (!document) return;
-    setRequirements((current) => {
-      if (current.some((requirement) => requirement.document_id === document.id)) return current;
-      return [
-        ...current,
-        {
-          document_id: document.id,
-          name: document.name,
-          description: document.description,
-          can_reuse: document.can_reuse,
-          is_required: true,
-          status: "active",
-          sort_order: current.length + 1,
-          source: "listing_override",
-        },
-      ];
-    });
-  };
-
-  const selectedDocumentIds = new Set(
-    requirements
-      .map((requirement) => requirement.document_id)
-      .filter(Boolean)
-      .map(Number),
-  );
-
-  const filteredDocumentLibrary = documentLibrary.filter((document) =>
-    [document.name, document.description]
-      .filter(Boolean)
-      .join(" ")
-      .toLowerCase()
-      .includes(documentSearch.toLowerCase().trim()),
-  );
-
   return (
     <Modal
       title={
@@ -1483,8 +1439,6 @@ const ListingDetailsModal = ({
       }
     >
       {isLoading ? <LoadingState label="Loading listing details..." /> : null}
-
-      {successMessage ? <Alert type="success">{successMessage}</Alert> : null}
 
       {error ? (
         <Alert
@@ -1713,132 +1667,6 @@ const ListingDetailsModal = ({
               label="Document Status"
               value={formatText(details.documentSummary.document_status)}
             />
-            <div className="md:col-span-2">
-              <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <h4 className="font-bold text-slate-900">Listing Document Requirements</h4>
-                    <p className="text-xs text-slate-500">
-                      This list is inherited from the project, but can be customized per listing.
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      disabled={resetRequirementsMutation.isPending}
-                      onClick={() => resetRequirementsMutation.mutate(details.listing.id)}
-                    >
-                      Reset to Project Defaults
-                    </Button>
-                    <Button
-                      disabled={saveRequirementsMutation.isPending}
-                      onClick={() =>
-                        saveRequirementsMutation.mutate({
-                          listingId: details.listing.id,
-                          requirements,
-                        })
-                      }
-                      variant="primary"
-                    >
-                      {saveRequirementsMutation.isPending ? "Saving..." : "Save Requirements"}
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="mb-3 rounded-lg border border-slate-200 bg-white p-3">
-                  <div className="mb-2 flex flex-col gap-1">
-                    <p className="text-sm font-bold text-slate-900">Add Existing Documents</p>
-                    <p className="text-xs text-slate-500">Create missing documents in Document Library first, then search and add them here.</p>
-                  </div>
-                  <Input
-                    icon={<FiSearch />}
-                    onChange={(e) => setDocumentSearch(e.target.value)}
-                    placeholder="Search document library..."
-                    value={documentSearch}
-                  />
-                  <div className="mt-3 grid max-h-52 grid-cols-1 gap-2 overflow-y-auto md:grid-cols-2">
-                    {filteredDocumentLibrary.map((document) => {
-                      const alreadySelected = selectedDocumentIds.has(Number(document.id));
-                      return (
-                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3" key={document.id}>
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <p className="text-sm font-semibold text-slate-900">{document.name}</p>
-                              <p className="text-xs text-slate-500">{document.description || "No description"}</p>
-                            </div>
-                            <Button
-                              disabled={alreadySelected}
-                              onClick={() => addLibraryRequirement(String(document.id))}
-                            >
-                              {alreadySelected ? "Added" : "Add"}
-                            </Button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {saveRequirementsMutation.isError ? (
-                  <Alert type="error">{saveRequirementsMutation.error.message}</Alert>
-                ) : null}
-                {resetRequirementsMutation.isError ? (
-                  <Alert type="error">{resetRequirementsMutation.error.message}</Alert>
-                ) : null}
-
-                {requirements.length === 0 ? (
-                  <div className="rounded-lg border border-dashed border-slate-300 bg-white p-4 text-sm text-slate-500">
-                    No document requirements configured for this listing.
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {requirements.map((requirement, index) => (
-                      <div
-                        className="grid grid-cols-1 items-center gap-2 rounded-lg border border-slate-200 bg-white p-3 md:grid-cols-[1fr_150px_120px_auto]"
-                        key={`${requirement.document_id || requirement.name}-${index}`}
-                      >
-                        <div>
-                          <p className="font-semibold text-slate-900">{requirement.name}</p>
-                          <p className="text-xs text-slate-500">
-                            {requirement.description || formatText(requirement.source || "listing_override")}
-                          </p>
-                          <p className="text-[11px] text-slate-400">
-                            Source: {formatText(requirement.source || "listing_override")}
-                          </p>
-                        </div>
-                        <Select
-                          label="Requirement"
-                          onChange={(e) =>
-                            updateRequirement(index, {
-                              is_required: e.target.value === "true",
-                            })
-                          }
-                          value={String(Boolean(requirement.is_required))}
-                        >
-                          <option value="true">Required</option>
-                          <option value="false">Optional</option>
-                        </Select>
-                        <Select
-                          label="Status"
-                          onChange={(e) =>
-                            updateRequirement(index, { status: e.target.value })
-                          }
-                          value={requirement.status || "active"}
-                        >
-                          <option value="active">Active</option>
-                          <option value="inactive">Inactive</option>
-                        </Select>
-                        <Button
-                          onClick={() => removeRequirement(index)}
-                          variant="danger"
-                        >
-                          Remove
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
           </DetailsSection>
 
           <DetailsSection title="System Information">
@@ -1859,6 +1687,270 @@ const ListingDetailsModal = ({
               value={formatDate(details.clientUnit?.updated_at)}
             />
           </DetailsSection>
+        </div>
+      ) : null}
+    </Modal>
+  );
+};
+
+const ListingDocumentRequirementsModal = ({
+  details,
+  error,
+  isLoading,
+  onClose,
+}: ListingDetailsModalProps) => {
+  const queryClient = useQueryClient();
+  const [requirements, setRequirements] = useState<ListingDocumentRequirement[]>([]);
+  const [successMessage, setSuccessMessage] = useState("");
+  const [documentSearch, setDocumentSearch] = useState("");
+
+  const { data: documentLibrary = [] } = useQuery({
+    queryKey: ["documents", "library", "active"],
+    queryFn: fetchDocumentLibrary,
+  });
+
+  useEffect(() => {
+    setRequirements(getRequirementsFromDetails(details));
+  }, [details]);
+
+  const saveRequirementsMutation = useMutation({
+    mutationFn: updateListingDocumentRequirements,
+    onSuccess: () => {
+      if (details?.listing.id) {
+        queryClient.invalidateQueries({ queryKey: ["listing-full-details", details.listing.id] });
+        queryClient.invalidateQueries({ queryKey: ["listings"] });
+      }
+      setSuccessMessage("Listing document requirements saved");
+    },
+  });
+
+  const resetRequirementsMutation = useMutation({
+    mutationFn: resetListingDocumentRequirements,
+    onSuccess: () => {
+      if (details?.listing.id) {
+        queryClient.invalidateQueries({ queryKey: ["listing-full-details", details.listing.id] });
+        queryClient.invalidateQueries({ queryKey: ["listings"] });
+      }
+      setSuccessMessage("Listing document requirements reset to project defaults");
+    },
+  });
+
+  const updateRequirement = (index: number, updates: Partial<ListingDocumentRequirement>) => {
+    setRequirements((current) =>
+      current.map((requirement, i) =>
+        i === index ? { ...requirement, ...updates } : requirement,
+      ),
+    );
+  };
+
+  const removeRequirement = (index: number) => {
+    setRequirements((current) => current.filter((_, i) => i !== index));
+  };
+
+  const addLibraryRequirement = (documentId: string) => {
+    const document = documentLibrary.find((item) => String(item.id) === documentId);
+    if (!document) return;
+    setRequirements((current) => {
+      if (current.some((requirement) => requirement.document_id === document.id)) return current;
+      return [
+        ...current,
+        {
+          document_id: document.id,
+          name: document.name,
+          description: document.description,
+          can_reuse: document.can_reuse,
+          is_required: true,
+          status: "active",
+          sort_order: current.length + 1,
+          source: "listing_override",
+        },
+      ];
+    });
+  };
+
+  const selectedDocumentIds = new Set(
+    requirements
+      .map((requirement) => requirement.document_id)
+      .filter(Boolean)
+      .map(Number),
+  );
+
+  const filteredDocumentLibrary = documentLibrary.filter((document) =>
+    [document.name, document.description]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+      .includes(documentSearch.toLowerCase().trim()),
+  );
+
+  return (
+    <Modal
+      title={
+        details
+          ? `Edit Documents - ${details.listing.unit_id}`
+          : "Edit Listing Documents"
+      }
+      onClose={onClose}
+      size="xl"
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button onClick={onClose}>Close</Button>
+          <Button
+            disabled={!details || saveRequirementsMutation.isPending}
+            onClick={() => {
+              if (!details) return;
+              saveRequirementsMutation.mutate({
+                listingId: details.listing.id,
+                requirements,
+              });
+            }}
+            variant="primary"
+          >
+            {saveRequirementsMutation.isPending ? "Saving..." : "Save Requirements"}
+          </Button>
+        </div>
+      }
+    >
+      {isLoading ? <LoadingState label="Loading listing documents..." /> : null}
+
+      {successMessage ? <Alert type="success">{successMessage}</Alert> : null}
+
+      {error ? (
+        <Alert
+          variant="error"
+          title="Failed to load listing documents"
+          message="Please check the backend endpoint /listings/:id/full-details."
+        />
+      ) : null}
+
+      {details ? (
+        <div className="space-y-4">
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">
+                  {details.listing.project_name} / {details.listing.unit_id}
+                </h3>
+                <p className="text-sm text-slate-500">
+                  Edit only this listing's document requirements. Existing client-unit checklists keep their snapshot unless rebuilt intentionally.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2 text-xs">
+                <span className="rounded-full bg-blue-50 px-3 py-1 font-semibold text-blue-700">
+                  {requirements.length} docs
+                </span>
+                <span className="rounded-full bg-emerald-50 px-3 py-1 font-semibold text-emerald-700">
+                  {requirements.filter((item) => Boolean(item.is_required) && item.status !== "inactive").length} required
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-white p-4">
+            <div className="mb-3 flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <h4 className="font-bold text-slate-900">Add Existing Documents</h4>
+                <p className="text-xs text-slate-500">
+                  Create missing documents in Document Library first, then search and add them here.
+                </p>
+              </div>
+              <Button
+                disabled={resetRequirementsMutation.isPending}
+                onClick={() => resetRequirementsMutation.mutate(details.listing.id)}
+              >
+                Reset to Project Defaults
+              </Button>
+            </div>
+
+            <Input
+              icon={<FiSearch />}
+              onChange={(e) => setDocumentSearch(e.target.value)}
+              placeholder="Search document library..."
+              value={documentSearch}
+            />
+
+            <div className="mt-3 grid max-h-56 grid-cols-1 gap-2 overflow-y-auto md:grid-cols-2">
+              {filteredDocumentLibrary.map((document) => {
+                const alreadySelected = selectedDocumentIds.has(Number(document.id));
+                return (
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3" key={document.id}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-slate-900">{document.name}</p>
+                        <p className="text-xs text-slate-500">{document.description || "No description"}</p>
+                      </div>
+                      <Button
+                        disabled={alreadySelected}
+                        onClick={() => addLibraryRequirement(String(document.id))}
+                      >
+                        {alreadySelected ? "Added" : "Add"}
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {saveRequirementsMutation.isError ? (
+            <Alert type="error">{saveRequirementsMutation.error.message}</Alert>
+          ) : null}
+          {resetRequirementsMutation.isError ? (
+            <Alert type="error">{resetRequirementsMutation.error.message}</Alert>
+          ) : null}
+
+          {requirements.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-slate-300 bg-white p-4 text-sm text-slate-500">
+              No document requirements configured for this listing.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {requirements.map((requirement, index) => (
+                <div
+                  className="grid grid-cols-1 items-center gap-2 rounded-lg border border-slate-200 bg-white p-3 md:grid-cols-[1fr_150px_120px_auto]"
+                  key={`${requirement.document_id || requirement.name}-${index}`}
+                >
+                  <div className="min-w-0">
+                    <p className="font-semibold text-slate-900">{requirement.name}</p>
+                    <p className="text-xs text-slate-500">
+                      {requirement.description || formatText(requirement.source || "listing_override")}
+                    </p>
+                    <p className="text-[11px] text-slate-400">
+                      Source: {formatText(requirement.source || "listing_override")}
+                    </p>
+                  </div>
+                  <Select
+                    label="Requirement"
+                    onChange={(e) =>
+                      updateRequirement(index, {
+                        is_required: e.target.value === "true",
+                      })
+                    }
+                    value={String(Boolean(requirement.is_required))}
+                  >
+                    <option value="true">Required</option>
+                    <option value="false">Optional</option>
+                  </Select>
+                  <Select
+                    label="Status"
+                    onChange={(e) =>
+                      updateRequirement(index, { status: e.target.value })
+                    }
+                    value={requirement.status || "active"}
+                  >
+                    <option value="active">Active</option>
+                    <option value="inactive">Inactive</option>
+                  </Select>
+                  <Button
+                    onClick={() => removeRequirement(index)}
+                    variant="danger"
+                  >
+                    Remove
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       ) : null}
     </Modal>

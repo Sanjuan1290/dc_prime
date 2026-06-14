@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { FiUsers } from "react-icons/fi"
 import Alert from "../components/ui/Alert"
@@ -7,9 +7,11 @@ import Input from "../components/ui/Input"
 import LoadingState from "../components/ui/LoadingState"
 import Modal from "../components/ui/Modal"
 import PageHeader from "../components/ui/PageHeader"
+import Pagination from "../components/ui/Pagination"
 import TableContainer from "../components/ui/TableContainer"
 import { API_URL, getErrorMessage } from "../utils/api"
 import { formatMoney, formatNumber, formatText } from "../utils/formatters"
+import { paginateRows } from "../utils/pagination"
 import useCurrentUser from "../utils/useCurrentUser"
 
 type TeamMember = {
@@ -74,9 +76,32 @@ const rateLabel = (member: TeamMember) => {
 
 const canEditMember = (currentRole: string | undefined, member: TeamMember) => {
   if (currentRole === "broker_network_manager") return member.seller_role === "broker"
-  if (currentRole === "broker") return member.seller_role === "manager" || member.seller_role === "agent"
+  if (currentRole === "broker") return member.seller_role === "manager"
   if (currentRole === "manager") return member.seller_role === "agent"
   return false
+}
+
+const viewOnlyReason = (currentRole: string | undefined, member: TeamMember) => {
+  if (currentRole === "broker" && member.seller_role === "agent") {
+    return "Only the manager can edit agent rate"
+  }
+  return "View only"
+}
+
+const rateRules = (currentRole: string | undefined, member: TeamMember) => {
+  if (currentRole === "broker_network_manager" && member.seller_role === "broker") {
+    return "You are setting a Broker Pool Rate. This rate cannot exceed your BNM Pool Rate. Broker managers and agents will be calculated under this broker pool."
+  }
+
+  if (currentRole === "broker" && member.seller_role === "manager") {
+    return "You are setting a Manager Rate. This rate cannot exceed your Broker Pool Rate. The manager will use this as the maximum pool for their agents."
+  }
+
+  if (currentRole === "manager" && member.seller_role === "agent") {
+    return "You are setting an Agent Rate. This rate cannot exceed your Manager Rate. The same rate is used for the agent's personal and direct-to-developer commission."
+  }
+
+  return "Rate rules: BNM sets broker pool only. Broker sets manager rate only. Manager sets agent rate only. Broker can view agent rate but cannot edit it."
 }
 
 const MyTeam = () => {
@@ -84,10 +109,13 @@ const MyTeam = () => {
   const [editingMember, setEditingMember] = useState<TeamMember | null>(null)
   const [rateValue, setRateValue] = useState("")
   const [message, setMessage] = useState("")
+  const [page, setPage] = useState(1)
+  const [rowsPerPage, setRowsPerPage] = useState(10)
   const { data: currentUserData } = useCurrentUser()
-  const currentRole = (currentUserData as CurrentUserResponse | null)?.user?.role
+  const currentRole = (currentUserData as CurrentUserResponse | null)?.user?.role?.toLowerCase().trim()
 
   const { data = [], isLoading, error } = useQuery({ queryKey: ["seller-team"], queryFn: fetchTeam })
+  const paginatedTeam = useMemo(() => paginateRows(data, page, rowsPerPage), [data, page, rowsPerPage])
 
   const rateMutation = useMutation({
     mutationFn: updateTeamRate,
@@ -106,52 +134,66 @@ const MyTeam = () => {
 
   return (
     <div className="p-6">
-      <PageHeader icon={<FiUsers />} title="My Team" subtitle="Manage rates for sellers under your hierarchy." />
+      <PageHeader icon={<FiUsers />} title="My Team" subtitle="View your hierarchy and manage only the rates allowed for your role." />
       {message ? <Alert variant="success" title={message} /> : null}
       {error ? <Alert variant="error" title={error instanceof Error ? error.message : "Failed to load team"} /> : null}
       {rateMutation.error ? <Alert variant="error" title={rateMutation.error instanceof Error ? rateMutation.error.message : "Failed to update rate"} /> : null}
       {isLoading ? <LoadingState label="Loading team..." /> : null}
       {!isLoading ? (
-        <TableContainer>
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50">
-              <tr className="border-b border-slate-200">
-                <th className="px-4 py-3 text-left">Seller</th>
-                <th className="px-4 py-3 text-left">Role</th>
-                <th className="px-4 py-3 text-left">Reports Under</th>
-                <th className="px-4 py-3 text-left">Assigned Rate</th>
-                <th className="px-4 py-3 text-left">Sales</th>
-                <th className="px-4 py-3 text-left">TCP</th>
-                <th className="px-4 py-3 text-left">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.map((member) => (
-                <tr className="border-b border-slate-100" key={member.id}>
-                  <td className="px-4 py-3">
-                    <p className="font-semibold text-slate-900">{member.full_name}</p>
-                    <p className="text-xs text-slate-500">{member.email || member.contact_no || "-"}</p>
-                  </td>
-                  <td className="px-4 py-3 text-slate-600">{formatText(member.seller_role)}</td>
-                  <td className="px-4 py-3 text-slate-600">{member.parent_seller_name || "Company"}</td>
-                  <td className="px-4 py-3 text-slate-600">
-                    <p className="font-medium text-slate-900">{rateLabel(member)}</p>
-                    <p>{rate(assignedRate(member))}</p>
-                  </td>
-                  <td className="px-4 py-3 text-slate-600">{formatNumber(member.total_sales)}</td>
-                  <td className="px-4 py-3 text-slate-600">{formatMoney(member.total_tcp)}</td>
-                  <td className="px-4 py-3">
-                    {canEditMember(currentRole, member) ? (
-                      <Button onClick={() => openEdit(member)}>Edit Rate</Button>
-                    ) : (
-                      <span className="text-xs text-slate-400">View only</span>
-                    )}
-                  </td>
+        <>
+          <TableContainer>
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50">
+                <tr className="border-b border-slate-200">
+                  <th className="px-4 py-3 text-left">Seller</th>
+                  <th className="px-4 py-3 text-left">Role</th>
+                  <th className="px-4 py-3 text-left">Reports Under</th>
+                  <th className="px-4 py-3 text-left">Assigned Rate</th>
+                  <th className="px-4 py-3 text-left">Sales</th>
+                  <th className="px-4 py-3 text-left">TCP</th>
+                  <th className="px-4 py-3 text-left">Action</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </TableContainer>
+              </thead>
+              <tbody>
+                {paginatedTeam.map((member) => (
+                  <tr className="border-b border-slate-100" key={member.id}>
+                    <td className="px-4 py-3">
+                      <p className="font-semibold text-slate-900">{member.full_name}</p>
+                      <p className="text-xs text-slate-500">{member.email || member.contact_no || "-"}</p>
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">{formatText(member.seller_role)}</td>
+                    <td className="px-4 py-3 text-slate-600">{member.parent_seller_name || "Company"}</td>
+                    <td className="px-4 py-3 text-slate-600">
+                      <p className="font-medium text-slate-900">{rateLabel(member)}</p>
+                      <p>{rate(assignedRate(member))}</p>
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">{formatNumber(member.total_sales)}</td>
+                    <td className="px-4 py-3 text-slate-600">{formatMoney(member.total_tcp)}</td>
+                    <td className="px-4 py-3">
+                      {canEditMember(currentRole, member) ? (
+                        <Button onClick={() => openEdit(member)}>Edit Rate</Button>
+                      ) : (
+                        <span className="text-xs text-slate-400">{viewOnlyReason(currentRole, member)}</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+                {!paginatedTeam.length ? (
+                  <tr>
+                    <td colSpan={7} className="px-4 py-8 text-center text-sm text-slate-500">No team members found.</td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </TableContainer>
+          <Pagination
+            page={page}
+            rowsPerPage={rowsPerPage}
+            totalRows={data.length}
+            onPageChange={setPage}
+            onRowsPerPageChange={setRowsPerPage}
+          />
+        </>
       ) : null}
 
       {editingMember ? (
@@ -174,7 +216,7 @@ const MyTeam = () => {
           <Alert
             variant="info"
             title="Rate rules"
-            message="Broker rate cannot exceed BNM pool. Manager rate cannot exceed broker pool. Agent rate cannot exceed manager rate."
+            message={rateRules(currentRole, editingMember)}
           />
           <Input
             label={`${rateLabel(editingMember)} (%)`}

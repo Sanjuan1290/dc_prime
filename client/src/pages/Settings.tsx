@@ -20,6 +20,9 @@ type SettingsMap = {
   company_contact?: string
   company_address?: string
   system_status?: string
+  reservation_contact_name?: string
+  reservation_contact_email?: string
+  reservation_contact_no?: string
 }
 
 type SettingRow = {
@@ -41,6 +44,9 @@ type SettingsFormData = {
   company_contact: string
   company_address: string
   system_status: string
+  reservation_contact_name: string
+  reservation_contact_email: string
+  reservation_contact_no: string
 }
 
 const emptyFormData: SettingsFormData = {
@@ -49,7 +55,12 @@ const emptyFormData: SettingsFormData = {
   company_contact: "",
   company_address: "",
   system_status: "active",
+  reservation_contact_name: "",
+  reservation_contact_email: "",
+  reservation_contact_no: "",
 }
+
+const hiddenRawKeys = ["default_reservation_fee", "default_commission_rate"]
 
 const fetchSettings = async (): Promise<SettingsResponse> => {
   const res = await fetch(`${API_URL}/settings`, {
@@ -111,7 +122,7 @@ const Settings = () => {
   })
 
   const settingsMap = data?.settingsMap || {}
-  const settingsRows = (data?.settings || []).filter((setting) => !["default_reservation_fee", "default_commission_rate"].includes(setting.setting_key))
+  const settingsRows = (data?.settings || []).filter((setting) => !hiddenRawKeys.includes(setting.setting_key))
 
   const loadSettingsToForm = () => {
     setFormData({
@@ -120,6 +131,9 @@ const Settings = () => {
       company_contact: settingsMap.company_contact || "",
       company_address: settingsMap.company_address || "",
       system_status: settingsMap.system_status || "active",
+      reservation_contact_name: settingsMap.reservation_contact_name || settingsMap.company_name || "",
+      reservation_contact_email: settingsMap.reservation_contact_email || settingsMap.company_email || "",
+      reservation_contact_no: settingsMap.reservation_contact_no || settingsMap.company_contact || "",
     })
 
     setIsEditing(true)
@@ -150,7 +164,7 @@ const Settings = () => {
       <PageHeader
         icon={<FiSettings />}
         title="Settings"
-        subtitle="Manage company details and system default values from MySQL"
+        subtitle="Manage company details, seller reservation contact, and system status."
         actions={
           !isEditing ? (
             <Button icon={<FiEdit2 />} onClick={loadSettingsToForm} variant="primary">
@@ -169,6 +183,11 @@ const Settings = () => {
           description="Displayed company name"
         />
         <StatCard
+          label="Reservation Contact"
+          value={settingsMap.reservation_contact_name || settingsMap.company_name || "-"}
+          description="Shown to sellers in Available Units"
+        />
+        <StatCard
           label="System Status"
           value={formatText(settingsMap.system_status || "active")}
           description="Current operating mode"
@@ -180,7 +199,7 @@ const Settings = () => {
           <div>
             <h2 className="text-xl font-bold text-slate-900">System Settings</h2>
             <p className="mt-1 text-sm text-slate-500">
-              Update company info, defaults, and system status.
+              Update company info, seller reservation contact, and system status.
             </p>
           </div>
           {isEditing ? (
@@ -194,18 +213,13 @@ const Settings = () => {
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <SettingDisplay label="Company Name" value={settingsMap.company_name} />
             <SettingDisplay label="Company Email" value={settingsMap.company_email} />
-            <SettingDisplay
-              label="Company Contact"
-              value={settingsMap.company_contact}
-            />
-            <SettingDisplay
-              label="Company Address"
-              value={settingsMap.company_address}
-            />
+            <SettingDisplay label="Company Contact" value={settingsMap.company_contact} />
+            <SettingDisplay label="Company Address" value={settingsMap.company_address} />
+            <SettingDisplay label="Reservation Contact Name" value={settingsMap.reservation_contact_name || settingsMap.company_name} />
+            <SettingDisplay label="Reservation Contact Email" value={settingsMap.reservation_contact_email || settingsMap.company_email} />
+            <SettingDisplay label="Reservation Contact Number" value={settingsMap.reservation_contact_no || settingsMap.company_contact} />
             <div className="rounded-lg border border-slate-200 p-4">
-              <p className="text-sm font-semibold text-slate-500">
-                System Status
-              </p>
+              <p className="text-sm font-semibold text-slate-500">System Status</p>
               <div className="mt-2">
                 <StatusBadge status={settingsMap.system_status || "active"} />
               </div>
@@ -214,69 +228,68 @@ const Settings = () => {
         ) : (
           <form onSubmit={handleSaveSettings} className="space-y-6">
             <div>
-              <h3 className="mb-3 text-base font-bold text-slate-900">
-                Company Details
-              </h3>
+              <h3 className="mb-3 text-base font-bold text-slate-900">Company Details</h3>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <Input
                   label="Company Name"
                   value={formData.company_name}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      company_name: e.target.value,
-                    })
-                  }
+                  onChange={(e) => setFormData({ ...formData, company_name: e.target.value })}
                   required
                 />
                 <Input
                   label="Company Email"
                   type="email"
                   value={formData.company_email}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      company_email: e.target.value,
-                    })
-                  }
+                  onChange={(e) => setFormData({ ...formData, company_email: e.target.value })}
                 />
                 <Input
                   label="Company Contact"
                   value={formData.company_contact}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      company_contact: e.target.value,
-                    })
-                  }
+                  onChange={(e) => setFormData({ ...formData, company_contact: e.target.value })}
                 />
                 <Input
                   label="Company Address"
                   value={formData.company_address}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      company_address: e.target.value,
-                    })
-                  }
+                  onChange={(e) => setFormData({ ...formData, company_address: e.target.value })}
                 />
               </div>
             </div>
 
             <div>
-              <h3 className="mb-3 text-base font-bold text-slate-900">
-                System Status
-              </h3>
+              <h3 className="mb-3 text-base font-bold text-slate-900">Seller Reservation Contact</h3>
+              <p className="mb-3 text-sm text-slate-500">
+                This is shown on the Available Units page so sellers know who to contact for reservation requests or questions.
+              </p>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                <Input
+                  label="Contact Name"
+                  value={formData.reservation_contact_name}
+                  onChange={(e) => setFormData({ ...formData, reservation_contact_name: e.target.value })}
+                  placeholder="Admin / Reservation Officer"
+                />
+                <Input
+                  label="Contact Email"
+                  type="email"
+                  value={formData.reservation_contact_email}
+                  onChange={(e) => setFormData({ ...formData, reservation_contact_email: e.target.value })}
+                  placeholder="admin@email.com"
+                />
+                <Input
+                  label="Contact Number"
+                  value={formData.reservation_contact_no}
+                  onChange={(e) => setFormData({ ...formData, reservation_contact_no: e.target.value })}
+                  placeholder="09xxxxxxxxx"
+                />
+              </div>
+            </div>
+
+            <div>
+              <h3 className="mb-3 text-base font-bold text-slate-900">System Status</h3>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <Select
                   label="System Status"
                   value={formData.system_status}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      system_status: e.target.value,
-                    })
-                  }
+                  onChange={(e) => setFormData({ ...formData, system_status: e.target.value })}
                 >
                   <option value="active">Active</option>
                   <option value="maintenance">Maintenance</option>
@@ -285,10 +298,7 @@ const Settings = () => {
             </div>
 
             {updateSettingsMutation.error instanceof Error ? (
-              <Alert
-                title={updateSettingsMutation.error.message}
-                variant="error"
-              />
+              <Alert title={updateSettingsMutation.error.message} variant="error" />
             ) : null}
 
             <div className="flex justify-end gap-2">
@@ -299,9 +309,7 @@ const Settings = () => {
                 type="submit"
                 variant="primary"
               >
-                {updateSettingsMutation.isPending
-                  ? "Saving..."
-                  : "Save Settings"}
+                {updateSettingsMutation.isPending ? "Saving..." : "Save Settings"}
               </Button>
             </div>
           </form>
@@ -310,44 +318,26 @@ const Settings = () => {
 
       <div className="mb-3">
         <h2 className="text-xl font-bold text-slate-900">Raw Settings</h2>
-        <p className="mt-1 text-sm text-slate-500">
-          Key-value records saved in the settings table.
-        </p>
+        <p className="mt-1 text-sm text-slate-500">Key-value records saved in the settings table.</p>
       </div>
 
       <TableContainer>
         <table className="min-w-full divide-y divide-slate-200 text-sm">
           <thead className="bg-slate-50">
             <tr>
-              <th className="px-4 py-3 text-left font-semibold text-slate-600">
-                Key
-              </th>
-              <th className="px-4 py-3 text-left font-semibold text-slate-600">
-                Value
-              </th>
-              <th className="px-4 py-3 text-left font-semibold text-slate-600">
-                Created At
-              </th>
-              <th className="px-4 py-3 text-left font-semibold text-slate-600">
-                Updated At
-              </th>
+              <th className="px-4 py-3 text-left font-semibold text-slate-600">Key</th>
+              <th className="px-4 py-3 text-left font-semibold text-slate-600">Value</th>
+              <th className="px-4 py-3 text-left font-semibold text-slate-600">Created At</th>
+              <th className="px-4 py-3 text-left font-semibold text-slate-600">Updated At</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 bg-white">
             {settingsRows.map((setting) => (
               <tr key={setting.id} className="hover:bg-slate-50">
-                <td className="px-4 py-3 font-semibold text-slate-900">
-                  {setting.setting_key}
-                </td>
-                <td className="px-4 py-3 text-slate-600">
-                  {setting.setting_value || "-"}
-                </td>
-                <td className="px-4 py-3 text-slate-600">
-                  {formatDate(setting.created_at)}
-                </td>
-                <td className="px-4 py-3 text-slate-600">
-                  {formatDate(setting.updated_at)}
-                </td>
+                <td className="px-4 py-3 font-semibold text-slate-900">{setting.setting_key}</td>
+                <td className="px-4 py-3 text-slate-600">{setting.setting_value || "-"}</td>
+                <td className="px-4 py-3 text-slate-600">{formatDate(setting.created_at)}</td>
+                <td className="px-4 py-3 text-slate-600">{formatDate(setting.updated_at)}</td>
               </tr>
             ))}
           </tbody>
@@ -374,4 +364,3 @@ const SettingDisplay = ({
 }
 
 export default Settings
-
