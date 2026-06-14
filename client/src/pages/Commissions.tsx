@@ -55,7 +55,7 @@ type Commission = {
   commission_role: string | null
   source_type: "main" | "override" | string
   parent_commission_id: number | null
-  sale_type: "distributed" | "direct" | string
+  sale_type: "distributed" | "direct" | "direct_to_developer" | string
   cash_kaliwaan_amount: number | string
   cash_kaliwaan_date: string | null
   cash_kaliwaan_notes: string | null
@@ -160,6 +160,7 @@ type CommissionWithReleaseDetails = Commission & {
 
 type CommissionDetails = CommissionWithReleaseDetails & {
   pairedOverrideCommission?: CommissionWithReleaseDetails | null
+  relatedOverrideCommissions?: CommissionWithReleaseDetails[]
 }
 
 type Seller = {
@@ -190,7 +191,7 @@ type CommissionEditData = {
   rate: string
   commission_role: string
   source_type: "main" | "override"
-  sale_type: "distributed" | "direct"
+  sale_type: "distributed" | "direct" | "direct_to_developer"
   cash_kaliwaan_amount: string
   cash_kaliwaan_date: string
   cash_kaliwaan_notes: string
@@ -633,12 +634,18 @@ const Commissions = () => {
           releases: commissionDetails.releases || [],
         }
       : null,
-    commissionDetails?.pairedOverrideCommission
-      ? {
-          commission: commissionDetails.pairedOverrideCommission,
-          releases: commissionDetails.pairedOverrideCommission.releases || [],
-        }
-      : null,
+    ...(commissionDetails?.relatedOverrideCommissions || []).map((commission) => ({
+      commission,
+      releases: commission.releases || [],
+    })),
+    ...(!commissionDetails?.relatedOverrideCommissions?.length && commissionDetails?.pairedOverrideCommission
+      ? [
+          {
+            commission: commissionDetails.pairedOverrideCommission,
+            releases: commissionDetails.pairedOverrideCommission.releases || [],
+          },
+        ]
+      : []),
   ].filter(
     (
       context
@@ -765,19 +772,19 @@ const Commissions = () => {
   })
 
   const commissionGroups = commissions.reduce<
-    Record<string, { main: Commission | null; override: Commission | null }>
+    Record<string, { main: Commission | null; overrides: Commission[] }>
   >((groups, commission) => {
     const key = getCommissionGroupKey(commission)
 
     if (!groups[key]) {
       groups[key] = {
         main: null,
-        override: null,
+        overrides: [],
       }
     }
 
     if (commission.source_type === "override") {
-      groups[key].override = commission
+      groups[key].overrides.push(commission)
     } else {
       groups[key].main = commission
     }
@@ -787,62 +794,64 @@ const Commissions = () => {
 
   const groupedCommissions = Object.values(commissionGroups)
     .map((group) => {
-      if (!group.main && group.override) {
+      if (!group.main && group.overrides.length > 0) {
+        const [firstOverride, ...otherOverrides] = group.overrides
         return {
-          main: group.override,
-          override: null,
+          main: firstOverride,
+          overrides: otherOverrides,
           isOrphanOverride: true,
         }
       }
 
       return {
         main: group.main,
-        override: group.override,
+        overrides: group.overrides,
         isOrphanOverride: false,
       }
     })
     .filter((group): group is {
       main: Commission
-      override: Commission | null
+      overrides: Commission[]
       isOrphanOverride: boolean
     } => Boolean(group.main))
 
-  const filteredGroups = groupedCommissions.filter(({ main, override }) => {
+  const filteredGroups = groupedCommissions.filter(({ main, overrides }) => {
     const searchText = [
       main.seller_name,
       main.client_name,
       main.unit_id,
       main.project_name,
       main.seller_role,
-      override?.seller_name,
-      override?.seller_role,
+      ...overrides.flatMap((override) => [override.seller_name, override.seller_role]),
     ]
       .filter(Boolean)
       .join(" ")
       .toLowerCase()
 
-    const matchesSearch = searchText.includes(search.toLowerCase().trim())
+    const searchTerm = search.toLowerCase().trim()
+    const matchesSearch = !searchTerm || searchText.includes(searchTerm)
     const matchesStatus =
       statusFilter === "all" ||
       main.status === statusFilter ||
-      override?.status === statusFilter
+      overrides.some((override) => override.status === statusFilter)
 
     const matchesSource =
       sourceFilter === "all" ||
       main.source_type === sourceFilter ||
-      override?.source_type === sourceFilter
+      overrides.some((override) => override.source_type === sourceFilter)
 
     const matchesSaleType =
       saleTypeFilter === "all" ||
       main.sale_type === saleTypeFilter ||
-      override?.sale_type === saleTypeFilter
+      overrides.some((override) => override.sale_type === saleTypeFilter)
 
     return matchesSearch && matchesStatus && matchesSource && matchesSaleType
   })
 
-  const filteredCommissions = filteredGroups.flatMap(({ main, override }) =>
-    override ? [main, override] : [main]
-  )
+  const filteredCommissions = filteredGroups.flatMap(({ main, overrides }) => [
+    main,
+    ...overrides,
+  ])
 
   const summary = filteredCommissions.reduce<CommissionSummary>(
     (totals, commission) => {
@@ -964,7 +973,7 @@ const Commissions = () => {
         {releases.length > 0 && !hasEligibleReleases ? (
           <Alert
             variant="info"
-            title="No eligible releases are available for cash advance deductions."
+            title="No eligible releases are available yet. Cash advance deductions are now handled from the Cash Advances page."
           />
         ) : null}
 
@@ -1030,15 +1039,9 @@ const Commissions = () => {
                         Hold
                       </Button>
                       {release.status === "eligible" ? (
-                        <Button
-                          disabled={deductMutation.isPending}
-                          onClick={() => {
-                            setDeductReleaseId(release.id)
-                            setDeductData(defaultDeductAdvanceData)
-                          }}
-                        >
-                          Deduct
-                        </Button>
+                        <span className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-500">
+                          Deduct in Cash Advances
+                        </span>
                       ) : null}
                       <Button
                         disabled={cancelReleaseMutation.isPending}
@@ -1226,6 +1229,7 @@ const Commissions = () => {
             <option value="all">All Sale Types</option>
             <option value="distributed">Distributed</option>
             <option value="direct">Direct</option>
+            <option value="direct_to_developer">Direct to Developer</option>
           </Select>
         </div>
       </div>
@@ -1244,7 +1248,7 @@ const Commissions = () => {
                     <th className="px-4 py-3 text-left">Client / Unit</th>
                     <th className="px-4 py-3 text-left">Main Commission</th>
                     <th className="px-4 py-3 text-left">
-                      Commission Chain / Hierarchy Release Milestones
+                      Commission Chain / Hierarchy Residuals
                     </th>
                     <th className="px-4 py-3 text-left">TCP / Paid</th>
                     <th className="px-4 py-3 text-left">Release Progress</th>
@@ -1254,10 +1258,11 @@ const Commissions = () => {
                 </thead>
 
                 <tbody>
-                  {paginatedGroups.map(({ main, override, isOrphanOverride }) => {
-                    const canAddMissingOverride =
+                  {paginatedGroups.map(({ main, overrides, isOrphanOverride }) => {
+                    const canAddManualResidual =
                       main.source_type === "main" &&
                       main.sale_type === "distributed" &&
+                      overrides.length === 0 &&
                       !hasOverrideForMain(main, commissions)
 
                     return (
@@ -1293,26 +1298,31 @@ const Commissions = () => {
                         </td>
 
                         <td className="px-4 py-3">
-                          {override ? (
-                            <div>
-                              <p className="font-bold text-slate-900">
-                                {override.seller_name}
-                              </p>
-                              <p className="text-xs text-slate-500">
-                                {formatText(override.seller_role)} ·{" "}
-                                {formatNumber(override.rate)}%
-                              </p>
-                              <p className="mt-1 text-xs text-slate-500">
-                                Gross: {formatMoney(override.gross_commission)}
-                              </p>
-                              <StatusBadge status={override.status} />
+                          {overrides.length > 0 ? (
+                            <div className="space-y-3">
+                              {overrides.map((override) => (
+                                <div key={override.id} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                                  <p className="font-bold text-slate-900">
+                                    {override.seller_name}
+                                  </p>
+                                  <p className="text-xs text-slate-500">
+                                    {formatText(override.seller_role)} residual · {formatNumber(override.rate)}%
+                                  </p>
+                                  <p className="mt-1 text-xs text-slate-500">
+                                    Gross: {formatMoney(override.gross_commission)}
+                                  </p>
+                                  <StatusBadge status={override.status} />
+                                </div>
+                              ))}
                             </div>
                           ) : (
                             <div>
                               <p className="text-sm text-slate-500">
-                                No override commission
+                                {main.sale_type === "direct_to_developer"
+                                  ? "Direct-to-developer sale: no hierarchy residuals"
+                                  : "No hierarchy residual commission"}
                               </p>
-                              {canAddMissingOverride ? (
+                              {canAddManualResidual ? (
                                 <Button
                                   className="mt-2"
                                   onClick={() => openMissingOverrideModal(main)}
@@ -1368,7 +1378,7 @@ const Commissions = () => {
 
                             <Button
                               icon={<FiEdit2 />}
-                              onClick={() => openEditModal(main, override || undefined)}
+                              onClick={() => openEditModal(main, overrides[0])}
                             >
                               Edit Main
                             </Button>
@@ -1478,6 +1488,7 @@ const Commissions = () => {
                 <option value="agent">Agent</option>
                 <option value="manager">Manager</option>
                 <option value="broker">Broker</option>
+                <option value="broker_network_manager">Broker Network Manager</option>
               </Select>
 
               <Select
@@ -1495,20 +1506,20 @@ const Commissions = () => {
               </Select>
 
               <Select
-                label="Distributed / Direct"
+                label="Sale Channel"
                 value={editData.sale_type}
                 onChange={(e) => {
-                  const saleType = e.target.value as "distributed" | "direct"
+                  const saleType = e.target.value as "distributed" | "direct" | "direct_to_developer"
 
                   setEditData({
                     ...editData,
                     sale_type: saleType,
                     override_seller_id:
-                      saleType === "direct" ? "" : editData.override_seller_id,
+                      ["direct", "direct_to_developer"].includes(saleType) ? "" : editData.override_seller_id,
                     override_rate:
-                      saleType === "direct" ? "" : editData.override_rate,
+                      ["direct", "direct_to_developer"].includes(saleType) ? "" : editData.override_rate,
                     override_notes_for_child:
-                      saleType === "direct"
+                      ["direct", "direct_to_developer"].includes(saleType)
                         ? ""
                         : editData.override_notes_for_child,
                   })
@@ -1516,6 +1527,7 @@ const Commissions = () => {
               >
                 <option value="distributed">Distributed</option>
                 <option value="direct">Direct</option>
+                <option value="direct_to_developer">Direct to Developer</option>
               </Select>
 
               <Select
@@ -1714,7 +1726,7 @@ const Commissions = () => {
 
       {missingOverrideMain ? (
         <Modal
-          title={`Add Manual Residual - ${missingOverrideMain.client_name}`}
+          title={`Add Manual Residual / Correction - ${missingOverrideMain.client_name}`}
           onClose={() => {
             setMissingOverrideMain(null)
             setMissingOverrideData(defaultMissingOverrideData)
@@ -1982,7 +1994,7 @@ const Commissions = () => {
                 <div className="mb-3 flex items-center justify-between gap-3">
                   <h3 className="text-base font-bold text-slate-900">
                     {commissionDetails.source_type === "override"
-                      ? "Override Release Milestones"
+                      ? "Hierarchy Residual Release Milestones"
                       : "Main Release Milestones"}
                   </h3>
                 </div>
@@ -1990,51 +2002,39 @@ const Commissions = () => {
                 {renderReleaseMilestonesTable(commissionDetails.releases || [])}
               </section>
 
-              {commissionDetails.pairedOverrideCommission ? (
+              {(commissionDetails.relatedOverrideCommissions || []).length > 0 ? (
                 <section>
-                  <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-                    <div>
-                      <h3 className="text-base font-bold text-slate-900">
-                        Override Agent Release Milestones
-                      </h3>
-                      <p className="mt-1 text-sm text-slate-500">
-                        {commissionDetails.pairedOverrideCommission.seller_name} -{" "}
-                        {formatText(
-                          commissionDetails.pairedOverrideCommission.seller_role
-                        )}{" "}
-                        - {formatNumber(commissionDetails.pairedOverrideCommission.rate)}%
-                      </p>
-                    </div>
+                  <h3 className="mb-3 text-base font-bold text-slate-900">
+                    Related Hierarchy Residual Release Milestones
+                  </h3>
 
-                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-                      <ComputedBox
-                        label="Gross"
-                        value={formatMoney(
-                          commissionDetails.pairedOverrideCommission
-                            .gross_commission
+                  <div className="space-y-6">
+                    {(commissionDetails.relatedOverrideCommissions || []).map((overrideCommission) => (
+                      <div key={overrideCommission.id} className="rounded-xl border border-slate-200 bg-white p-4">
+                        <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                          <div>
+                            <p className="text-sm font-bold text-slate-900">
+                              {overrideCommission.seller_name}
+                            </p>
+                            <p className="mt-1 text-sm text-slate-500">
+                              {formatText(overrideCommission.seller_role)} residual - {formatNumber(overrideCommission.rate)}%
+                            </p>
+                          </div>
+
+                          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                            <ComputedBox label="Gross" value={formatMoney(overrideCommission.gross_commission)} />
+                            <ComputedBox label="Released" value={formatMoney(overrideCommission.released_amount)} />
+                            <ComputedBox label="Remaining" value={formatMoney(overrideCommission.remaining_amount)} />
+                          </div>
+                        </div>
+
+                        {renderReleaseMilestonesTable(
+                          overrideCommission.releases || [],
+                          "No residual milestones generated"
                         )}
-                      />
-                      <ComputedBox
-                        label="Released"
-                        value={formatMoney(
-                          commissionDetails.pairedOverrideCommission
-                            .released_amount
-                        )}
-                      />
-                      <ComputedBox
-                        label="Remaining"
-                        value={formatMoney(
-                          commissionDetails.pairedOverrideCommission
-                            .remaining_amount
-                        )}
-                      />
-                    </div>
+                      </div>
+                    ))}
                   </div>
-
-                  {renderReleaseMilestonesTable(
-                    commissionDetails.pairedOverrideCommission.releases || [],
-                    "No override milestones generated"
-                  )}
                 </section>
               ) : null}
 
@@ -2304,3 +2304,4 @@ const ComputedBox = ({ label, value }: { label: string; value: string }) => {
 }
 
 export default Commissions
+

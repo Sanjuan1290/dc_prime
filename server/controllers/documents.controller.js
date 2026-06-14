@@ -4,6 +4,7 @@ import { getClientIp } from '../utils/getClientIp.js'
 import { refreshCommissionEligibility } from './commissions.controller.js'
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
 import { createDriveFolderIfMissing, deleteDriveFile, getDriveFileBuffer, safeDriveName, uploadFileToDrive } from '../lib/googleDrive.js'
+import { createClientDocumentChecklistFromListing } from '../utils/documentRequirements.js'
 
 const allowedClientDocumentStatuses = [
   'not_submitted',
@@ -295,7 +296,8 @@ export const getClientUnitDocuments = async (req, res) => {
       cdl.document_id,
       d.name,
       d.description,
-      d.is_required,
+      COALESCE(cdl.is_required, d.is_required) AS is_required,
+      cdl.requirement_source,
       d.can_reuse,
       cdl.file_url,
       cdl.storage_provider,
@@ -319,7 +321,7 @@ export const getClientUnitDocuments = async (req, res) => {
     LEFT JOIN users reviewer ON reviewer.id = cdl.reviewed_by
     LEFT JOIN users uploader ON uploader.id = cdl.uploaded_by
     WHERE cdl.client_unit_id = ?
-    ORDER BY d.id ASC
+    ORDER BY cdl.id ASC
     `,
     [clientUnitId]
   )
@@ -343,55 +345,24 @@ export const createChecklistForClientUnit = async (req, res) => {
     })
   }
 
-  const [documents] = await db.query(
-    `
-    SELECT id
-    FROM documents
-    WHERE status = 'active'
-    ORDER BY id ASC
-    `
-  )
-
-  if (documents.length === 0) {
-    return res.status(200).json({
-      message: 'No active documents found',
-      data: {
-        clientUnitId: Number(clientUnitId),
-        insertedDocuments: 0,
-      },
-    })
-  }
-
-  const values = documents.map((document) => [
-    clientUnitId,
-    document.id,
-    'not_submitted',
-  ])
-
-  const [result] = await db.query(
-    `
-    INSERT IGNORE INTO client_document_list (
-      client_unit_id,
-      document_id,
-      status
-    ) VALUES ?
-    `,
-    [values]
-  )
+  const result = await createClientDocumentChecklistFromListing(db, clientUnit)
 
   await createAuditLog({
     userId: req.user.id,
     action: 'create',
     module: 'Client Documents',
-    description: `Created document checklist for client unit ${clientUnitId}`,
+    description: `Created listing-based document checklist for client unit ${clientUnitId}`,
     ipAddress: getClientIp(req),
   })
 
   res.status(201).json({
-    message: 'Document checklist created successfully',
+    message:
+      result.insertedCount > 0
+        ? 'Document checklist created successfully'
+        : 'No listing document requirements found or checklist already exists',
     data: {
       clientUnitId: Number(clientUnitId),
-      insertedDocuments: result.affectedRows,
+      insertedDocuments: result.insertedCount,
     },
   })
 }
@@ -778,7 +749,7 @@ export const downloadClientUnitDocumentsPdf = async (req, res) => {
     JOIN listings l ON l.id = cu.listing_id
     WHERE cdl.client_unit_id = ?
       AND cdl.drive_file_id IS NOT NULL
-    ORDER BY d.id ASC
+    ORDER BY cdl.id ASC
     `,
     [clientUnitId]
   )
@@ -840,14 +811,14 @@ export const getClientUnitDocumentStatus = async (req, res) => {
     `
     SELECT
       COUNT(d.id) AS total_documents,
-      SUM(CASE WHEN d.is_required = TRUE THEN 1 ELSE 0 END) AS required_documents,
+      SUM(CASE WHEN COALESCE(cdl.is_required, d.is_required) = TRUE THEN 1 ELSE 0 END) AS required_documents,
       SUM(CASE WHEN cdl.status = 'not_submitted' THEN 1 ELSE 0 END) AS not_submitted_count,
       SUM(CASE WHEN cdl.status = 'submitted' THEN 1 ELSE 0 END) AS submitted_count,
       SUM(CASE WHEN cdl.status = 'approved' THEN 1 ELSE 0 END) AS approved_count,
       SUM(CASE WHEN cdl.status = 'rejected' THEN 1 ELSE 0 END) AS rejected_count,
       SUM(
         CASE
-          WHEN d.is_required = TRUE
+          WHEN COALESCE(cdl.is_required, d.is_required) = TRUE
             AND cdl.status IN ('submitted', 'approved')
           THEN 1
           ELSE 0
@@ -934,3 +905,4 @@ export const deleteDocument = async (req, res) => {
 
   res.status(200).json({ message: 'Document deleted successfully' })
 }
+

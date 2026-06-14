@@ -7,6 +7,7 @@ import {
   approveCashAdvance,
   rejectCashAdvance,
   cancelCashAdvance,
+  deductCashAdvance,
   getCashAdvanceSummary,
   getSellerCommissionSummaryForCashAdvance,
 } from '../controllers/cashAdvances.controller.js'
@@ -25,5 +26,7 @@ router.patch('/cash-advances/:id', updateCashAdvance)
 router.patch('/cash-advances/:id/approve', approveCashAdvance)
 router.patch('/cash-advances/:id/reject', rejectCashAdvance)
 router.patch('/cash-advances/:id/cancel', cancelCashAdvance)
+router.patch('/cash-advances/:id/deduct', deductCashAdvance)
 
 export default router
+

@@ -2,6 +2,11 @@ import { db } from '../db/connect.js'
 import { createAuditLog } from '../utils/createAuditLog.js'
 import { getClientIp } from '../utils/getClientIp.js'
 import { refreshCommissionEligibility } from './commissions.controller.js'
+import {
+  copyProjectRequirementsToListing,
+  getListingDocumentRequirements as loadListingDocumentRequirements,
+  replaceListingDocumentRequirements,
+} from '../utils/documentRequirements.js'
 
 const nullableValue = (value) => {
   if (value === undefined || value === null || value === '') return null
@@ -490,12 +495,12 @@ export const getListingFullDetails = async (req, res) => {
       `
       SELECT
         COUNT(cdl.id) AS total_documents,
-        SUM(CASE WHEN d.is_required = TRUE THEN 1 ELSE 0 END) AS required_documents,
+        SUM(CASE WHEN COALESCE(cdl.is_required, d.is_required) = TRUE THEN 1 ELSE 0 END) AS required_documents,
         SUM(CASE WHEN cdl.status IN ('submitted', 'approved') THEN 1 ELSE 0 END) AS submitted_documents,
         SUM(CASE WHEN cdl.status = 'approved' THEN 1 ELSE 0 END) AS approved_documents,
         SUM(
           CASE
-            WHEN d.is_required = TRUE
+            WHEN COALESCE(cdl.is_required, d.is_required) = TRUE
               AND cdl.status NOT IN ('submitted', 'approved')
             THEN 1
             ELSE 0
@@ -525,12 +530,28 @@ export const getListingFullDetails = async (req, res) => {
     }
   }
 
+  const listingDocumentRequirements = await loadListingDocumentRequirements(db, id)
+
+  if (!clientUnit) {
+    const requiredDocuments = listingDocumentRequirements.filter((document) => Boolean(document.is_required)).length
+    documentSummary = {
+      total_documents: listingDocumentRequirements.length,
+      required_documents: requiredDocuments,
+      submitted_documents: 0,
+      approved_documents: 0,
+      missing_required_documents: requiredDocuments,
+      document_status: listingDocumentRequirements.length > 0 ? 'not_reserved' : 'not_configured'
+    }
+  }
+
   return res.status(200).json({
     listing: mappedListing,
     clientUnit,
     paymentSummary,
     commissionSummary,
-    documentSummary
+    documentSummary,
+    listingDocumentRequirements,
+    documentRequirements: listingDocumentRequirements
   })
 }
 
@@ -582,32 +603,50 @@ export const createListing = async (req, res) => {
     reservation_fee
   })
 
-  const [result] = await db.query(
-    `
-    INSERT INTO listings (
-      project_id,
-      cadastral_lot_no,
-      unit_id,
-      lot_type,
-      reservation_fee,
-      price_per_sqm,
-      lot_area_sqm,
-      legal_misc_rate,
-      status
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `,
-    [
-      project_id,
-      nullableValue(cadastral_lot_no),
-      unit_id,
-      nullableValue(lot_type),
-      numberValue(reservation_fee),
-      numberValue(price_per_sqm),
-      numberValue(lot_area_sqm),
-      numberValue(legal_misc_rate),
-      status
-    ]
-  )
+  const connection = await db.getConnection()
+  let listingId = null
+  let documentSync = { insertedCount: 0 }
+
+  try {
+    await connection.beginTransaction()
+
+    const [result] = await connection.query(
+      `
+      INSERT INTO listings (
+        project_id,
+        cadastral_lot_no,
+        unit_id,
+        lot_type,
+        reservation_fee,
+        price_per_sqm,
+        lot_area_sqm,
+        legal_misc_rate,
+        status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        project_id,
+        nullableValue(cadastral_lot_no),
+        unit_id,
+        nullableValue(lot_type),
+        numberValue(reservation_fee),
+        numberValue(price_per_sqm),
+        numberValue(lot_area_sqm),
+        numberValue(legal_misc_rate),
+        status
+      ]
+    )
+
+    listingId = result.insertId
+    documentSync = await copyProjectRequirementsToListing(connection, listingId, project_id, { overwrite: true })
+
+    await connection.commit()
+  } catch (error) {
+    await connection.rollback()
+    throw error
+  } finally {
+    connection.release()
+  }
 
   await createAuditLog({
     userId: req.user.id,
@@ -619,7 +658,8 @@ export const createListing = async (req, res) => {
 
   return res.status(201).json({
     message: 'Listing created successfully',
-    listingId: result.insertId,
+    listingId,
+    documentSync,
     pricing: {
       net_selling_price: computedAmounts.netSellingPrice,
       legal_misc_fee: computedAmounts.legalMiscFee,
@@ -705,6 +745,8 @@ export const updateListing = async (req, res) => {
       })
     }
 
+    await copyProjectRequirementsToListing(connection, id, project_id, { overwrite: false })
+
     balanceSummaries = await recomputeListingClientUnitBalances(connection, id, {
       actorRole: req.user.role,
     })
@@ -736,6 +778,91 @@ export const updateListing = async (req, res) => {
   })
 }
 
+
+
+export const getListingDocumentRequirements = async (req, res) => {
+  const { id } = req.params
+
+  const [listingRows] = await db.query(
+    `SELECT id FROM listings WHERE id = ? LIMIT 1`,
+    [id]
+  )
+
+  if (!listingRows[0]) {
+    return res.status(404).json({ message: 'Listing not found' })
+  }
+
+  const requirements = await loadListingDocumentRequirements(db, id)
+
+  return res.status(200).json({
+    message: 'Listing document requirements fetched successfully',
+    requirements,
+    documentRequirements: requirements,
+    data: requirements
+  })
+}
+
+export const updateListingDocumentRequirements = async (req, res) => {
+  const { id } = req.params
+  const { document_requirements, documentRequirements } = req.body
+
+  const [listingRows] = await db.query(
+    `SELECT id, unit_id FROM listings WHERE id = ? LIMIT 1`,
+    [id]
+  )
+
+  const listing = listingRows[0]
+
+  if (!listing) {
+    return res.status(404).json({ message: 'Listing not found' })
+  }
+
+  const requirements = document_requirements || documentRequirements || []
+  const result = await replaceListingDocumentRequirements(db, id, requirements, 'listing_override')
+
+  await createAuditLog({
+    userId: req.user.id,
+    action: 'update',
+    module: 'Listing Documents',
+    description: `Updated listing document requirements for ${listing.unit_id}`,
+    ipAddress: getClientIp(req)
+  })
+
+  return res.status(200).json({
+    message: 'Listing document requirements updated successfully',
+    data: result
+  })
+}
+
+export const resetListingDocumentRequirements = async (req, res) => {
+  const { id } = req.params
+
+  const [listingRows] = await db.query(
+    `SELECT id, unit_id, project_id FROM listings WHERE id = ? LIMIT 1`,
+    [id]
+  )
+
+  const listing = listingRows[0]
+
+  if (!listing) {
+    return res.status(404).json({ message: 'Listing not found' })
+  }
+
+  const result = await copyProjectRequirementsToListing(db, id, listing.project_id, { overwrite: true })
+
+  await createAuditLog({
+    userId: req.user.id,
+    action: 'reset',
+    module: 'Listing Documents',
+    description: `Reset listing documents for ${listing.unit_id} to project defaults`,
+    ipAddress: getClientIp(req)
+  })
+
+  return res.status(200).json({
+    message: 'Listing document requirements reset to project defaults',
+    data: result
+  })
+}
 
 export const deleteListing = async (req, res) => {
   const { id } = req.params
@@ -780,3 +907,4 @@ export const deleteListing = async (req, res) => {
 
   return res.status(200).json({ message: 'Listing deleted successfully' })
 }
+

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import {
@@ -125,12 +125,34 @@ type DocumentSummary = {
   document_status: string;
 };
 
+type ListingDocumentRequirement = {
+  id?: number;
+  document_id: number | null;
+  name: string;
+  description?: string | null;
+  can_reuse?: boolean | number;
+  is_required: boolean | number;
+  status: string;
+  sort_order: number;
+  source?: string;
+};
+
+type LibraryDocument = {
+  id: number;
+  name: string;
+  description: string | null;
+  can_reuse: boolean | number;
+  status: string;
+};
+
 type ListingFullDetails = {
   listing: Listing;
   clientUnit: ClientUnitFullDetails | null;
   paymentSummary: PaymentSummary;
   commissionSummary: CommissionSummary;
   documentSummary: DocumentSummary;
+  listingDocumentRequirements?: ListingDocumentRequirement[];
+  documentRequirements?: ListingDocumentRequirement[];
 };
 
 type ListingFormData = {
@@ -1298,6 +1320,103 @@ const ListingDetailsModal = ({
   isLoading,
   onClose,
 }: ListingDetailsModalProps) => {
+  const queryClient = useQueryClient();
+  const [requirements, setRequirements] = useState<ListingDocumentRequirement[]>([]);
+  const [successMessage, setSuccessMessage] = useState("");
+  const [newRequirementName, setNewRequirementName] = useState("");
+
+  const { data: documentLibrary = [] } = useQuery({
+    queryKey: ["documents", "library", "active"],
+    queryFn: fetchDocumentLibrary,
+  });
+
+  useEffect(() => {
+    setRequirements(
+      (details?.listingDocumentRequirements || details?.documentRequirements || []).map(
+        (requirement, index) => ({
+          ...requirement,
+          is_required: Boolean(requirement.is_required),
+          sort_order: Number(requirement.sort_order || index + 1),
+        }),
+      ),
+    );
+  }, [details]);
+
+  const saveRequirementsMutation = useMutation({
+    mutationFn: updateListingDocumentRequirements,
+    onSuccess: () => {
+      if (details?.listing.id) {
+        queryClient.invalidateQueries({ queryKey: ["listing-full-details", details.listing.id] });
+      }
+      setSuccessMessage("Listing document requirements saved");
+    },
+  });
+
+  const resetRequirementsMutation = useMutation({
+    mutationFn: resetListingDocumentRequirements,
+    onSuccess: () => {
+      if (details?.listing.id) {
+        queryClient.invalidateQueries({ queryKey: ["listing-full-details", details.listing.id] });
+      }
+      setSuccessMessage("Listing document requirements reset to project defaults");
+    },
+  });
+
+  const updateRequirement = (index: number, updates: Partial<ListingDocumentRequirement>) => {
+    setRequirements((current) =>
+      current.map((requirement, i) =>
+        i === index ? { ...requirement, ...updates } : requirement,
+      ),
+    );
+  };
+
+  const removeRequirement = (index: number) => {
+    setRequirements((current) => current.filter((_, i) => i !== index));
+  };
+
+  const addLibraryRequirement = (documentId: string) => {
+    const document = documentLibrary.find((item) => String(item.id) === documentId);
+    if (!document) return;
+    setRequirements((current) => {
+      if (current.some((requirement) => requirement.document_id === document.id)) return current;
+      return [
+        ...current,
+        {
+          document_id: document.id,
+          name: document.name,
+          description: document.description,
+          can_reuse: document.can_reuse,
+          is_required: true,
+          status: "active",
+          sort_order: current.length + 1,
+          source: "listing_override",
+        },
+      ];
+    });
+  };
+
+  const addNewRequirement = () => {
+    const trimmedName = newRequirementName.trim();
+    if (!trimmedName) return;
+    setRequirements((current) => {
+      if (current.some((requirement) => requirement.name.toLowerCase() === trimmedName.toLowerCase())) return current;
+      return [
+        ...current,
+        {
+          document_id: null,
+          name: trimmedName,
+          description: null,
+          can_reuse: false,
+          is_required: true,
+          status: "active",
+          sort_order: current.length + 1,
+          source: "listing_override",
+        },
+      ];
+    });
+    setNewRequirementName("");
+  };
+
   return (
     <Modal
       title={
@@ -1314,6 +1433,8 @@ const ListingDetailsModal = ({
       }
     >
       {isLoading ? <LoadingState label="Loading listing details..." /> : null}
+
+      {successMessage ? <Alert type="success">{successMessage}</Alert> : null}
 
       {error ? (
         <Alert
@@ -1542,6 +1663,120 @@ const ListingDetailsModal = ({
               label="Document Status"
               value={formatText(details.documentSummary.document_status)}
             />
+            <div className="md:col-span-2">
+              <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h4 className="font-bold text-slate-900">Listing Document Requirements</h4>
+                    <p className="text-xs text-slate-500">
+                      This list is inherited from the project, but can be customized per listing.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      disabled={resetRequirementsMutation.isPending}
+                      onClick={() => resetRequirementsMutation.mutate(details.listing.id)}
+                    >
+                      Reset to Project Defaults
+                    </Button>
+                    <Button
+                      disabled={saveRequirementsMutation.isPending}
+                      onClick={() =>
+                        saveRequirementsMutation.mutate({
+                          listingId: details.listing.id,
+                          requirements,
+                        })
+                      }
+                      variant="primary"
+                    >
+                      {saveRequirementsMutation.isPending ? "Saving..." : "Save Requirements"}
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="mb-3 grid grid-cols-1 gap-2 md:grid-cols-[1fr_1fr_auto]">
+                  <Select
+                    onChange={(e) => {
+                      addLibraryRequirement(e.target.value);
+                      e.target.value = "";
+                    }}
+                    value=""
+                  >
+                    <option value="">Add from Document Library...</option>
+                    {documentLibrary.map((document) => (
+                      <option key={document.id} value={document.id}>
+                        {document.name}
+                      </option>
+                    ))}
+                  </Select>
+                  <Input
+                    onChange={(e) => setNewRequirementName(e.target.value)}
+                    placeholder="New document name"
+                    value={newRequirementName}
+                  />
+                  <Button icon={<FiPlus />} onClick={addNewRequirement}>
+                    Add
+                  </Button>
+                </div>
+
+                {saveRequirementsMutation.isError ? (
+                  <Alert type="error">{saveRequirementsMutation.error.message}</Alert>
+                ) : null}
+                {resetRequirementsMutation.isError ? (
+                  <Alert type="error">{resetRequirementsMutation.error.message}</Alert>
+                ) : null}
+
+                {requirements.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-slate-300 bg-white p-4 text-sm text-slate-500">
+                    No document requirements configured for this listing.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {requirements.map((requirement, index) => (
+                      <div
+                        className="grid grid-cols-1 items-center gap-2 rounded-lg border border-slate-200 bg-white p-3 md:grid-cols-[1fr_150px_120px_auto]"
+                        key={`${requirement.document_id || requirement.name}-${index}`}
+                      >
+                        <div>
+                          <p className="font-semibold text-slate-900">{requirement.name}</p>
+                          <p className="text-xs text-slate-500">
+                            {formatText(requirement.source || "listing_override")}
+                          </p>
+                        </div>
+                        <Select
+                          label="Requirement"
+                          onChange={(e) =>
+                            updateRequirement(index, {
+                              is_required: e.target.value === "true",
+                            })
+                          }
+                          value={String(Boolean(requirement.is_required))}
+                        >
+                          <option value="true">Required</option>
+                          <option value="false">Optional</option>
+                        </Select>
+                        <Select
+                          label="Status"
+                          onChange={(e) =>
+                            updateRequirement(index, { status: e.target.value })
+                          }
+                          value={requirement.status || "active"}
+                        >
+                          <option value="active">Active</option>
+                          <option value="inactive">Inactive</option>
+                        </Select>
+                        <Button
+                          onClick={() => removeRequirement(index)}
+                          variant="danger"
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
           </DetailsSection>
 
           <DetailsSection title="System Information">
@@ -1604,3 +1839,4 @@ const Detail = ({
 };
 
 export default Listings;
+

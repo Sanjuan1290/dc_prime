@@ -11,6 +11,7 @@ import PageHeader from "../components/ui/PageHeader"
 import Select from "../components/ui/Select"
 import StatusBadge from "../components/ui/StatusBadge"
 import TableContainer from "../components/ui/TableContainer"
+import Pagination from "../components/ui/Pagination"
 import { API_URL, getErrorMessage } from "../utils/api"
 import { formatDate, formatNumber, formatText } from "../utils/formatters"
 import useCurrentUser from "../utils/useCurrentUser"
@@ -303,6 +304,11 @@ const Users = () => {
   const [form, setForm] = useState<UserForm>(emptyForm)
   const [defaultsForm, setDefaultsForm] = useState<DefaultsForm>(defaultDefaultsForm)
   const [message, setMessage] = useState("")
+  const [roleFilter, setRoleFilter] = useState("all")
+  const [statusFilter, setStatusFilter] = useState("all")
+  const [sellerProfileFilter, setSellerProfileFilter] = useState("all")
+  const [page, setPage] = useState(1)
+  const [rowsPerPage, setRowsPerPage] = useState(10)
 
   const { data: currentUserData } = useCurrentUser()
   const currentUser = (currentUserData as CurrentUserResponse | null)?.user
@@ -330,14 +336,37 @@ const Users = () => {
 
   const filteredUsers = useMemo(() => {
     const term = search.toLowerCase().trim()
-    if (!term) return users
-    return users.filter((user) =>
-      [user.full_name, user.email, user.role, user.status, user.seller_full_name, user.parent_seller_name]
+
+    return users.filter((user) => {
+      const matchesSearch = !term || [
+        user.full_name,
+        user.email,
+        user.role,
+        user.status,
+        user.seller_full_name,
+        user.parent_seller_name,
+        user.seller_role,
+      ]
+        .filter(Boolean)
         .join(" ")
         .toLowerCase()
         .includes(term)
-    )
-  }, [search, users])
+
+      const matchesRole = roleFilter === "all" || String(user.role) === roleFilter
+      const matchesStatus = statusFilter === "all" || String(user.status) === statusFilter
+      const matchesSellerProfile =
+        sellerProfileFilter === "all" ||
+        (sellerProfileFilter === "linked" && Boolean(user.seller_id)) ||
+        (sellerProfileFilter === "unlinked" && !user.seller_id)
+
+      return matchesSearch && matchesRole && matchesStatus && matchesSellerProfile
+    })
+  }, [roleFilter, search, sellerProfileFilter, statusFilter, users])
+
+  const paginatedUsers = useMemo(
+    () => filteredUsers.slice((page - 1) * rowsPerPage, page * rowsPerPage),
+    [filteredUsers, page, rowsPerPage]
+  )
 
   const parentOptions = useMemo(() => getParentOptions(form.role, sellers), [form.role, sellers])
 
@@ -433,6 +462,26 @@ const Users = () => {
     setIsOpen(true)
   }
 
+  const handleResetPassword = (user: User) => {
+    const confirmed = window.confirm(
+      `Are you sure you want to reset the password for ${user.full_name}? A new temporary password will be emailed and the user must change it on first login.`
+    )
+
+    if (confirmed) {
+      resetPasswordMutation.mutate(user.id)
+    }
+  }
+
+  const handleDeactivate = (user: User) => {
+    const confirmed = window.confirm(
+      `Are you sure you want to deactivate ${user.full_name}? They will no longer be able to login.`
+    )
+
+    if (confirmed) {
+      deactivateMutation.mutate(user.id)
+    }
+  }
+
   const rateSummary = (user: User) => {
     if (user.role === "broker_network_manager") return `BNM Pool: ${formatRate(user.commission_pool_rate)}`
     if (user.role === "broker") return `Broker Pool: ${formatRate(user.commission_pool_rate)}`
@@ -470,8 +519,54 @@ const Users = () => {
       {resetPasswordMutation.error ? <Alert variant="error" title={resetPasswordMutation.error instanceof Error ? resetPasswordMutation.error.message : "Failed to reset password"} /> : null}
       {defaultsMutation.error ? <Alert variant="error" title={defaultsMutation.error instanceof Error ? defaultsMutation.error.message : "Failed to save defaults"} /> : null}
 
-      <div className="mb-4 max-w-md">
-        <Input icon={<FiSearch />} placeholder="Search users..." value={search} onChange={(e) => setSearch(e.target.value)} />
+      <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-[1fr_220px_220px_220px]">
+        <Input
+          icon={<FiSearch />}
+          placeholder="Search users, email, seller, or parent..."
+          value={search}
+          onChange={(e) => {
+            setSearch(e.target.value)
+            setPage(1)
+          }}
+        />
+
+        <Select
+          value={roleFilter}
+          onChange={(e) => {
+            setRoleFilter(e.target.value)
+            setPage(1)
+          }}
+        >
+          <option value="all">All roles</option>
+          {allRoles.map((role) => (
+            <option key={role} value={role}>{formatText(role)}</option>
+          ))}
+        </Select>
+
+        <Select
+          value={statusFilter}
+          onChange={(e) => {
+            setStatusFilter(e.target.value)
+            setPage(1)
+          }}
+        >
+          <option value="all">All statuses</option>
+          {statuses.map((status) => (
+            <option key={status} value={status}>{formatText(status)}</option>
+          ))}
+        </Select>
+
+        <Select
+          value={sellerProfileFilter}
+          onChange={(e) => {
+            setSellerProfileFilter(e.target.value)
+            setPage(1)
+          }}
+        >
+          <option value="all">All profiles</option>
+          <option value="linked">With seller profile</option>
+          <option value="unlinked">No seller profile</option>
+        </Select>
       </div>
 
       {isLoading ? <LoadingState label="Loading users..." /> : null}
@@ -493,7 +588,7 @@ const Users = () => {
               </tr>
             </thead>
             <tbody>
-              {filteredUsers.map((user) => (
+              {paginatedUsers.map((user) => (
                 <tr className="border-b border-slate-100" key={user.id}>
                   <td className="px-4 py-3">
                     <p className="font-semibold text-slate-900">{user.full_name}</p>
@@ -504,7 +599,6 @@ const Users = () => {
                     {user.seller_id ? (
                       <>
                         <p className="font-medium text-slate-900">{user.seller_full_name || user.full_name}</p>
-                        <p className="text-xs text-slate-500">Seller ID #{user.seller_id}</p>
                       </>
                     ) : (
                       <span>-</span>
@@ -528,8 +622,8 @@ const Users = () => {
                   <td className="px-4 py-3">
                     <div className="flex gap-2">
                       <Button onClick={() => openEdit(user)}>Edit</Button>
-                      <Button disabled={resetPasswordMutation.isPending} onClick={() => resetPasswordMutation.mutate(user.id)} variant="secondary">Reset Temp Password</Button>
-                      <Button disabled={user.status !== "active" || deactivateMutation.isPending} onClick={() => deactivateMutation.mutate(user.id)} variant="danger">Deactivate</Button>
+                      <Button disabled={resetPasswordMutation.isPending} onClick={() => handleResetPassword(user)} variant="secondary">Reset Temp Password</Button>
+                      <Button disabled={user.status !== "active" || deactivateMutation.isPending} onClick={() => handleDeactivate(user)} variant="danger">Deactivate</Button>
                     </div>
                   </td>
                 </tr>
@@ -537,6 +631,19 @@ const Users = () => {
             </tbody>
           </table>
         </TableContainer>
+      ) : null}
+
+      {filteredUsers.length > 0 ? (
+        <Pagination
+          page={page}
+          rowsPerPage={rowsPerPage}
+          totalRows={filteredUsers.length}
+          onPageChange={setPage}
+          onRowsPerPageChange={(nextRowsPerPage) => {
+            setRowsPerPage(nextRowsPerPage)
+            setPage(1)
+          }}
+        />
       ) : null}
 
       {isOpen ? (
@@ -650,4 +757,5 @@ const Users = () => {
 }
 
 export default Users
+
 

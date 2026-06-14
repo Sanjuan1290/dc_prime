@@ -372,7 +372,7 @@ export const getDocumentsReport = async (req, res) => {
   }
 
   if (!isMissing(is_required) && is_required !== 'all') {
-    conditions.push('d.is_required = ?')
+    conditions.push('COALESCE(cdl.is_required, d.is_required) = ?')
     params.push(booleanFilterValue(is_required))
   }
 
@@ -392,7 +392,7 @@ export const getDocumentsReport = async (req, res) => {
       p.name AS project_name,
       l.unit_id,
       d.name AS document_name,
-      d.is_required,
+      COALESCE(cdl.is_required, d.is_required) AS is_required,
       d.can_reuse,
       cdl.status,
       reviewer.full_name AS reviewed_by_name,
@@ -486,3 +486,4 @@ export const getClientsReport = async (req, res) => {
     })),
   })
 }
+

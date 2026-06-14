@@ -12,15 +12,13 @@ import StatCard from "../components/ui/StatCard"
 import StatusBadge from "../components/ui/StatusBadge"
 import TableContainer from "../components/ui/TableContainer"
 import { API_URL, getErrorMessage } from "../utils/api"
-import { formatDate, formatMoney, formatText } from "../utils/formatters"
+import { formatDate, formatText } from "../utils/formatters"
 
 type SettingsMap = {
   company_name?: string
   company_email?: string
   company_contact?: string
   company_address?: string
-  default_reservation_fee?: string
-  default_commission_rate?: string
   system_status?: string
 }
 
@@ -42,8 +40,6 @@ type SettingsFormData = {
   company_email: string
   company_contact: string
   company_address: string
-  default_reservation_fee: string
-  default_commission_rate: string
   system_status: string
 }
 
@@ -52,8 +48,6 @@ const emptyFormData: SettingsFormData = {
   company_email: "",
   company_contact: "",
   company_address: "",
-  default_reservation_fee: "10000",
-  default_commission_rate: "5",
   system_status: "active",
 }
 
@@ -117,7 +111,7 @@ const Settings = () => {
   })
 
   const settingsMap = data?.settingsMap || {}
-  const settingsRows = data?.settings || []
+  const settingsRows = (data?.settings || []).filter((setting) => !["default_reservation_fee", "default_commission_rate"].includes(setting.setting_key))
 
   const loadSettingsToForm = () => {
     setFormData({
@@ -125,8 +119,6 @@ const Settings = () => {
       company_email: settingsMap.company_email || "",
       company_contact: settingsMap.company_contact || "",
       company_address: settingsMap.company_address || "",
-      default_reservation_fee: settingsMap.default_reservation_fee || "10000",
-      default_commission_rate: settingsMap.default_commission_rate || "5",
       system_status: settingsMap.system_status || "active",
     })
 
@@ -170,21 +162,11 @@ const Settings = () => {
 
       {successMessage ? <Alert title={successMessage} variant="success" /> : null}
 
-      <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-4">
+      <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3">
         <StatCard
           label="Company Name"
           value={settingsMap.company_name || "-"}
           description="Displayed company name"
-        />
-        <StatCard
-          label="Reservation Fee"
-          value={formatMoney(settingsMap.default_reservation_fee)}
-          description="Default for reservations"
-        />
-        <StatCard
-          label="Commission Rate"
-          value={`${settingsMap.default_commission_rate || "0"}%`}
-          description="Default seller rate"
         />
         <StatCard
           label="System Status"
@@ -219,14 +201,6 @@ const Settings = () => {
             <SettingDisplay
               label="Company Address"
               value={settingsMap.company_address}
-            />
-            <SettingDisplay
-              label="Default Reservation Fee"
-              value={formatMoney(settingsMap.default_reservation_fee)}
-            />
-            <SettingDisplay
-              label="Default Commission Rate"
-              value={`${settingsMap.default_commission_rate || "0"}%`}
             />
             <div className="rounded-lg border border-slate-200 p-4">
               <p className="text-sm font-semibold text-slate-500">
@@ -291,35 +265,9 @@ const Settings = () => {
 
             <div>
               <h3 className="mb-3 text-base font-bold text-slate-900">
-                Default Values
+                System Status
               </h3>
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-                <Input
-                  label="Default Reservation Fee"
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  value={formData.default_reservation_fee}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      default_reservation_fee: e.target.value,
-                    })
-                  }
-                />
-                <Input
-                  label="Default Commission Rate"
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  value={formData.default_commission_rate}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      default_commission_rate: e.target.value,
-                    })
-                  }
-                />
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <Select
                   label="System Status"
                   value={formData.system_status}
@@ -426,3 +374,4 @@ const SettingDisplay = ({
 }
 
 export default Settings
+

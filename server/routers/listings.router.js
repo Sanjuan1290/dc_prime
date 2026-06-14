@@ -3,6 +3,9 @@ import {
   getListings,
   getListing,
   getListingFullDetails,
+  getListingDocumentRequirements,
+  updateListingDocumentRequirements,
+  resetListingDocumentRequirements,
   createListing,
   updateListing,
   deleteListing
@@ -13,6 +16,9 @@ const router = express.Router()
 
 router.get('/listings', auth, getListings)
 router.get('/listings/:id/full-details', auth, getListingFullDetails)
+router.get('/listings/:id/document-requirements', auth, getListingDocumentRequirements)
+router.put('/listings/:id/document-requirements', auth, updateListingDocumentRequirements)
+router.post('/listings/:id/document-requirements/reset', auth, resetListingDocumentRequirements)
 router.get('/listings/:id', auth, getListing)
 router.post('/listings', auth, createListing)
 router.patch('/listings/:id', auth, updateListing)
@@ -20,3 +26,4 @@ router.patch('/listings/:id', auth, updateListing)
 router.delete('/listings/:id', auth, deleteListing)
 
 export default router
+

@@ -11,7 +11,6 @@ import {
   getCommissionReleases,
   generateReleaseMilestones,
   markReleaseStage,
-  deductCashAdvance,
   cancelRelease,
   holdRelease,
   unholdRelease,
@@ -33,7 +32,6 @@ router.post('/commissions/:id/releases/generate', generateReleaseMilestones)
 router.post('/commissions/:id/missing-override', addMissingOverrideCommission)
 
 router.patch('/commission-releases/:id/mark-released', markReleaseStage)
-router.patch('/commission-releases/:id/deduct-advance', deductCashAdvance)
 router.patch('/commission-releases/:id/cancel', cancelRelease)
 router.patch('/commission-releases/:id/hold', holdRelease)
 router.patch('/commission-releases/:id/unhold', unholdRelease)
@@ -53,3 +51,4 @@ router.post(
 )
 
 export default router
+

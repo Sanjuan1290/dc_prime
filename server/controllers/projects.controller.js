@@ -1,6 +1,10 @@
 import { db } from '../db/connect.js'
 import { createAuditLog } from '../utils/createAuditLog.js'
 import { getClientIp } from '../utils/getClientIp.js'
+import {
+  getProjectDocumentRequirements as loadProjectDocumentRequirements,
+  replaceProjectDocumentRequirements,
+} from '../utils/documentRequirements.js'
 
 const isMissing = (value) => {
   return value === undefined || value === null || value === ''
@@ -18,7 +22,7 @@ const validateLocationCode = (value) => {
     return {
       isValid: false,
       message: 'Location code is required',
-      value: locationCode
+      value: locationCode,
     }
   }
 
@@ -26,14 +30,42 @@ const validateLocationCode = (value) => {
     return {
       isValid: false,
       message: 'Location code must be 1 to 10 characters',
-      value: locationCode
+      value: locationCode,
     }
   }
 
   return {
     isValid: true,
     message: null,
-    value: locationCode
+    value: locationCode,
+  }
+}
+
+const projectSelectFields = `
+  p.id,
+  p.name,
+  p.location,
+  p.location_code,
+  p.administrator,
+  p.tax_declaration_no,
+  p.pin,
+  p.status,
+  p.ended_at,
+  COALESCE(document_summary.document_count, 0) AS document_count,
+  COALESCE(document_summary.required_count, 0) AS required_document_count,
+  p.created_at,
+  p.updated_at
+`
+
+const hydrateProjectRequirements = async (project) => {
+  if (!project) return null
+
+  const documentRequirements = await loadProjectDocumentRequirements(db, project.id)
+
+  return {
+    ...project,
+    document_requirements: documentRequirements,
+    documentRequirements,
   }
 }
 
@@ -41,24 +73,23 @@ export const getProjects = async (req, res) => {
   const [projects] = await db.query(
     `
     SELECT
-      id,
-      name,
-      location,
-      location_code,
-      administrator,
-      tax_declaration_no,
-      pin,
-      status,
-      ended_at,
-      created_at,
-      updated_at
-    FROM projects
-    ORDER BY id DESC
+      ${projectSelectFields}
+    FROM projects p
+    LEFT JOIN (
+      SELECT
+        project_id,
+        COUNT(*) AS document_count,
+        SUM(CASE WHEN is_required = TRUE THEN 1 ELSE 0 END) AS required_count
+      FROM project_document_requirements
+      WHERE status = 'active'
+      GROUP BY project_id
+    ) document_summary ON document_summary.project_id = p.id
+    ORDER BY p.id DESC
     `
   )
 
   res.status(200).json({
-    projects
+    projects,
   })
 }
 
@@ -68,19 +99,18 @@ export const getProject = async (req, res) => {
   const [rows] = await db.query(
     `
     SELECT
-      id,
-      name,
-      location,
-      location_code,
-      administrator,
-      tax_declaration_no,
-      pin,
-      status,
-      ended_at,
-      created_at,
-      updated_at
-    FROM projects
-    WHERE id = ?
+      ${projectSelectFields}
+    FROM projects p
+    LEFT JOIN (
+      SELECT
+        project_id,
+        COUNT(*) AS document_count,
+        SUM(CASE WHEN is_required = TRUE THEN 1 ELSE 0 END) AS required_count
+      FROM project_document_requirements
+      WHERE status = 'active'
+      GROUP BY project_id
+    ) document_summary ON document_summary.project_id = p.id
+    WHERE p.id = ?
     LIMIT 1
     `,
     [id]
@@ -90,12 +120,66 @@ export const getProject = async (req, res) => {
 
   if (!project) {
     return res.status(404).json({
-      message: 'Project not found'
+      message: 'Project not found',
     })
   }
 
   res.status(200).json({
-    project
+    project: await hydrateProjectRequirements(project),
+  })
+}
+
+export const getProjectDocumentRequirements = async (req, res) => {
+  const { id } = req.params
+
+  const [projectRows] = await db.query(
+    `SELECT id FROM projects WHERE id = ? LIMIT 1`,
+    [id]
+  )
+
+  if (!projectRows[0]) {
+    return res.status(404).json({ message: 'Project not found' })
+  }
+
+  const requirements = await loadProjectDocumentRequirements(db, id)
+
+  res.status(200).json({
+    message: 'Project document requirements fetched successfully',
+    requirements,
+    documentRequirements: requirements,
+    data: requirements,
+  })
+}
+
+export const updateProjectDocumentRequirements = async (req, res) => {
+  const { id } = req.params
+  const { document_requirements, documentRequirements } = req.body
+
+  const [projectRows] = await db.query(
+    `SELECT id, name FROM projects WHERE id = ? LIMIT 1`,
+    [id]
+  )
+
+  const project = projectRows[0]
+
+  if (!project) {
+    return res.status(404).json({ message: 'Project not found' })
+  }
+
+  const requirements = document_requirements || documentRequirements || []
+  const result = await replaceProjectDocumentRequirements(db, id, requirements)
+
+  await createAuditLog({
+    userId: req.user.id,
+    action: 'update',
+    module: 'Project Documents',
+    description: `Updated default documents for project ${project.name}`,
+    ipAddress: getClientIp(req),
+  })
+
+  res.status(200).json({
+    message: 'Project document requirements updated successfully',
+    data: result,
   })
 }
 
@@ -107,12 +191,14 @@ export const createProject = async (req, res) => {
     administrator,
     tax_declaration_no,
     pin,
-    status
+    status,
+    document_requirements,
+    documentRequirements,
   } = req.body
 
   if (!name) {
     return res.status(400).json({
-      message: 'Project name is required'
+      message: 'Project name is required',
     })
   }
 
@@ -120,45 +206,65 @@ export const createProject = async (req, res) => {
 
   if (!locationCodeValidation.isValid) {
     return res.status(400).json({
-      message: locationCodeValidation.message
+      message: locationCodeValidation.message,
     })
   }
 
-  const [result] = await db.query(
-    `
-    INSERT INTO projects (
-      name,
-      location,
-      location_code,
-      administrator,
-      tax_declaration_no,
-      pin,
-      status
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)
-    `,
-    [
-      name,
-      location || null,
-      locationCodeValidation.value,
-      administrator || null,
-      tax_declaration_no || null,
-      pin || null,
-      status || 'active'
-    ]
-  )
+  const connection = await db.getConnection()
 
-  await createAuditLog({
-    userId: req.user.id,
-    action: 'create',
-    module: 'Projects',
-    description: `Created project ${name}`,
-    ipAddress: req.ip
-  })
+  try {
+    await connection.beginTransaction()
 
-  res.status(201).json({
-    message: 'Project created successfully',
-    projectId: result.insertId
-  })
+    const [result] = await connection.query(
+      `
+      INSERT INTO projects (
+        name,
+        location,
+        location_code,
+        administrator,
+        tax_declaration_no,
+        pin,
+        status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        name,
+        location || null,
+        locationCodeValidation.value,
+        administrator || null,
+        tax_declaration_no || null,
+        pin || null,
+        status || 'active',
+      ]
+    )
+
+    const projectId = result.insertId
+    const requirements = document_requirements || documentRequirements || []
+
+    if (Array.isArray(requirements) && requirements.length > 0) {
+      await replaceProjectDocumentRequirements(connection, projectId, requirements)
+    }
+
+    await connection.commit()
+
+    await createAuditLog({
+      userId: req.user.id,
+      action: 'create',
+      module: 'Projects',
+      description: `Created project ${name}`,
+      ipAddress: getClientIp(req),
+    })
+
+    res.status(201).json({
+      message: 'Project created successfully',
+      projectId,
+    })
+  } catch (error) {
+    await connection.rollback()
+    throw error
+  } finally {
+    connection.release()
+  }
 }
 
 export const updateProject = async (req, res) => {
@@ -172,12 +278,14 @@ export const updateProject = async (req, res) => {
     tax_declaration_no,
     pin,
     status,
-    ended_at
+    ended_at,
+    document_requirements,
+    documentRequirements,
   } = req.body
 
   if (!name) {
     return res.status(400).json({
-      message: 'Project name is required'
+      message: 'Project name is required',
     })
   }
 
@@ -195,7 +303,7 @@ export const updateProject = async (req, res) => {
 
   if (!existingProject) {
     return res.status(404).json({
-      message: 'Project not found'
+      message: 'Project not found',
     })
   }
 
@@ -211,59 +319,83 @@ export const updateProject = async (req, res) => {
 
     if (!locationCodeValidation.isValid) {
       return res.status(400).json({
-        message: locationCodeValidation.message
+        message: locationCodeValidation.message,
       })
     }
 
     finalLocationCode = locationCodeValidation.value
   }
 
-  const [result] = await db.query(
-    `
-    UPDATE projects
-    SET
-      name = ?,
-      location = ?,
-      location_code = ?,
-      administrator = ?,
-      tax_declaration_no = ?,
-      pin = ?,
-      status = ?,
-      ended_at = ?
-    WHERE id = ?
-    `,
-    [
-      name,
-      location || null,
-      finalLocationCode,
-      administrator || null,
-      tax_declaration_no || null,
-      pin || null,
-      status || 'active',
-      ended_at || null,
-      id
-    ]
-  )
+  const connection = await db.getConnection()
 
-  if (result.affectedRows === 0) {
-    return res.status(404).json({
-      message: 'Project not found'
+  try {
+    await connection.beginTransaction()
+
+    const [result] = await connection.query(
+      `
+      UPDATE projects
+      SET
+        name = ?,
+        location = ?,
+        location_code = ?,
+        administrator = ?,
+        tax_declaration_no = ?,
+        pin = ?,
+        status = ?,
+        ended_at = ?
+      WHERE id = ?
+      `,
+      [
+        name,
+        location || null,
+        finalLocationCode,
+        administrator || null,
+        tax_declaration_no || null,
+        pin || null,
+        status || 'active',
+        ended_at || null,
+        id,
+      ]
+    )
+
+    if (result.affectedRows === 0) {
+      await connection.rollback()
+      return res.status(404).json({
+        message: 'Project not found',
+      })
+    }
+
+    const hasRequirements =
+      Array.isArray(document_requirements) || Array.isArray(documentRequirements)
+
+    if (hasRequirements) {
+      await replaceProjectDocumentRequirements(
+        connection,
+        id,
+        document_requirements || documentRequirements || []
+      )
+    }
+
+    await connection.commit()
+
+    await createAuditLog({
+      userId: req.user.id,
+      action: 'update',
+      module: 'Projects',
+      description: `Updated project ${name}`,
+      ipAddress: getClientIp(req),
     })
+
+    res.status(200).json({
+      message: 'Project updated successfully',
+    })
+  } catch (error) {
+    await connection.rollback()
+    throw error
+  } finally {
+    connection.release()
   }
-
-  await createAuditLog({
-    userId: req.user.id,
-    action: 'update',
-    module: 'Projects',
-    description: `Updated project ${name}`,
-    ipAddress: req.ip
-  })
-
-  res.status(200).json({
-    message: 'Project updated successfully'
-  })
 }
-
 
 export const deleteProject = async (req, res) => {
   const { id } = req.params
@@ -286,18 +418,30 @@ export const deleteProject = async (req, res) => {
 
   if (listingRows.length > 0) {
     return res.status(400).json({
-      message: 'Cannot delete a project that has listings. Remove all listings first.'
+      message: 'Cannot delete a project that has listings. Remove all listings first.',
     })
   }
 
-  await db.query(`DELETE FROM projects WHERE id = ?`, [id])
+  const connection = await db.getConnection()
+
+  try {
+    await connection.beginTransaction()
+    await connection.query(`DELETE FROM project_document_requirements WHERE project_id = ?`, [id])
+    await connection.query(`DELETE FROM projects WHERE id = ?`, [id])
+    await connection.commit()
+  } catch (error) {
+    await connection.rollback()
+    throw error
+  } finally {
+    connection.release()
+  }
 
   await createAuditLog({
     userId: req.user.id,
     action: 'delete',
     module: 'Projects',
     description: `Deleted project ${project.name}`,
-    ipAddress: getClientIp(req)
+    ipAddress: getClientIp(req),
   })
 
   res.status(200).json({ message: 'Project deleted successfully' })

@@ -7,8 +7,6 @@ const allowedSettingKeys = [
   'company_email',
   'company_contact',
   'company_address',
-  'default_reservation_fee',
-  'default_commission_rate',
   'system_status'
 ]
 
@@ -186,3 +184,4 @@ export const updateSetting = async (req, res) => {
     message: 'Setting updated successfully'
   })
 }
+

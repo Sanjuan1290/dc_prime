@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   FiEdit2,
   FiEye,
+  FiFileText,
   FiMap,
   FiPlus,
   FiSearch,
@@ -35,8 +36,31 @@ type Project = {
   pin: string | null;
   status: "active" | "inactive" | string;
   ended_at: string | null;
+  document_count?: number;
+  required_document_count?: number;
+  document_requirements?: DocumentRequirement[];
+  documentRequirements?: DocumentRequirement[];
   created_at: string;
   updated_at: string;
+};
+
+type DocumentItem = {
+  id: number;
+  name: string;
+  description: string | null;
+  can_reuse: boolean | number;
+  status: string;
+};
+
+type DocumentRequirement = {
+  id?: number;
+  document_id: number | null;
+  name: string;
+  description?: string | null;
+  can_reuse?: boolean | number;
+  is_required: boolean;
+  status: string;
+  sort_order: number;
 };
 
 type ProjectFormData = {
@@ -47,10 +71,15 @@ type ProjectFormData = {
   tax_declaration_no: string;
   pin: string;
   status: "active" | "inactive";
+  document_requirements: DocumentRequirement[];
 };
 
 type ProjectsResponse = {
   projects: Project[];
+};
+
+type DocumentsResponse = {
+  documents: DocumentItem[];
 };
 
 const emptyFormData: ProjectFormData = {
@@ -61,7 +90,18 @@ const emptyFormData: ProjectFormData = {
   tax_declaration_no: "",
   pin: "",
   status: "active",
+  document_requirements: [],
 };
+
+const normalizeRequirements = (requirements: DocumentRequirement[] = []) =>
+  requirements.map((requirement, index) => ({
+    ...requirement,
+    document_id: requirement.document_id ? Number(requirement.document_id) : null,
+    name: requirement.name || "",
+    is_required: Boolean(requirement.is_required),
+    status: requirement.status || "active",
+    sort_order: Number(requirement.sort_order || index + 1),
+  }));
 
 const fetchProjects = async () => {
   const response = await fetch(`${API_URL}/projects`, {
@@ -77,6 +117,32 @@ const fetchProjects = async () => {
   return data.projects;
 };
 
+const fetchProject = async (id: number) => {
+  const response = await fetch(`${API_URL}/projects/${id}`, {
+    credentials: "include",
+  });
+
+  if (!response.ok) {
+    throw new Error(await getErrorMessage(response));
+  }
+
+  const data = (await response.json()) as { project: Project };
+  return data.project;
+};
+
+const fetchDocuments = async () => {
+  const response = await fetch(`${API_URL}/documents?status=active`, {
+    credentials: "include",
+  });
+
+  if (!response.ok) {
+    throw new Error(await getErrorMessage(response));
+  }
+
+  const data = (await response.json()) as DocumentsResponse;
+  return data.documents || [];
+};
+
 const createProject = async (projectData: ProjectFormData) => {
   const response = await fetch(`${API_URL}/projects`, {
     method: "POST",
@@ -84,7 +150,12 @@ const createProject = async (projectData: ProjectFormData) => {
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(projectData),
+    body: JSON.stringify({
+      ...projectData,
+      document_requirements: normalizeRequirements(
+        projectData.document_requirements,
+      ),
+    }),
   });
 
   if (!response.ok) {
@@ -105,7 +176,12 @@ const updateProject = async ({
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(projectData),
+    body: JSON.stringify({
+      ...projectData,
+      document_requirements: normalizeRequirements(
+        projectData.document_requirements,
+      ),
+    }),
   });
 
   if (!response.ok) {
@@ -132,6 +208,9 @@ const projectToFormData = (project: Project): ProjectFormData => ({
   tax_declaration_no: project.tax_declaration_no ?? "",
   pin: project.pin ?? "",
   status: project.status === "inactive" ? "inactive" : "active",
+  document_requirements: normalizeRequirements(
+    project.document_requirements || project.documentRequirements || [],
+  ),
 });
 
 const Projects = () => {
@@ -140,7 +219,7 @@ const Projects = () => {
   const [statusFilter, setStatusFilter] = useState("all");
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [viewProject, setViewProject] = useState<Project | null>(null);
-  const [editProject, setEditProject] = useState<Project | null>(null);
+  const [editProjectId, setEditProjectId] = useState<number | null>(null);
   const [formData, setFormData] = useState<ProjectFormData>(emptyFormData);
   const [editFormData, setEditFormData] =
     useState<ProjectFormData>(emptyFormData);
@@ -148,6 +227,8 @@ const Projects = () => {
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [successMessage, setSuccessMessage] = useState("");
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
+  const [newDocName, setNewDocName] = useState("");
+  const [editNewDocName, setEditNewDocName] = useState("");
 
   const {
     data: projects = [],
@@ -158,14 +239,33 @@ const Projects = () => {
     queryFn: fetchProjects,
   });
 
+  const { data: documentLibrary = [] } = useQuery({
+    queryKey: ["documents", "library", "active"],
+    queryFn: fetchDocuments,
+  });
+
+  const { data: editProjectDetails, isLoading: isEditLoading } = useQuery({
+    queryKey: ["project", editProjectId],
+    queryFn: () => fetchProject(editProjectId || 0),
+    enabled: Boolean(editProjectId),
+  });
+
+  useEffect(() => {
+    if (editProjectDetails) {
+      setEditFormData(projectToFormData(editProjectDetails));
+    }
+  }, [editProjectDetails]);
+
   const resetForm = () => {
     setFormData(emptyFormData);
+    setNewDocName("");
   };
 
   const createProjectMutation = useMutation({
     mutationFn: createProject,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["projects"] });
+      queryClient.invalidateQueries({ queryKey: ["documents"] });
       setIsAddOpen(false);
       resetForm();
       setSuccessMessage("Project created successfully");
@@ -176,31 +276,13 @@ const Projects = () => {
     mutationFn: updateProject,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["projects"] });
-      setEditProject(null);
+      queryClient.invalidateQueries({ queryKey: ["project", editProjectId] });
+      queryClient.invalidateQueries({ queryKey: ["documents"] });
+      setEditProjectId(null);
+      setEditNewDocName("");
       setSuccessMessage("Project updated successfully");
     },
   });
-
-  const openEditModal = (project: Project) => {
-    setEditProject(project);
-    setEditFormData(projectToFormData(project));
-  };
-
-  const handleAddProject = (e: { preventDefault: () => void }) => {
-    e.preventDefault();
-    createProjectMutation.mutate(formData);
-  };
-
-  const handleUpdateProject = (e: { preventDefault: () => void }) => {
-    e.preventDefault();
-
-    if (!editProject) return;
-
-    updateProjectMutation.mutate({
-      id: editProject.id,
-      projectData: editFormData,
-    });
-  };
 
   const deleteProjectMutation = useMutation({
     mutationFn: deleteProject,
@@ -237,64 +319,300 @@ const Projects = () => {
     (project) => project.status === "inactive",
   ).length;
 
+  const openEditModal = (project: Project) => {
+    setEditProjectId(project.id);
+    setEditFormData(projectToFormData(project));
+  };
+
+  const handleAddProject = (e: { preventDefault: () => void }) => {
+    e.preventDefault();
+    createProjectMutation.mutate(formData);
+  };
+
+  const handleUpdateProject = (e: { preventDefault: () => void }) => {
+    e.preventDefault();
+
+    if (!editProjectId) return;
+
+    updateProjectMutation.mutate({
+      id: editProjectId,
+      projectData: editFormData,
+    });
+  };
+
+  const addLibraryRequirement = (
+    document: DocumentItem,
+    data: ProjectFormData,
+    setData: (data: ProjectFormData) => void,
+  ) => {
+    const exists = data.document_requirements.some(
+      (requirement) => requirement.document_id === document.id,
+    );
+
+    if (exists) return;
+
+    setData({
+      ...data,
+      document_requirements: [
+        ...data.document_requirements,
+        {
+          document_id: document.id,
+          name: document.name,
+          description: document.description,
+          can_reuse: document.can_reuse,
+          is_required: true,
+          status: "active",
+          sort_order: data.document_requirements.length + 1,
+        },
+      ],
+    });
+  };
+
+  const addNewRequirement = (
+    name: string,
+    setName: (value: string) => void,
+    data: ProjectFormData,
+    setData: (data: ProjectFormData) => void,
+  ) => {
+    const trimmedName = name.trim();
+    if (!trimmedName) return;
+
+    const exists = data.document_requirements.some(
+      (requirement) =>
+        requirement.name.toLowerCase() === trimmedName.toLowerCase(),
+    );
+
+    if (exists) return;
+
+    setData({
+      ...data,
+      document_requirements: [
+        ...data.document_requirements,
+        {
+          document_id: null,
+          name: trimmedName,
+          description: null,
+          can_reuse: false,
+          is_required: true,
+          status: "active",
+          sort_order: data.document_requirements.length + 1,
+        },
+      ],
+    });
+    setName("");
+  };
+
+  const updateRequirement = (
+    index: number,
+    updates: Partial<DocumentRequirement>,
+    data: ProjectFormData,
+    setData: (data: ProjectFormData) => void,
+  ) => {
+    setData({
+      ...data,
+      document_requirements: data.document_requirements.map((requirement, i) =>
+        i === index ? { ...requirement, ...updates } : requirement,
+      ),
+    });
+  };
+
+  const removeRequirement = (
+    index: number,
+    data: ProjectFormData,
+    setData: (data: ProjectFormData) => void,
+  ) => {
+    setData({
+      ...data,
+      document_requirements: data.document_requirements.filter(
+        (_, i) => i !== index,
+      ),
+    });
+  };
+
+  const availableLibraryDocuments = useMemo(
+    () => documentLibrary.filter((document) => document.status === "active"),
+    [documentLibrary],
+  );
+
+  const buildDefaultRequirementsFromLibrary = () =>
+    availableLibraryDocuments.map((document, index) => ({
+      document_id: document.id,
+      name: document.name,
+      description: document.description,
+      can_reuse: document.can_reuse,
+      is_required: true,
+      status: "active",
+      sort_order: index + 1,
+    }));
+
+  const openAddProjectModal = () => {
+    setFormData({
+      ...emptyFormData,
+      document_requirements: buildDefaultRequirementsFromLibrary(),
+    });
+    setNewDocName("");
+    setIsAddOpen(true);
+  };
+
   const formFields = (
     data: ProjectFormData,
     setData: (data: ProjectFormData) => void,
+    newName: string,
+    setNewName: (value: string) => void,
   ) => (
-    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-      <Input
-        label="Project name"
-        onChange={(e) => setData({ ...data, name: e.target.value })}
-        required
-        value={data.name}
-      />
-      <Input
-        label="Location"
-        onChange={(e) => setData({ ...data, location: e.target.value })}
-        value={data.location}
-      />
-      <Input
-        label="Location Code"
-        maxLength={10}
-        onChange={(e) =>
-          setData({
-            ...data,
-            location_code: e.target.value.toUpperCase(),
-          })
-        }
-        required
-        value={data.location_code}
-      />
-      <Input
-        label="Administrator"
-        onChange={(e) => setData({ ...data, administrator: e.target.value })}
-        value={data.administrator}
-      />
-      <Input
-        label="Tax declaration no."
-        onChange={(e) =>
-          setData({ ...data, tax_declaration_no: e.target.value })
-        }
-        value={data.tax_declaration_no}
-      />
-      <Input
-        label="PIN"
-        onChange={(e) => setData({ ...data, pin: e.target.value })}
-        value={data.pin}
-      />
-      <Select
-        label="Status"
-        onChange={(e) =>
-          setData({
-            ...data,
-            status: e.target.value as ProjectFormData["status"],
-          })
-        }
-        value={data.status}
-      >
-        <option value="active">Active</option>
-        <option value="inactive">Inactive</option>
-      </Select>
+    <div className="space-y-5">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <Input
+          label="Project name"
+          onChange={(e) => setData({ ...data, name: e.target.value })}
+          required
+          value={data.name}
+        />
+        <Input
+          label="Location"
+          onChange={(e) => setData({ ...data, location: e.target.value })}
+          value={data.location}
+        />
+        <Input
+          label="Location Code"
+          maxLength={10}
+          onChange={(e) =>
+            setData({
+              ...data,
+              location_code: e.target.value.toUpperCase(),
+            })
+          }
+          required
+          value={data.location_code}
+        />
+        <Input
+          label="Administrator"
+          onChange={(e) => setData({ ...data, administrator: e.target.value })}
+          value={data.administrator}
+        />
+        <Input
+          label="Tax declaration no."
+          onChange={(e) =>
+            setData({ ...data, tax_declaration_no: e.target.value })
+          }
+          value={data.tax_declaration_no}
+        />
+        <Input
+          label="PIN"
+          onChange={(e) => setData({ ...data, pin: e.target.value })}
+          value={data.pin}
+        />
+        <Select
+          label="Status"
+          onChange={(e) =>
+            setData({
+              ...data,
+              status: e.target.value as ProjectFormData["status"],
+            })
+          }
+          value={data.status}
+        >
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+        </Select>
+      </div>
+
+      <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+        <div className="mb-3 flex flex-col gap-1">
+          <h3 className="flex items-center gap-2 text-base font-bold text-slate-900">
+            <FiFileText /> Default Document Requirements
+          </h3>
+          <p className="text-sm text-slate-500">
+            These documents become the default checklist for listings created under this project. Listings can still be customized later.
+          </p>
+        </div>
+
+        <div className="mb-3 grid grid-cols-1 gap-2 md:grid-cols-[1fr_auto]">
+          <Select
+            onChange={(e) => {
+              const selected = availableLibraryDocuments.find(
+                (document) => String(document.id) === e.target.value,
+              );
+              if (selected) addLibraryRequirement(selected, data, setData);
+              e.target.value = "";
+            }}
+            value=""
+          >
+            <option value="">Add from Document Library...</option>
+            {availableLibraryDocuments.map((document) => (
+              <option key={document.id} value={document.id}>
+                {document.name}
+              </option>
+            ))}
+          </Select>
+          <div className="grid grid-cols-[1fr_auto] gap-2">
+            <Input
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder="New document name"
+              value={newName}
+            />
+            <Button
+              onClick={() => addNewRequirement(newName, setNewName, data, setData)}
+              icon={<FiPlus />}
+            >
+              Add
+            </Button>
+          </div>
+        </div>
+
+        {data.document_requirements.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-slate-300 bg-white p-4 text-sm text-slate-500">
+            No default documents selected yet.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {data.document_requirements.map((requirement, index) => (
+              <div
+                className="grid grid-cols-1 items-center gap-2 rounded-lg border border-slate-200 bg-white p-3 md:grid-cols-[1fr_160px_110px_auto]"
+                key={`${requirement.document_id || requirement.name}-${index}`}
+              >
+                <div>
+                  <p className="font-semibold text-slate-900">{requirement.name}</p>
+                  <p className="text-xs text-slate-500">
+                    {requirement.document_id ? "From library" : "New document, will be added to library"}
+                  </p>
+                </div>
+                <Select
+                  label="Requirement"
+                  onChange={(e) =>
+                    updateRequirement(
+                      index,
+                      { is_required: e.target.value === "true" },
+                      data,
+                      setData,
+                    )
+                  }
+                  value={String(requirement.is_required)}
+                >
+                  <option value="true">Required</option>
+                  <option value="false">Optional</option>
+                </Select>
+                <Select
+                  label="Status"
+                  onChange={(e) =>
+                    updateRequirement(index, { status: e.target.value }, data, setData)
+                  }
+                  value={requirement.status}
+                >
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                </Select>
+                <Button
+                  onClick={() => removeRequirement(index, data, setData)}
+                  variant="danger"
+                >
+                  Remove
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 
@@ -304,21 +622,28 @@ const Projects = () => {
         actions={
           <Button
             icon={<FiPlus />}
-            onClick={() => setIsAddOpen(true)}
+            onClick={openAddProjectModal}
             variant="primary"
           >
             Add Project
           </Button>
         }
         icon={<FiMap className="h-5 w-5" />}
-        subtitle="Company projects from MySQL with editable project records"
+        subtitle="Create projects and configure their default document requirements"
         title="Projects"
       />
 
-      <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3">
+      <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-4">
         <StatCard title="Total Projects" value={projects.length} />
         <StatCard title="Active" value={activeCount} />
         <StatCard title="Inactive" value={inactiveCount} />
+        <StatCard
+          title="Required Docs"
+          value={projects.reduce(
+            (sum, project) => sum + Number(project.required_document_count || 0),
+            0,
+          )}
+        />
       </div>
 
       {successMessage ? (
@@ -379,9 +704,7 @@ const Projects = () => {
                       "Name",
                       "Location",
                       "Location Code",
-                      "Administrator",
-                      "Tax Declaration No.",
-                      "PIN",
+                      "Default Docs",
                       "Status",
                       "Actions",
                     ].map((heading) => (
@@ -412,19 +735,13 @@ const Projects = () => {
                         </span>
                       </td>
                       <td className="px-4 py-3 text-slate-600">
-                        {project.administrator || "-"}
-                      </td>
-                      <td className="px-4 py-3 text-slate-600">
-                        {project.tax_declaration_no || "-"}
-                      </td>
-                      <td className="px-4 py-3 text-slate-600">
-                        {project.pin || "-"}
+                        {Number(project.document_count || 0)} docs / {Number(project.required_document_count || 0)} required
                       </td>
                       <td className="px-4 py-3">
                         <StatusBadge status={project.status} />
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex gap-2">
+                        <div className="flex flex-wrap gap-2">
                           <Button
                             icon={<FiEye />}
                             onClick={() => setViewProject(project)}
@@ -463,9 +780,9 @@ const Projects = () => {
       ) : null}
 
       {isAddOpen ? (
-        <Modal onClose={() => setIsAddOpen(false)} title="Add Project">
+        <Modal onClose={() => setIsAddOpen(false)} title="Add Project" size="xl">
           <form className="space-y-4" onSubmit={handleAddProject}>
-            {formFields(formData, setFormData)}
+            {formFields(formData, setFormData, newDocName, setNewDocName)}
             {createProjectMutation.isError ? (
               <Alert type="error">{createProjectMutation.error.message}</Alert>
             ) : null}
@@ -486,40 +803,19 @@ const Projects = () => {
       {viewProject ? (
         <Modal onClose={() => setViewProject(null)} title="Project Details">
           <div className="grid grid-cols-1 gap-3 text-sm md:grid-cols-2">
-            <p>
-              <b>ID:</b> {viewProject.id}
-            </p>
-            <p>
-              <b>Name:</b> {viewProject.name}
-            </p>
-            <p>
-              <b>Location:</b> {viewProject.location || "-"}
-            </p>
-            <p>
-              <b>Location Code:</b> {viewProject.location_code || "-"}
-            </p>
-            <p>
-              <b>Administrator:</b> {viewProject.administrator || "-"}
-            </p>
-            <p>
-              <b>Tax Declaration No.:</b>{" "}
-              {viewProject.tax_declaration_no || "-"}
-            </p>
-            <p>
-              <b>PIN:</b> {viewProject.pin || "-"}
-            </p>
-            <p>
-              <b>Status:</b> {viewProject.status}
-            </p>
-            <p>
-              <b>Ended At:</b> {formatDate(viewProject.ended_at)}
-            </p>
-            <p>
-              <b>Created At:</b> {formatDate(viewProject.created_at)}
-            </p>
-            <p>
-              <b>Updated At:</b> {formatDate(viewProject.updated_at)}
-            </p>
+            <p><b>ID:</b> {viewProject.id}</p>
+            <p><b>Name:</b> {viewProject.name}</p>
+            <p><b>Location:</b> {viewProject.location || "-"}</p>
+            <p><b>Location Code:</b> {viewProject.location_code || "-"}</p>
+            <p><b>Administrator:</b> {viewProject.administrator || "-"}</p>
+            <p><b>Tax Declaration No.:</b> {viewProject.tax_declaration_no || "-"}</p>
+            <p><b>PIN:</b> {viewProject.pin || "-"}</p>
+            <p><b>Status:</b> {viewProject.status}</p>
+            <p><b>Default Documents:</b> {Number(viewProject.document_count || 0)}</p>
+            <p><b>Required Documents:</b> {Number(viewProject.required_document_count || 0)}</p>
+            <p><b>Ended At:</b> {formatDate(viewProject.ended_at)}</p>
+            <p><b>Created At:</b> {formatDate(viewProject.created_at)}</p>
+            <p><b>Updated At:</b> {formatDate(viewProject.updated_at)}</p>
           </div>
           <div className="mt-5 flex justify-end gap-2">
             <Button
@@ -553,17 +849,18 @@ const Projects = () => {
         </Modal>
       ) : null}
 
-      {editProject ? (
-        <Modal onClose={() => setEditProject(null)} title="Edit Project">
+      {editProjectId ? (
+        <Modal onClose={() => setEditProjectId(null)} title="Edit Project" size="xl">
+          {isEditLoading ? <LoadingState message="Loading project documents..." /> : null}
           <form className="space-y-4" onSubmit={handleUpdateProject}>
-            {formFields(editFormData, setEditFormData)}
+            {formFields(editFormData, setEditFormData, editNewDocName, setEditNewDocName)}
             {updateProjectMutation.isError ? (
               <Alert type="error">{updateProjectMutation.error.message}</Alert>
             ) : null}
             <div className="flex justify-end gap-2">
-              <Button onClick={() => setEditProject(null)}>Cancel</Button>
+              <Button onClick={() => setEditProjectId(null)}>Cancel</Button>
               <Button
-                disabled={updateProjectMutation.isPending}
+                disabled={updateProjectMutation.isPending || isEditLoading}
                 type="submit"
                 variant="primary"
               >

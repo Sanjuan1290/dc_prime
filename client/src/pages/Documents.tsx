@@ -51,7 +51,7 @@ type DocumentsResponse = {
 const emptyFormData: DocumentFormData = {
   name: "",
   description: "",
-  is_required: true,
+  is_required: false,
   can_reuse: false,
   status: "active",
 };
@@ -120,8 +120,7 @@ const Documents = () => {
   const queryClient = useQueryClient();
   const [searchInput, setSearchInput] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [requiredFilter, setRequiredFilter] = useState("all");
-  const [reusableFilter, setReusableFilter] = useState("all");
+    const [reusableFilter, setReusableFilter] = useState("all");
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [editDocument, setEditDocument] = useState<DocumentItem | null>(null);
   const [formData, setFormData] = useState<DocumentFormData>(emptyFormData);
@@ -178,9 +177,7 @@ const Documents = () => {
       document.status.toLowerCase().includes(search);
     const matchesStatus =
       statusFilter === "all" || document.status === statusFilter;
-    const matchesRequired =
-      requiredFilter === "all" ||
-      String(Boolean(document.is_required)) === requiredFilter;
+    const matchesRequired = true;
     const matchesReusable =
       reusableFilter === "all" ||
       String(Boolean(document.can_reuse)) === reusableFilter;
@@ -189,9 +186,6 @@ const Documents = () => {
   });
 
   const paginatedDocuments = paginateRows(filteredDocuments, page, rowsPerPage);
-  const requiredCount = documents.filter((document) =>
-    Boolean(document.is_required),
-  ).length;
   const reusableCount = documents.filter((document) =>
     Boolean(document.can_reuse),
   ).length;
@@ -202,7 +196,6 @@ const Documents = () => {
   const resetFilters = () => {
     setSearchInput("");
     setStatusFilter("all");
-    setRequiredFilter("all");
     setReusableFilter("all");
     setPage(1);
   };
@@ -250,17 +243,7 @@ const Documents = () => {
           value={data.description}
         />
       </label>
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-        <Select
-          label="Required"
-          onChange={(e) =>
-            setData({ ...data, is_required: e.target.value === "true" })
-          }
-          value={String(data.is_required)}
-        >
-          <option value="true">Required</option>
-          <option value="false">Optional</option>
-        </Select>
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         <Select
           label="Reusable"
           onChange={(e) =>
@@ -292,17 +275,16 @@ const Documents = () => {
             onClick={() => setIsAddOpen(true)}
             variant="primary"
           >
-            Add Document
+            Add Document Template
           </Button>
         }
         icon={<FiFileText className="h-5 w-5" />}
-        subtitle="Manage the list of documents required from clients"
-        title="Documents"
+        subtitle="Master library of reusable document names. Required/optional is now configured per project and listing."
+        title="Document Library"
       />
 
-      <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-4">
+      <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3">
         <StatCard title="Total Documents" value={documents.length} />
-        <StatCard title="Required" value={requiredCount} />
         <StatCard title="Reusable" value={reusableCount} />
         <StatCard title="Inactive" value={inactiveCount} />
       </div>
@@ -314,7 +296,7 @@ const Documents = () => {
       ) : null}
 
       <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_160px_160px_170px_auto]">
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_160px_170px_auto]">
           <Input
             onChange={(e) => {
               setSearchInput(e.target.value);
@@ -330,14 +312,6 @@ const Documents = () => {
             <option value="all">All Status</option>
             <option value="active">Active</option>
             <option value="inactive">Inactive</option>
-          </Select>
-          <Select
-            onChange={(e) => setRequiredFilter(e.target.value)}
-            value={requiredFilter}
-          >
-            <option value="all">All Required</option>
-            <option value="true">Required</option>
-            <option value="false">Optional</option>
           </Select>
           <Select
             onChange={(e) => setReusableFilter(e.target.value)}
@@ -370,7 +344,6 @@ const Documents = () => {
                     {[
                       "Name",
                       "Description",
-                      "Required",
                       "Reusable",
                       "Status",
                       "Actions",
@@ -395,9 +368,6 @@ const Documents = () => {
                       </td>
                       <td className="px-4 py-3 text-slate-600">
                         {document.description || "-"}
-                      </td>
-                      <td className="px-4 py-3 text-slate-600">
-                        {document.is_required ? "Yes" : "No"}
                       </td>
                       <td className="px-4 py-3 text-slate-600">
                         {document.can_reuse ? "Yes" : "No"}
@@ -437,7 +407,7 @@ const Documents = () => {
       ) : null}
 
       {isAddOpen ? (
-        <Modal onClose={() => setIsAddOpen(false)} title="Add Document">
+        <Modal onClose={() => setIsAddOpen(false)} title="Add Document Template">
           <form className="space-y-4" onSubmit={handleAddDocument}>
             {formFields(formData, setFormData)}
             {createDocumentMutation.isError ? (
@@ -452,7 +422,7 @@ const Documents = () => {
               >
                 {createDocumentMutation.isPending
                   ? "Saving..."
-                  : "Save Document"}
+                  : "Save Template"}
               </Button>
             </div>
           </form>
@@ -479,7 +449,7 @@ const Documents = () => {
       ) : null}
 
       {editDocument ? (
-        <Modal onClose={() => setEditDocument(null)} title="Edit Document">
+        <Modal onClose={() => setEditDocument(null)} title="Edit Document Template">
           <form className="space-y-4" onSubmit={handleUpdateDocument}>
             {formFields(
               {
@@ -518,3 +488,4 @@ const Documents = () => {
 };
 
 export default Documents;
+

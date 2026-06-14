@@ -1,6 +1,7 @@
 import { db } from '../db/connect.js'
 import { createAuditLog } from '../utils/createAuditLog.js'
 import { getClientIp } from '../utils/getClientIp.js'
+import { createClientDocumentChecklistFromListing } from '../utils/documentRequirements.js'
 import {
   createAutoCommissionForClientUnit,
   createHierarchyCommissionsForClientUnit,
@@ -441,9 +442,9 @@ const clientUnitJoins = `
   LEFT JOIN (
     SELECT
       cu_docs.id AS client_unit_id,
-      COUNT(d.id) AS total_count,
+      COUNT(cdl.id) AS total_count,
       COUNT(cdl.id) AS checklist_count,
-      SUM(CASE WHEN d.is_required = TRUE THEN 1 ELSE 0 END) AS required_count,
+      SUM(CASE WHEN COALESCE(cdl.is_required, d.is_required) = TRUE THEN 1 ELSE 0 END) AS required_count,
       SUM(
         CASE
           WHEN cdl.status IN ('submitted', 'approved') THEN 1
@@ -452,7 +453,7 @@ const clientUnitJoins = `
       ) AS submitted_count,
       SUM(
         CASE
-          WHEN d.is_required = TRUE
+          WHEN COALESCE(cdl.is_required, d.is_required) = TRUE
             AND cdl.status IN ('submitted', 'approved')
           THEN 1
           ELSE 0
@@ -461,11 +462,10 @@ const clientUnitJoins = `
       SUM(CASE WHEN cdl.status = 'approved' THEN 1 ELSE 0 END) AS approved_count,
       SUM(CASE WHEN cdl.status = 'rejected' THEN 1 ELSE 0 END) AS rejected_count
     FROM client_units cu_docs
-    LEFT JOIN documents d
-      ON d.status = 'active'
     LEFT JOIN client_document_list cdl
       ON cdl.client_unit_id = cu_docs.id
-      AND cdl.document_id = d.id
+    LEFT JOIN documents d
+      ON d.id = cdl.document_id
     GROUP BY cu_docs.id
   ) document_summary ON document_summary.client_unit_id = cu.id
   LEFT JOIN (
@@ -569,42 +569,12 @@ const getSellerById = async (connectionOrDb, sellerId) => {
 }
 
 const createClientDocumentChecklist = async (connectionOrDb, clientUnitId) => {
-  const [documents] = await connectionOrDb.query(
-    `
-    SELECT id
-    FROM documents
-    WHERE status = 'active'
-      AND is_required = TRUE
-    ORDER BY id ASC
-    `
+  const [clientUnitRows] = await connectionOrDb.query(
+    `SELECT id, listing_id FROM client_units WHERE id = ? LIMIT 1`,
+    [clientUnitId]
   )
 
-  if (documents.length === 0) {
-    return {
-      insertedCount: 0,
-    }
-  }
-
-  const values = documents.map((document) => [
-    clientUnitId,
-    document.id,
-    'not_submitted',
-  ])
-
-  const [result] = await connectionOrDb.query(
-    `
-    INSERT IGNORE INTO client_document_list (
-      client_unit_id,
-      document_id,
-      status
-    ) VALUES ?
-    `,
-    [values]
-  )
-
-  return {
-    insertedCount: result.affectedRows,
-  }
+  return createClientDocumentChecklistFromListing(connectionOrDb, clientUnitRows[0])
 }
 
 const createReservationCommissions = async ({
@@ -779,13 +749,13 @@ export const searchClientUnits = async (req, res) => {
     LEFT JOIN (
       SELECT
         cu_docs.id AS client_unit_id,
-        COUNT(d.id) AS total_count,
+        COUNT(cdl.id) AS total_count,
         COUNT(cdl.id) AS checklist_count,
-        SUM(CASE WHEN d.is_required = TRUE THEN 1 ELSE 0 END) AS required_count,
+        SUM(CASE WHEN COALESCE(cdl.is_required, d.is_required) = TRUE THEN 1 ELSE 0 END) AS required_count,
         SUM(CASE WHEN cdl.status IN ('submitted', 'approved') THEN 1 ELSE 0 END) AS submitted_count,
         SUM(
           CASE
-            WHEN d.is_required = TRUE
+            WHEN COALESCE(cdl.is_required, d.is_required) = TRUE
               AND cdl.status IN ('submitted', 'approved')
             THEN 1
             ELSE 0
@@ -794,11 +764,10 @@ export const searchClientUnits = async (req, res) => {
         SUM(CASE WHEN cdl.status = 'approved' THEN 1 ELSE 0 END) AS approved_count,
         SUM(CASE WHEN cdl.status = 'rejected' THEN 1 ELSE 0 END) AS rejected_count
       FROM client_units cu_docs
-      LEFT JOIN documents d
-        ON d.status = 'active'
       LEFT JOIN client_document_list cdl
         ON cdl.client_unit_id = cu_docs.id
-        AND cdl.document_id = d.id
+      LEFT JOIN documents d
+        ON d.id = cdl.document_id
       GROUP BY cu_docs.id
     ) document_summary ON document_summary.client_unit_id = cu.id
     WHERE
@@ -1779,4 +1748,5 @@ export const deleteClientUnit = async (req, res) => {
     connection.release()
   }
 }
+
 

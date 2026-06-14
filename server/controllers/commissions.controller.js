@@ -303,7 +303,7 @@
     return rows[0]
   }
 
-  const getOverrideCommissionByParentId = async (parentCommissionId) => {
+  const getOverrideCommissionsByParentId = async (parentCommissionId) => {
     const [rows] = await db.query(
       `
       SELECT
@@ -312,12 +312,23 @@
       WHERE cm.parent_commission_id = ?
         AND cm.source_type = 'override'
         AND cm.status <> 'cancelled'
-      ORDER BY cm.id DESC
-      LIMIT 1
+      ORDER BY
+        CASE seller.seller_role
+          WHEN 'manager' THEN 1
+          WHEN 'broker' THEN 2
+          WHEN 'broker_network_manager' THEN 3
+          ELSE 99
+        END,
+        cm.id ASC
       `,
       [parentCommissionId]
     )
 
+    return rows
+  }
+
+  const getOverrideCommissionByParentId = async (parentCommissionId) => {
+    const rows = await getOverrideCommissionsByParentId(parentCommissionId)
     return rows[0] || null
   }
 
@@ -383,10 +394,10 @@
     const [rows] = await connectionOrDb.query(
       `
       SELECT
-        COALESCE(SUM(CASE WHEN d.is_required = TRUE THEN 1 ELSE 0 END), 0) AS required_count,
+        COALESCE(SUM(CASE WHEN COALESCE(cdl.is_required, d.is_required) = TRUE THEN 1 ELSE 0 END), 0) AS required_count,
         COALESCE(SUM(
           CASE
-            WHEN d.is_required = TRUE
+            WHEN COALESCE(cdl.is_required, d.is_required) = TRUE
               AND cdl.status IN ('submitted', 'approved')
             THEN 1
             ELSE 0
@@ -1179,20 +1190,22 @@
 
     const releases = await getReleasesByCommissionId(id)
     const cashAdvanceDeductions = await getCashAdvanceDeductionsByCommissionId(id)
-    const pairedOverrideCommission =
+    const relatedOverrideCommissions =
       commission.source_type === 'main'
-        ? await getOverrideCommissionByParentId(id)
-        : null
+        ? await getOverrideCommissionsByParentId(id)
+        : []
 
-    const pairedOverrideDetails = pairedOverrideCommission
-      ? {
-          ...pairedOverrideCommission,
-          releases: await getReleasesByCommissionId(pairedOverrideCommission.id),
-          cashAdvanceDeductions: await getCashAdvanceDeductionsByCommissionId(
-            pairedOverrideCommission.id
-          ),
-        }
-      : null
+    const relatedOverrideDetails = await Promise.all(
+      relatedOverrideCommissions.map(async (overrideCommission) => ({
+        ...overrideCommission,
+        releases: await getReleasesByCommissionId(overrideCommission.id),
+        cashAdvanceDeductions: await getCashAdvanceDeductionsByCommissionId(
+          overrideCommission.id
+        ),
+      }))
+    )
+
+    const pairedOverrideDetails = relatedOverrideDetails[0] || null
 
     return res.status(200).json({
       message: 'Commission fetched successfully',
@@ -1201,12 +1214,14 @@
         releases,
         cashAdvanceDeductions,
         pairedOverrideCommission: pairedOverrideDetails,
+        relatedOverrideCommissions: relatedOverrideDetails,
       },
       data: {
         ...commission,
         releases,
         cashAdvanceDeductions,
         pairedOverrideCommission: pairedOverrideDetails,
+        relatedOverrideCommissions: relatedOverrideDetails,
       },
     })
   }
@@ -2665,5 +2680,6 @@ export const addMissingOverrideCommission = async (req, res) => {
       data: rows,
     })
   }
+
 
 
