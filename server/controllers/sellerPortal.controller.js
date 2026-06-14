@@ -36,6 +36,50 @@ const sellerScopeSql = (visibleSellerIds, column = 'seller.id') => {
   }
 }
 
+
+const reservationContactDefaults = {
+  reservation_contact_name: 'Admin',
+  reservation_contact_email: 'admin@gmail.com',
+  reservation_contact_no: '09000000000',
+  company_name: 'D&C Prime Realty',
+  company_email: 'admin@gmail.com',
+  company_contact: '09000000000',
+}
+
+const firstNonEmpty = (...values) => {
+  const value = values.find((item) => item !== undefined && item !== null && String(item).trim() !== '')
+  return value === undefined || value === null ? '' : String(value).trim()
+}
+
+export const getReservationContactSettings = async (_req, res) => {
+  const keys = Object.keys(reservationContactDefaults)
+  const [rows] = await db.query(
+    `
+    SELECT setting_key, setting_value
+    FROM settings
+    WHERE setting_key IN (${keys.map(() => '?').join(', ')})
+    `,
+    keys
+  )
+
+  const settingsMap = rows.reduce((map, row) => {
+    map[row.setting_key] = row.setting_value
+    return map
+  }, { ...reservationContactDefaults })
+
+  const reservationContact = {
+    name: firstNonEmpty(settingsMap.reservation_contact_name, settingsMap.company_name, reservationContactDefaults.reservation_contact_name),
+    email: firstNonEmpty(settingsMap.reservation_contact_email, settingsMap.company_email, reservationContactDefaults.reservation_contact_email),
+    contact_no: firstNonEmpty(settingsMap.reservation_contact_no, settingsMap.company_contact, reservationContactDefaults.reservation_contact_no),
+  }
+
+  res.status(200).json({
+    message: 'Reservation contact fetched successfully',
+    reservationContact,
+    settingsMap,
+  })
+}
+
 export const getSellerDashboard = async (req, res) => {
   const access = await requireSellerAccess(req, res)
   if (!access) return

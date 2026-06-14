@@ -1,6 +1,7 @@
 import express from 'express'
 import { auth } from '../middlewares/auth.middleware.js'
 import {
+  getReservationContactSettings,
   getSellerAvailableUnits,
   getSellerDashboard,
   getSellerSales,
@@ -16,9 +17,11 @@ const router = express.Router()
 router.use(auth)
 
 router.get('/seller/dashboard', getSellerDashboard)
+router.get('/seller/reservation-contact', getReservationContactSettings)
 router.get('/seller/available-units', getSellerAvailableUnits)
 router.get('/seller/team', getSellerTeam)
 router.patch('/seller/team/:sellerId/rate', updateSellerTeamRate)
 router.get('/seller/sales', getSellerSales)
 
 export default router
+

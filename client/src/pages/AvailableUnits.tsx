@@ -24,52 +24,39 @@ type Unit = {
   status: string
 }
 
-type SettingRow = {
-  setting_key: string
-  setting_value: string | null
+type ReservationContact = {
+  name?: string
+  email?: string
+  contact_no?: string
 }
 
-type SettingsMap = {
-  company_name?: string
-  company_email?: string
-  company_contact?: string
-  reservation_contact_name?: string
-  reservation_contact_email?: string
-  reservation_contact_no?: string
-}
-
-type SettingsResponse = {
-  settings?: SettingRow[]
-  settingsMap?: SettingsMap
+type ReservationContactResponse = {
+  reservationContact?: ReservationContact
 }
 
 const fetchAvailableUnits = async () => {
-  const res = await fetch(`${API_URL}/seller/available-units`, { credentials: "include" })
+  const res = await fetch(`${API_URL}/seller/available-units`, {
+    credentials: "include",
+  })
+
   if (!res.ok) throw new Error(await getErrorMessage(res))
+
   const data = await res.json()
   return (data.units || data.data || []) as Unit[]
 }
 
-const fetchSettings = async () => {
-  const res = await fetch(`${API_URL}/settings`, { credentials: "include" })
+const fetchReservationContact = async () => {
+  const res = await fetch(`${API_URL}/seller/reservation-contact`, {
+    credentials: "include",
+  })
+
   if (!res.ok) throw new Error(await getErrorMessage(res))
-  return res.json() as Promise<SettingsResponse>
+
+  return res.json() as Promise<ReservationContactResponse>
 }
 
 const getNonEmptyValue = (...values: Array<string | null | undefined>) => {
   return values.find((value) => typeof value === "string" && value.trim().length > 0)?.trim()
-}
-
-const buildSettingsMap = (settingsData?: SettingsResponse): SettingsMap => {
-  const rowMap = (settingsData?.settings || []).reduce<SettingsMap>((map, setting) => {
-    map[setting.setting_key as keyof SettingsMap] = setting.setting_value || ""
-    return map
-  }, {})
-
-  return {
-    ...rowMap,
-    ...(settingsData?.settingsMap || {}),
-  }
 }
 
 const AvailableUnits = () => {
@@ -80,9 +67,11 @@ const AvailableUnits = () => {
     queryKey: ["seller-available-units"],
     queryFn: fetchAvailableUnits,
   })
-  const { data: settingsData, error: settingsError } = useQuery({
-    queryKey: ["settings", "reservation-contact"],
-    queryFn: fetchSettings,
+
+  const { data: contactData } = useQuery({
+    queryKey: ["seller-reservation-contact"],
+    queryFn: fetchReservationContact,
+    retry: false,
   })
 
   const paginatedUnits = useMemo(
@@ -90,22 +79,10 @@ const AvailableUnits = () => {
     [data, page, rowsPerPage]
   )
 
-  const settings = buildSettingsMap(settingsData)
-  const contactName = getNonEmptyValue(
-    settings.reservation_contact_name,
-    settings.company_name,
-    "D&C Prime Realty Admin"
-  )
-  const contactEmail = getNonEmptyValue(
-    settings.reservation_contact_email,
-    settings.company_email,
-    "admin@gmail.com"
-  )
-  const contactNo = getNonEmptyValue(
-    settings.reservation_contact_no,
-    settings.company_contact,
-    "09000000000"
-  )
+  const contact = contactData?.reservationContact || {}
+  const contactName = getNonEmptyValue(contact.name, "D&C Prime Realty Admin")
+  const contactEmail = getNonEmptyValue(contact.email, "admin@gmail.com")
+  const contactNo = getNonEmptyValue(contact.contact_no, "09000000000")
 
   return (
     <div className="p-6">
@@ -116,23 +93,36 @@ const AvailableUnits = () => {
         actions={
           <div className="w-full max-w-sm rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm text-blue-900 shadow-sm sm:w-80">
             <p className="font-bold">Reservation Assistance</p>
-            <p className="mt-1 text-xs text-blue-700">For reservation requests or unit questions, contact:</p>
+            <p className="mt-1 text-xs text-blue-700">
+              For reservation requests or unit questions, contact:
+            </p>
             <div className="mt-3 space-y-1.5">
-              <p className="flex items-center gap-2"><FiUser className="shrink-0" /> <span>{contactName}</span></p>
-              <p className="flex items-center gap-2"><FiMail className="shrink-0" /> <span className="break-all">{contactEmail}</span></p>
-              <p className="flex items-center gap-2"><FiPhone className="shrink-0" /> <span>{contactNo}</span></p>
+              <p className="flex items-center gap-2">
+                <FiUser className="shrink-0" />
+                <span>{contactName}</span>
+              </p>
+              <p className="flex items-center gap-2">
+                <FiMail className="shrink-0" />
+                <span className="break-all">{contactEmail}</span>
+              </p>
+              <p className="flex items-center gap-2">
+                <FiPhone className="shrink-0" />
+                <span>{contactNo}</span>
+              </p>
             </div>
           </div>
         }
       />
-      {error ? <Alert variant="error" title={error instanceof Error ? error.message : "Failed to load units"} /> : null}
-      {settingsError ? (
+
+      {error ? (
         <Alert
-          variant="warning"
-          title="Reservation contact settings were not loaded. Default contact details are being shown."
+          variant="error"
+          title={error instanceof Error ? error.message : "Failed to load units"}
         />
       ) : null}
+
       {isLoading ? <LoadingState label="Loading available units..." /> : null}
+
       {!isLoading ? (
         <>
           <TableContainer>
@@ -151,23 +141,42 @@ const AvailableUnits = () => {
               <tbody>
                 {paginatedUnits.map((unit) => (
                   <tr className="border-b border-slate-100" key={unit.id}>
-                    <td className="px-4 py-3 font-semibold text-slate-900">{unit.unit_id}</td>
-                    <td className="px-4 py-3 text-slate-600">{unit.project_name}<br/><span className="text-xs text-slate-400">{unit.location}</span></td>
-                    <td className="px-4 py-3 text-slate-600">{formatNumber(unit.lot_area_sqm)} sqm</td>
-                    <td className="px-4 py-3 text-slate-600">{formatMoney(unit.price_per_sqm)}</td>
-                    <td className="px-4 py-3 text-slate-600">{formatMoney(unit.total_contract_price)}</td>
-                    <td className="px-4 py-3 text-slate-600">{formatMoney(unit.reservation_fee)}</td>
-                    <td className="px-4 py-3 text-slate-600">{formatText(unit.status)}</td>
+                    <td className="px-4 py-3 font-semibold text-slate-900">
+                      {unit.unit_id}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {unit.project_name}
+                      <br />
+                      <span className="text-xs text-slate-400">{unit.location}</span>
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {formatNumber(unit.lot_area_sqm)} sqm
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {formatMoney(unit.price_per_sqm)}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {formatMoney(unit.total_contract_price)}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {formatMoney(unit.reservation_fee)}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {formatText(unit.status)}
+                    </td>
                   </tr>
                 ))}
                 {!paginatedUnits.length ? (
                   <tr>
-                    <td colSpan={7} className="px-4 py-8 text-center text-sm text-slate-500">No available units found.</td>
+                    <td colSpan={7} className="px-4 py-8 text-center text-sm text-slate-500">
+                      No available units found.
+                    </td>
                   </tr>
                 ) : null}
               </tbody>
             </table>
           </TableContainer>
+
           <Pagination
             page={page}
             rowsPerPage={rowsPerPage}
