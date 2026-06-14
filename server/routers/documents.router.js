@@ -1,5 +1,10 @@
 import express from 'express'
 import {
+  getDocumentTemplates,
+  getDocumentTemplate,
+  createDocumentTemplate,
+  updateDocumentTemplate,
+  deleteDocumentTemplate,
   getDocuments,
   getDocument,
   createDocument,
@@ -25,6 +30,13 @@ const upload = multer({
 })
 
 
+
+router.get('/document-templates', auth, getDocumentTemplates)
+router.get('/document-templates/:id', auth, getDocumentTemplate)
+router.post('/document-templates', auth, createDocumentTemplate)
+router.patch('/document-templates/:id', auth, updateDocumentTemplate)
+router.delete('/document-templates/:id', auth, deleteDocumentTemplate)
+
 router.get('/documents', auth, getDocuments)
 router.get('/documents/:id', auth, getDocument)
 router.post('/documents', auth, createDocument)
@@ -43,3 +55,4 @@ router.get('/client-documents/:id/file', auth, openClientDocumentFile)
 router.delete('/documents/:id', auth, deleteDocument)
 
 export default router
+

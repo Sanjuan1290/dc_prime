@@ -4,7 +4,12 @@ import { getClientIp } from '../utils/getClientIp.js'
 import { refreshCommissionEligibility } from './commissions.controller.js'
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
 import { createDriveFolderIfMissing, deleteDriveFile, getDriveFileBuffer, safeDriveName, uploadFileToDrive } from '../lib/googleDrive.js'
-import { createClientDocumentChecklistFromListing } from '../utils/documentRequirements.js'
+import {
+  createClientDocumentChecklistFromListing,
+  getDocumentTemplates as loadDocumentTemplates,
+  getDocumentTemplateItems,
+  replaceDocumentTemplateItems,
+} from '../utils/documentRequirements.js'
 
 const allowedClientDocumentStatuses = [
   'not_submitted',
@@ -78,6 +83,232 @@ const getClientUnitById = async (clientUnitId, connectionOrDb = db) => {
   )
 
   return rows[0]
+}
+
+
+export const getDocumentTemplates = async (req, res) => {
+  const templates = await loadDocumentTemplates(db)
+
+  res.status(200).json({
+    message: 'Document templates fetched successfully',
+    templates,
+    documentTemplates: templates,
+    data: templates,
+  })
+}
+
+export const getDocumentTemplate = async (req, res) => {
+  const { id } = req.params
+
+  const [rows] = await db.query(
+    `
+    SELECT
+      dt.id,
+      dt.name,
+      dt.description,
+      dt.status,
+      dt.created_by,
+      creator.full_name AS created_by_name,
+      dt.created_at,
+      dt.updated_at
+    FROM document_templates dt
+    LEFT JOIN users creator ON creator.id = dt.created_by
+    WHERE dt.id = ?
+    LIMIT 1
+    `,
+    [id]
+  )
+
+  const template = rows[0]
+
+  if (!template) {
+    return res.status(404).json({ message: 'Document template not found' })
+  }
+
+  const items = await getDocumentTemplateItems(db, id)
+
+  res.status(200).json({
+    message: 'Document template fetched successfully',
+    template: {
+      ...template,
+      items,
+      document_requirements: items,
+      documentRequirements: items,
+    },
+  })
+}
+
+export const createDocumentTemplate = async (req, res) => {
+  const {
+    name,
+    description,
+    status = 'active',
+    items,
+    document_requirements,
+    documentRequirements,
+  } = req.body
+
+  if (isMissing(name)) {
+    return res.status(400).json({ message: 'Template name is required' })
+  }
+
+  const requirements = items || document_requirements || documentRequirements || []
+  const connection = await db.getConnection()
+
+  try {
+    await connection.beginTransaction()
+
+    const [result] = await connection.query(
+      `
+      INSERT INTO document_templates (
+        name,
+        description,
+        status,
+        created_by
+      ) VALUES (?, ?, ?, ?)
+      `,
+      [name, nullableValue(description), status || 'active', req.user.id]
+    )
+
+    const templateId = result.insertId
+    const sync = await replaceDocumentTemplateItems(connection, templateId, requirements)
+
+    await connection.commit()
+
+    await createAuditLog({
+      userId: req.user.id,
+      action: 'create',
+      module: 'Document Templates',
+      description: `Created document template ${name}`,
+      ipAddress: getClientIp(req),
+    })
+
+    res.status(201).json({
+      message: 'Document template created successfully',
+      templateId,
+      data: { templateId, ...sync },
+    })
+  } catch (error) {
+    await connection.rollback()
+    throw error
+  } finally {
+    connection.release()
+  }
+}
+
+export const updateDocumentTemplate = async (req, res) => {
+  const { id } = req.params
+  const {
+    name,
+    description,
+    status = 'active',
+    items,
+    document_requirements,
+    documentRequirements,
+  } = req.body
+
+  if (isMissing(name)) {
+    return res.status(400).json({ message: 'Template name is required' })
+  }
+
+  const requirements = items || document_requirements || documentRequirements || []
+  const connection = await db.getConnection()
+
+  try {
+    await connection.beginTransaction()
+
+    const [result] = await connection.query(
+      `
+      UPDATE document_templates
+      SET
+        name = ?,
+        description = ?,
+        status = ?
+      WHERE id = ?
+      `,
+      [name, nullableValue(description), status || 'active', id]
+    )
+
+    if (result.affectedRows === 0) {
+      await connection.rollback()
+      return res.status(404).json({ message: 'Document template not found' })
+    }
+
+    const sync = await replaceDocumentTemplateItems(connection, id, requirements)
+
+    await connection.commit()
+
+    await createAuditLog({
+      userId: req.user.id,
+      action: 'update',
+      module: 'Document Templates',
+      description: `Updated document template ${name}`,
+      ipAddress: getClientIp(req),
+    })
+
+    res.status(200).json({
+      message: 'Document template updated successfully',
+      data: sync,
+    })
+  } catch (error) {
+    await connection.rollback()
+    throw error
+  } finally {
+    connection.release()
+  }
+}
+
+export const deleteDocumentTemplate = async (req, res) => {
+  const { id } = req.params
+
+  const [rows] = await db.query(
+    `SELECT id, name FROM document_templates WHERE id = ? LIMIT 1`,
+    [id]
+  )
+
+  const template = rows[0]
+
+  if (!template) {
+    return res.status(404).json({ message: 'Document template not found' })
+  }
+
+  const connection = await db.getConnection()
+
+  try {
+    await connection.beginTransaction()
+
+    await connection.query(
+      `UPDATE projects SET document_template_id = NULL WHERE document_template_id = ?`,
+      [id]
+    )
+
+    await connection.query(
+      `DELETE FROM document_template_items WHERE template_id = ?`,
+      [id]
+    )
+
+    await connection.query(
+      `DELETE FROM document_templates WHERE id = ?`,
+      [id]
+    )
+
+    await connection.commit()
+  } catch (error) {
+    await connection.rollback()
+    throw error
+  } finally {
+    connection.release()
+  }
+
+  await createAuditLog({
+    userId: req.user.id,
+    action: 'delete',
+    module: 'Document Templates',
+    description: `Deleted document template ${template.name}`,
+    ipAddress: getClientIp(req),
+  })
+
+  res.status(200).json({ message: 'Document template deleted successfully' })
 }
 
 export const getDocuments = async (req, res) => {
@@ -882,27 +1113,46 @@ export const deleteDocument = async (req, res) => {
     return res.status(404).json({ message: 'Document not found' })
   }
 
-  const [usageRows] = await db.query(
-    `SELECT id FROM client_document_list WHERE document_id = ? LIMIT 1`,
-    [id]
-  )
+  const connection = await db.getConnection()
 
-  if (usageRows.length > 0) {
-    return res.status(400).json({
-      message: 'Cannot delete a document that is already in use. Set it to inactive instead.'
+  try {
+    await connection.beginTransaction()
+
+    await connection.query(`DELETE FROM document_template_items WHERE document_id = ?`, [id])
+    await connection.query(`DELETE FROM project_document_requirements WHERE document_id = ?`, [id])
+    await connection.query(`DELETE FROM listing_document_requirements WHERE document_id = ?`, [id])
+
+    const [clientDocumentRows] = await connection.query(
+      `SELECT id FROM client_document_list WHERE document_id = ? LIMIT 1`,
+      [id]
+    )
+
+    let message = 'Document deleted successfully'
+    let action = 'delete'
+
+    if (clientDocumentRows.length > 0) {
+      await connection.query(`UPDATE documents SET status = 'inactive' WHERE id = ?`, [id])
+      message = 'Document is used by existing client records, so it was removed from active lists instead of hard-deleted'
+      action = 'delete_requested'
+    } else {
+      await connection.query(`DELETE FROM documents WHERE id = ?`, [id])
+    }
+
+    await connection.commit()
+
+    await createAuditLog({
+      userId: req.user.id,
+      action,
+      module: 'Documents',
+      description: `${message}: ${document.name}`,
+      ipAddress: getClientIp(req)
     })
+
+    res.status(200).json({ message })
+  } catch (error) {
+    await connection.rollback()
+    throw error
+  } finally {
+    connection.release()
   }
-
-  await db.query(`DELETE FROM documents WHERE id = ?`, [id])
-
-  await createAuditLog({
-    userId: req.user.id,
-    action: 'delete',
-    module: 'Documents',
-    description: `Deleted document ${document.name}`,
-    ipAddress: getClientIp(req)
-  })
-
-  res.status(200).json({ message: 'Document deleted successfully' })
 }
-

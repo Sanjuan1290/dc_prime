@@ -946,3 +946,4 @@ export const linkUserToSeller = async (req, res) => {
   res.status(200).json({ message: 'User linked to seller successfully' })
 }
 
+

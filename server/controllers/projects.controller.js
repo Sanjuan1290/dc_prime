@@ -4,6 +4,7 @@ import { getClientIp } from '../utils/getClientIp.js'
 import {
   getProjectDocumentRequirements as loadProjectDocumentRequirements,
   replaceProjectDocumentRequirements,
+  getDocumentTemplateItems,
 } from '../utils/documentRequirements.js'
 
 const isMissing = (value) => {
@@ -50,6 +51,8 @@ const projectSelectFields = `
   p.tax_declaration_no,
   p.pin,
   p.status,
+  p.document_template_id,
+  template.name AS document_template_name,
   p.ended_at,
   COALESCE(document_summary.document_count, 0) AS document_count,
   COALESCE(document_summary.required_count, 0) AS required_document_count,
@@ -75,6 +78,7 @@ export const getProjects = async (req, res) => {
     SELECT
       ${projectSelectFields}
     FROM projects p
+    LEFT JOIN document_templates template ON template.id = p.document_template_id
     LEFT JOIN (
       SELECT
         project_id,
@@ -101,6 +105,7 @@ export const getProject = async (req, res) => {
     SELECT
       ${projectSelectFields}
     FROM projects p
+    LEFT JOIN document_templates template ON template.id = p.document_template_id
     LEFT JOIN (
       SELECT
         project_id,
@@ -192,6 +197,7 @@ export const createProject = async (req, res) => {
     tax_declaration_no,
     pin,
     status,
+    document_template_id,
     document_requirements,
     documentRequirements,
   } = req.body
@@ -224,8 +230,9 @@ export const createProject = async (req, res) => {
         administrator,
         tax_declaration_no,
         pin,
-        status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        status,
+        document_template_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         name,
@@ -235,11 +242,16 @@ export const createProject = async (req, res) => {
         tax_declaration_no || null,
         pin || null,
         status || 'active',
+        nullableValue(document_template_id),
       ]
     )
 
     const projectId = result.insertId
-    const requirements = document_requirements || documentRequirements || []
+    let requirements = document_requirements || documentRequirements || []
+
+    if ((!Array.isArray(requirements) || requirements.length === 0) && !isMissing(document_template_id)) {
+      requirements = await getDocumentTemplateItems(connection, document_template_id)
+    }
 
     if (Array.isArray(requirements) && requirements.length > 0) {
       await replaceProjectDocumentRequirements(connection, projectId, requirements)
@@ -278,6 +290,7 @@ export const updateProject = async (req, res) => {
     tax_declaration_no,
     pin,
     status,
+    document_template_id,
     ended_at,
     document_requirements,
     documentRequirements,
@@ -342,6 +355,7 @@ export const updateProject = async (req, res) => {
         tax_declaration_no = ?,
         pin = ?,
         status = ?,
+        document_template_id = ?,
         ended_at = ?
       WHERE id = ?
       `,
@@ -353,6 +367,7 @@ export const updateProject = async (req, res) => {
         tax_declaration_no || null,
         pin || null,
         status || 'active',
+        nullableValue(document_template_id),
         ended_at || null,
         id,
       ]
@@ -374,6 +389,11 @@ export const updateProject = async (req, res) => {
         id,
         document_requirements || documentRequirements || []
       )
+    } else if (!isMissing(document_template_id)) {
+      const templateRequirements = await getDocumentTemplateItems(connection, document_template_id)
+      if (templateRequirements.length > 0) {
+        await replaceProjectDocumentRequirements(connection, id, templateRequirements)
+      }
     }
 
     await connection.commit()

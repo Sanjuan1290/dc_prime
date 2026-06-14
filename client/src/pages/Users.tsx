@@ -134,6 +134,7 @@ const emptyForm: UserForm = {
 }
 
 const isSellerRole = (role: string) => sellerRoles.includes(role as UserRole)
+const isOfficeRole = (role: string) => ["super_admin", "admin"].includes(String(role))
 const toNumberOrNull = (value: string) => (value === "" ? null : Number(value))
 
 const fetchUsers = async () => {
@@ -462,7 +463,14 @@ const Users = () => {
     setIsOpen(true)
   }
 
+  const canResetOrDeactivateUser = (user: User) => canEditDefaults || !isOfficeRole(String(user.role))
+
   const handleResetPassword = (user: User) => {
+    if (!canResetOrDeactivateUser(user)) {
+      setMessage("Only super admin can reset another admin or super admin password.")
+      return
+    }
+
     const confirmed = window.confirm(
       `Are you sure you want to reset the password for ${user.full_name}? A new temporary password will be emailed and the user must change it on first login.`
     )
@@ -473,6 +481,11 @@ const Users = () => {
   }
 
   const handleDeactivate = (user: User) => {
+    if (!canResetOrDeactivateUser(user)) {
+      setMessage("Only super admin can deactivate admin or super admin accounts.")
+      return
+    }
+
     const confirmed = window.confirm(
       `Are you sure you want to deactivate ${user.full_name}? They will no longer be able to login.`
     )
@@ -599,6 +612,7 @@ const Users = () => {
                     {user.seller_id ? (
                       <>
                         <p className="font-medium text-slate-900">{user.seller_full_name || user.full_name}</p>
+                        <p className="text-xs text-slate-500">Seller ID #{user.seller_id}</p>
                       </>
                     ) : (
                       <span>-</span>
@@ -622,8 +636,14 @@ const Users = () => {
                   <td className="px-4 py-3">
                     <div className="flex gap-2">
                       <Button onClick={() => openEdit(user)}>Edit</Button>
-                      <Button disabled={resetPasswordMutation.isPending} onClick={() => handleResetPassword(user)} variant="secondary">Reset Temp Password</Button>
-                      <Button disabled={user.status !== "active" || deactivateMutation.isPending} onClick={() => handleDeactivate(user)} variant="danger">Deactivate</Button>
+                      {canResetOrDeactivateUser(user) ? (
+                        <>
+                          <Button disabled={resetPasswordMutation.isPending} onClick={() => handleResetPassword(user)} variant="secondary">Reset Temp Password</Button>
+                          <Button disabled={user.status !== "active" || deactivateMutation.isPending} onClick={() => handleDeactivate(user)} variant="danger">Deactivate</Button>
+                        </>
+                      ) : (
+                        <span className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-500">Super admin only</span>
+                      )}
                     </div>
                   </td>
                 </tr>

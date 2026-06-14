@@ -329,3 +329,124 @@ export const createClientDocumentChecklistFromListing = async (
 
   return { insertedCount: result.affectedRows }
 }
+
+export const getDocumentTemplateItems = async (connectionOrDb, templateId) => {
+  const [rows] = await connectionOrDb.query(
+    `
+    SELECT
+      dti.id,
+      dti.template_id,
+      dti.document_id,
+      d.name,
+      d.description,
+      d.can_reuse,
+      dti.is_required,
+      dti.status,
+      dti.sort_order,
+      dti.created_at,
+      dti.updated_at
+    FROM document_template_items dti
+    INNER JOIN documents d ON d.id = dti.document_id
+    WHERE dti.template_id = ?
+    ORDER BY dti.sort_order ASC, dti.id ASC
+    `,
+    [templateId]
+  )
+
+  return rows
+}
+
+export const replaceDocumentTemplateItems = async (
+  connectionOrDb,
+  templateId,
+  requirements = []
+) => {
+  const normalized = normalizeRequirementPayload(requirements)
+
+  await connectionOrDb.query(
+    `DELETE FROM document_template_items WHERE template_id = ?`,
+    [templateId]
+  )
+
+  let insertedCount = 0
+
+  for (const item of normalized) {
+    const document = await ensureDocument(connectionOrDb, {
+      ...item,
+      can_reuse: true,
+      status: item.status || 'active',
+    })
+    if (!document) continue
+
+    await connectionOrDb.query(
+      `
+      INSERT INTO document_template_items (
+        template_id,
+        document_id,
+        is_required,
+        status,
+        sort_order
+      ) VALUES (?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE
+        is_required = VALUES(is_required),
+        status = VALUES(status),
+        sort_order = VALUES(sort_order)
+      `,
+      [
+        templateId,
+        document.id,
+        booleanValue(item.is_required, true),
+        item.status || 'active',
+        item.sort_order || insertedCount + 1,
+      ]
+    )
+
+    insertedCount += 1
+  }
+
+  return { insertedCount }
+}
+
+export const getDocumentTemplates = async (connectionOrDb) => {
+  const [templates] = await connectionOrDb.query(
+    `
+    SELECT
+      dt.id,
+      dt.name,
+      dt.description,
+      dt.status,
+      dt.created_by,
+      creator.full_name AS created_by_name,
+      COALESCE(summary.document_count, 0) AS document_count,
+      COALESCE(summary.required_count, 0) AS required_document_count,
+      dt.created_at,
+      dt.updated_at
+    FROM document_templates dt
+    LEFT JOIN users creator ON creator.id = dt.created_by
+    LEFT JOIN (
+      SELECT
+        template_id,
+        COUNT(*) AS document_count,
+        SUM(CASE WHEN is_required = TRUE THEN 1 ELSE 0 END) AS required_count
+      FROM document_template_items
+      WHERE status = 'active'
+      GROUP BY template_id
+    ) summary ON summary.template_id = dt.id
+    ORDER BY dt.id DESC
+    `
+  )
+
+  const hydrated = []
+
+  for (const template of templates) {
+    const items = await getDocumentTemplateItems(connectionOrDb, template.id)
+    hydrated.push({
+      ...template,
+      items,
+      document_requirements: items,
+      documentRequirements: items,
+    })
+  }
+
+  return hydrated
+}

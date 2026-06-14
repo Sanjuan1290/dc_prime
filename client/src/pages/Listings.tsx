@@ -4,6 +4,7 @@ import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import {
   FiEdit2,
   FiEye,
+  FiFileText,
   FiGrid,
   FiPlus,
   FiSearch,
@@ -294,6 +295,53 @@ const fetchListingFullDetails = async (listingId: number) => {
   }
 
   return (await response.json()) as ListingFullDetails;
+};
+
+const fetchDocumentLibrary = async (): Promise<LibraryDocument[]> => {
+  const response = await fetch(`${API_URL}/documents?status=active`, {
+    credentials: "include",
+  });
+
+  if (!response.ok) {
+    throw new Error(await getErrorMessage(response));
+  }
+
+  const data = (await response.json()) as { documents: LibraryDocument[] };
+  return data.documents || [];
+};
+
+const updateListingDocumentRequirements = async ({
+  listingId,
+  requirements,
+}: {
+  listingId: number;
+  requirements: ListingDocumentRequirement[];
+}) => {
+  const response = await fetch(`${API_URL}/listings/${listingId}/document-requirements`, {
+    method: "PUT",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ document_requirements: requirements }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await getErrorMessage(response));
+  }
+
+  return response.json();
+};
+
+const resetListingDocumentRequirements = async (listingId: number) => {
+  const response = await fetch(`${API_URL}/listings/${listingId}/document-requirements/reset`, {
+    method: "POST",
+    credentials: "include",
+  });
+
+  if (!response.ok) {
+    throw new Error(await getErrorMessage(response));
+  }
+
+  return response.json();
 };
 
 const createListing = async (listingData: ListingFormData) => {
@@ -924,6 +972,13 @@ const Listings = () => {
                     </Button>
 
                     <Button
+                      icon={<FiFileText />}
+                      onClick={() => setViewListingId(listing.id)}
+                    >
+                      Edit Docs
+                    </Button>
+
+                    <Button
                       disabled={!["available", "hold"].includes(listing.status)}
                       icon={<FiTrash2 />}
                       onClick={() => setListingToDelete(listing)}
@@ -1323,7 +1378,7 @@ const ListingDetailsModal = ({
   const queryClient = useQueryClient();
   const [requirements, setRequirements] = useState<ListingDocumentRequirement[]>([]);
   const [successMessage, setSuccessMessage] = useState("");
-  const [newRequirementName, setNewRequirementName] = useState("");
+  const [documentSearch, setDocumentSearch] = useState("");
 
   const { data: documentLibrary = [] } = useQuery({
     queryKey: ["documents", "library", "active"],
@@ -1347,6 +1402,7 @@ const ListingDetailsModal = ({
     onSuccess: () => {
       if (details?.listing.id) {
         queryClient.invalidateQueries({ queryKey: ["listing-full-details", details.listing.id] });
+        queryClient.invalidateQueries({ queryKey: ["listings"] });
       }
       setSuccessMessage("Listing document requirements saved");
     },
@@ -1357,6 +1413,7 @@ const ListingDetailsModal = ({
     onSuccess: () => {
       if (details?.listing.id) {
         queryClient.invalidateQueries({ queryKey: ["listing-full-details", details.listing.id] });
+        queryClient.invalidateQueries({ queryKey: ["listings"] });
       }
       setSuccessMessage("Listing document requirements reset to project defaults");
     },
@@ -1395,27 +1452,20 @@ const ListingDetailsModal = ({
     });
   };
 
-  const addNewRequirement = () => {
-    const trimmedName = newRequirementName.trim();
-    if (!trimmedName) return;
-    setRequirements((current) => {
-      if (current.some((requirement) => requirement.name.toLowerCase() === trimmedName.toLowerCase())) return current;
-      return [
-        ...current,
-        {
-          document_id: null,
-          name: trimmedName,
-          description: null,
-          can_reuse: false,
-          is_required: true,
-          status: "active",
-          sort_order: current.length + 1,
-          source: "listing_override",
-        },
-      ];
-    });
-    setNewRequirementName("");
-  };
+  const selectedDocumentIds = new Set(
+    requirements
+      .map((requirement) => requirement.document_id)
+      .filter(Boolean)
+      .map(Number),
+  );
+
+  const filteredDocumentLibrary = documentLibrary.filter((document) =>
+    [document.name, document.description]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+      .includes(documentSearch.toLowerCase().trim()),
+  );
 
   return (
     <Modal
@@ -1694,29 +1744,38 @@ const ListingDetailsModal = ({
                   </div>
                 </div>
 
-                <div className="mb-3 grid grid-cols-1 gap-2 md:grid-cols-[1fr_1fr_auto]">
-                  <Select
-                    onChange={(e) => {
-                      addLibraryRequirement(e.target.value);
-                      e.target.value = "";
-                    }}
-                    value=""
-                  >
-                    <option value="">Add from Document Library...</option>
-                    {documentLibrary.map((document) => (
-                      <option key={document.id} value={document.id}>
-                        {document.name}
-                      </option>
-                    ))}
-                  </Select>
+                <div className="mb-3 rounded-lg border border-slate-200 bg-white p-3">
+                  <div className="mb-2 flex flex-col gap-1">
+                    <p className="text-sm font-bold text-slate-900">Add Existing Documents</p>
+                    <p className="text-xs text-slate-500">Create missing documents in Document Library first, then search and add them here.</p>
+                  </div>
                   <Input
-                    onChange={(e) => setNewRequirementName(e.target.value)}
-                    placeholder="New document name"
-                    value={newRequirementName}
+                    icon={<FiSearch />}
+                    onChange={(e) => setDocumentSearch(e.target.value)}
+                    placeholder="Search document library..."
+                    value={documentSearch}
                   />
-                  <Button icon={<FiPlus />} onClick={addNewRequirement}>
-                    Add
-                  </Button>
+                  <div className="mt-3 grid max-h-52 grid-cols-1 gap-2 overflow-y-auto md:grid-cols-2">
+                    {filteredDocumentLibrary.map((document) => {
+                      const alreadySelected = selectedDocumentIds.has(Number(document.id));
+                      return (
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3" key={document.id}>
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-semibold text-slate-900">{document.name}</p>
+                              <p className="text-xs text-slate-500">{document.description || "No description"}</p>
+                            </div>
+                            <Button
+                              disabled={alreadySelected}
+                              onClick={() => addLibraryRequirement(String(document.id))}
+                            >
+                              {alreadySelected ? "Added" : "Add"}
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
 
                 {saveRequirementsMutation.isError ? (
@@ -1740,7 +1799,10 @@ const ListingDetailsModal = ({
                         <div>
                           <p className="font-semibold text-slate-900">{requirement.name}</p>
                           <p className="text-xs text-slate-500">
-                            {formatText(requirement.source || "listing_override")}
+                            {requirement.description || formatText(requirement.source || "listing_override")}
+                          </p>
+                          <p className="text-[11px] text-slate-400">
+                            Source: {formatText(requirement.source || "listing_override")}
                           </p>
                         </div>
                         <Select

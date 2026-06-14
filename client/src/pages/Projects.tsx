@@ -38,6 +38,8 @@ type Project = {
   ended_at: string | null;
   document_count?: number;
   required_document_count?: number;
+  document_template_id?: number | null;
+  document_template_name?: string | null;
   document_requirements?: DocumentRequirement[];
   documentRequirements?: DocumentRequirement[];
   created_at: string;
@@ -50,6 +52,18 @@ type DocumentItem = {
   description: string | null;
   can_reuse: boolean | number;
   status: string;
+};
+
+type DocumentTemplate = {
+  id: number;
+  name: string;
+  description: string | null;
+  status: string;
+  document_count: number;
+  required_document_count: number;
+  items?: DocumentRequirement[];
+  document_requirements?: DocumentRequirement[];
+  documentRequirements?: DocumentRequirement[];
 };
 
 type DocumentRequirement = {
@@ -71,6 +85,8 @@ type ProjectFormData = {
   tax_declaration_no: string;
   pin: string;
   status: "active" | "inactive";
+  document_template_id: number | "";
+  document_template_ids: number[];
   document_requirements: DocumentRequirement[];
 };
 
@@ -82,6 +98,12 @@ type DocumentsResponse = {
   documents: DocumentItem[];
 };
 
+type DocumentTemplatesResponse = {
+  templates?: DocumentTemplate[];
+  documentTemplates?: DocumentTemplate[];
+  data?: DocumentTemplate[];
+};
+
 const emptyFormData: ProjectFormData = {
   name: "",
   location: "",
@@ -90,6 +112,8 @@ const emptyFormData: ProjectFormData = {
   tax_declaration_no: "",
   pin: "",
   status: "active",
+  document_template_id: "",
+  document_template_ids: [],
   document_requirements: [],
 };
 
@@ -99,6 +123,7 @@ const normalizeRequirements = (requirements: DocumentRequirement[] = []) =>
     document_id: requirement.document_id ? Number(requirement.document_id) : null,
     name: requirement.name || "",
     is_required: Boolean(requirement.is_required),
+    description: requirement.description || null,
     status: requirement.status || "active",
     sort_order: Number(requirement.sort_order || index + 1),
   }));
@@ -143,6 +168,20 @@ const fetchDocuments = async () => {
   return data.documents || [];
 };
 
+
+const fetchDocumentTemplates = async () => {
+  const response = await fetch(`${API_URL}/document-templates`, {
+    credentials: "include",
+  });
+
+  if (!response.ok) {
+    throw new Error(await getErrorMessage(response));
+  }
+
+  const data = (await response.json()) as DocumentTemplatesResponse;
+  return data.templates || data.documentTemplates || data.data || [];
+};
+
 const createProject = async (projectData: ProjectFormData) => {
   const response = await fetch(`${API_URL}/projects`, {
     method: "POST",
@@ -152,6 +191,7 @@ const createProject = async (projectData: ProjectFormData) => {
     },
     body: JSON.stringify({
       ...projectData,
+      document_template_id: projectData.document_template_ids[0] || projectData.document_template_id || "",
       document_requirements: normalizeRequirements(
         projectData.document_requirements,
       ),
@@ -178,6 +218,7 @@ const updateProject = async ({
     },
     body: JSON.stringify({
       ...projectData,
+      document_template_id: projectData.document_template_ids[0] || projectData.document_template_id || "",
       document_requirements: normalizeRequirements(
         projectData.document_requirements,
       ),
@@ -208,6 +249,8 @@ const projectToFormData = (project: Project): ProjectFormData => ({
   tax_declaration_no: project.tax_declaration_no ?? "",
   pin: project.pin ?? "",
   status: project.status === "inactive" ? "inactive" : "active",
+  document_template_id: project.document_template_id || "",
+  document_template_ids: project.document_template_id ? [Number(project.document_template_id)] : [],
   document_requirements: normalizeRequirements(
     project.document_requirements || project.documentRequirements || [],
   ),
@@ -227,8 +270,10 @@ const Projects = () => {
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [successMessage, setSuccessMessage] = useState("");
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
-  const [newDocName, setNewDocName] = useState("");
-  const [editNewDocName, setEditNewDocName] = useState("");
+  const [templateSearch, setTemplateSearch] = useState("");
+  const [editTemplateSearch, setEditTemplateSearch] = useState("");
+  const [documentSearch, setDocumentSearch] = useState("");
+  const [editDocumentSearch, setEditDocumentSearch] = useState("");
 
   const {
     data: projects = [],
@@ -242,6 +287,11 @@ const Projects = () => {
   const { data: documentLibrary = [] } = useQuery({
     queryKey: ["documents", "library", "active"],
     queryFn: fetchDocuments,
+  });
+
+  const { data: documentTemplates = [] } = useQuery({
+    queryKey: ["document-templates"],
+    queryFn: fetchDocumentTemplates,
   });
 
   const { data: editProjectDetails, isLoading: isEditLoading } = useQuery({
@@ -258,7 +308,8 @@ const Projects = () => {
 
   const resetForm = () => {
     setFormData(emptyFormData);
-    setNewDocName("");
+    setTemplateSearch("");
+    setDocumentSearch("");
   };
 
   const createProjectMutation = useMutation({
@@ -279,7 +330,8 @@ const Projects = () => {
       queryClient.invalidateQueries({ queryKey: ["project", editProjectId] });
       queryClient.invalidateQueries({ queryKey: ["documents"] });
       setEditProjectId(null);
-      setEditNewDocName("");
+      setEditTemplateSearch("");
+      setEditDocumentSearch("");
       setSuccessMessage("Project updated successfully");
     },
   });
@@ -368,40 +420,6 @@ const Projects = () => {
     });
   };
 
-  const addNewRequirement = (
-    name: string,
-    setName: (value: string) => void,
-    data: ProjectFormData,
-    setData: (data: ProjectFormData) => void,
-  ) => {
-    const trimmedName = name.trim();
-    if (!trimmedName) return;
-
-    const exists = data.document_requirements.some(
-      (requirement) =>
-        requirement.name.toLowerCase() === trimmedName.toLowerCase(),
-    );
-
-    if (exists) return;
-
-    setData({
-      ...data,
-      document_requirements: [
-        ...data.document_requirements,
-        {
-          document_id: null,
-          name: trimmedName,
-          description: null,
-          can_reuse: false,
-          is_required: true,
-          status: "active",
-          sort_order: data.document_requirements.length + 1,
-        },
-      ],
-    });
-    setName("");
-  };
-
   const updateRequirement = (
     index: number,
     updates: Partial<DocumentRequirement>,
@@ -445,21 +463,140 @@ const Projects = () => {
       sort_order: index + 1,
     }));
 
+  const getTemplateRequirements = (template: DocumentTemplate) =>
+    normalizeRequirements(
+      template.items || template.document_requirements || template.documentRequirements || [],
+    );
+
+  const mergeRequirements = (requirements: DocumentRequirement[]) => {
+    const map = new Map<string, DocumentRequirement>();
+
+    requirements.forEach((requirement) => {
+      const key = requirement.document_id
+        ? `id:${requirement.document_id}`
+        : `name:${requirement.name.toLowerCase()}`;
+      const existing = map.get(key);
+
+      if (!existing) {
+        map.set(key, { ...requirement });
+        return;
+      }
+
+      map.set(key, {
+        ...existing,
+        is_required: Boolean(existing.is_required) || Boolean(requirement.is_required),
+        status: existing.status === "active" || requirement.status === "active" ? "active" : existing.status,
+        description: existing.description || requirement.description || null,
+      });
+    });
+
+    return Array.from(map.values()).map((item, index) => ({
+      ...item,
+      sort_order: index + 1,
+    }));
+  };
+
+  const buildRequirementsFromTemplateIds = (templateIds: number[]) => {
+    const selectedTemplates = documentTemplates.filter((template) =>
+      templateIds.includes(Number(template.id)),
+    );
+
+    return mergeRequirements(
+      selectedTemplates.flatMap((template) => getTemplateRequirements(template)),
+    );
+  };
+
+  const applyTemplateIdsToForm = (
+    templateIds: number[],
+    data: ProjectFormData,
+    setData: (data: ProjectFormData) => void,
+  ) => {
+    const uniqueTemplateIds = Array.from(new Set(templateIds.map(Number)));
+
+    setData({
+      ...data,
+      document_template_id: uniqueTemplateIds[0] || "",
+      document_template_ids: uniqueTemplateIds,
+      document_requirements: buildRequirementsFromTemplateIds(uniqueTemplateIds),
+    });
+  };
+
+  const toggleTemplateForForm = (
+    templateId: number,
+    checked: boolean,
+    data: ProjectFormData,
+    setData: (data: ProjectFormData) => void,
+  ) => {
+    const currentIds = data.document_template_ids || [];
+    const nextIds = checked
+      ? Array.from(new Set([...currentIds, templateId]))
+      : currentIds.filter((id) => Number(id) !== Number(templateId));
+
+    applyTemplateIdsToForm(nextIds, data, setData);
+  };
+
+  const applyAllTemplatesToForm = (
+    data: ProjectFormData,
+    setData: (data: ProjectFormData) => void,
+  ) => {
+    applyTemplateIdsToForm(
+      documentTemplates
+        .filter((template) => template.status === "active")
+        .map((template) => Number(template.id)),
+      data,
+      setData,
+    );
+  };
+
   const openAddProjectModal = () => {
+    const activeTemplateIds = documentTemplates
+      .filter((template) => template.status === "active")
+      .map((template) => Number(template.id));
+
     setFormData({
       ...emptyFormData,
-      document_requirements: buildDefaultRequirementsFromLibrary(),
+      document_template_id: activeTemplateIds[0] || "",
+      document_template_ids: activeTemplateIds,
+      document_requirements: activeTemplateIds.length > 0
+        ? buildRequirementsFromTemplateIds(activeTemplateIds)
+        : buildDefaultRequirementsFromLibrary(),
     });
-    setNewDocName("");
+    setTemplateSearch("");
+    setDocumentSearch("");
     setIsAddOpen(true);
   };
 
   const formFields = (
     data: ProjectFormData,
     setData: (data: ProjectFormData) => void,
-    newName: string,
-    setNewName: (value: string) => void,
-  ) => (
+    currentTemplateSearch: string,
+    setCurrentTemplateSearch: (value: string) => void,
+    currentDocumentSearch: string,
+    setCurrentDocumentSearch: (value: string) => void,
+  ) => {
+    const activeTemplates = documentTemplates.filter((template) => template.status === "active");
+    const filteredTemplates = activeTemplates.filter((template) =>
+      [template.name, template.description]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(currentTemplateSearch.toLowerCase().trim()),
+    );
+    const selectedDocumentIds = new Set(
+      data.document_requirements
+        .map((requirement) => requirement.document_id)
+        .filter(Boolean)
+        .map(Number),
+    );
+    const filteredLibraryDocuments = availableLibraryDocuments.filter((document) =>
+      [document.name, document.description]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(currentDocumentSearch.toLowerCase().trim()),
+    );
+
+    return (
     <div className="space-y-5">
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         <Input
@@ -527,36 +664,99 @@ const Projects = () => {
           </p>
         </div>
 
-        <div className="mb-3 grid grid-cols-1 gap-2 md:grid-cols-[1fr_auto]">
-          <Select
-            onChange={(e) => {
-              const selected = availableLibraryDocuments.find(
-                (document) => String(document.id) === e.target.value,
-              );
-              if (selected) addLibraryRequirement(selected, data, setData);
-              e.target.value = "";
-            }}
-            value=""
-          >
-            <option value="">Add from Document Library...</option>
-            {availableLibraryDocuments.map((document) => (
-              <option key={document.id} value={document.id}>
-                {document.name}
-              </option>
+        <div className="mb-4 rounded-lg border border-slate-200 bg-white p-3">
+          <div className="mb-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="text-sm font-bold text-slate-900">Select Document Templates</p>
+              <p className="text-xs text-slate-500">You can select multiple templates. Duplicate documents are merged automatically.</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={() => applyAllTemplatesToForm(data, setData)}>Select All Templates</Button>
+              <Button
+                onClick={() =>
+                  setData({
+                    ...data,
+                    document_template_id: "",
+                    document_template_ids: [],
+                    document_requirements: [],
+                  })
+                }
+              >
+                Clear Templates
+              </Button>
+              <Button
+                onClick={() =>
+                  setData({
+                    ...data,
+                    document_template_id: "",
+                    document_template_ids: [],
+                    document_requirements: buildDefaultRequirementsFromLibrary(),
+                  })
+                }
+              >
+                Use All Library Docs
+              </Button>
+            </div>
+          </div>
+          <Input
+            icon={<FiSearch />}
+            onChange={(e) => setCurrentTemplateSearch(e.target.value)}
+            placeholder="Search templates..."
+            value={currentTemplateSearch}
+          />
+          <div className="mt-3 grid max-h-52 grid-cols-1 gap-2 overflow-y-auto md:grid-cols-2">
+            {filteredTemplates.map((template) => (
+              <label
+                className="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm"
+                key={template.id}
+              >
+                <input
+                  checked={(data.document_template_ids || []).includes(Number(template.id))}
+                  className="mt-1"
+                  onChange={(e) => toggleTemplateForForm(Number(template.id), e.target.checked, data, setData)}
+                  type="checkbox"
+                />
+                <span>
+                  <span className="block font-semibold text-slate-900">{template.name}</span>
+                  <span className="block text-xs text-slate-500">{template.description || "No description"}</span>
+                  <span className="block text-xs text-slate-500">{Number(template.required_document_count || 0)} required / {Number(template.document_count || 0)} docs</span>
+                </span>
+              </label>
             ))}
-          </Select>
-          <div className="grid grid-cols-[1fr_auto] gap-2">
-            <Input
-              onChange={(e) => setNewName(e.target.value)}
-              placeholder="New document name"
-              value={newName}
-            />
-            <Button
-              onClick={() => addNewRequirement(newName, setNewName, data, setData)}
-              icon={<FiPlus />}
-            >
-              Add
-            </Button>
+          </div>
+        </div>
+
+        <div className="mb-3 rounded-lg border border-slate-200 bg-white p-3">
+          <div className="mb-2 flex flex-col gap-1">
+            <p className="text-sm font-bold text-slate-900">Add Existing Documents</p>
+            <p className="text-xs text-slate-500">New documents should be created in the Document Library first, then selected here.</p>
+          </div>
+          <Input
+            icon={<FiSearch />}
+            onChange={(e) => setCurrentDocumentSearch(e.target.value)}
+            placeholder="Search document library..."
+            value={currentDocumentSearch}
+          />
+          <div className="mt-3 grid max-h-52 grid-cols-1 gap-2 overflow-y-auto md:grid-cols-2">
+            {filteredLibraryDocuments.map((document) => {
+              const alreadySelected = selectedDocumentIds.has(Number(document.id));
+              return (
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3" key={document.id}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900">{document.name}</p>
+                      <p className="text-xs text-slate-500">{document.description || "No description"}</p>
+                    </div>
+                    <Button
+                      disabled={alreadySelected}
+                      onClick={() => addLibraryRequirement(document, data, setData)}
+                    >
+                      {alreadySelected ? "Added" : "Add"}
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
 
@@ -574,7 +774,10 @@ const Projects = () => {
                 <div>
                   <p className="font-semibold text-slate-900">{requirement.name}</p>
                   <p className="text-xs text-slate-500">
-                    {requirement.document_id ? "From library" : "New document, will be added to library"}
+                    {requirement.description ||
+                      (requirement.document_id
+                        ? "From library"
+                        : "From selected template or library")}
                   </p>
                 </div>
                 <Select
@@ -614,7 +817,8 @@ const Projects = () => {
         )}
       </div>
     </div>
-  );
+    );
+  };
 
   return (
     <div>
@@ -782,7 +986,7 @@ const Projects = () => {
       {isAddOpen ? (
         <Modal onClose={() => setIsAddOpen(false)} title="Add Project" size="xl">
           <form className="space-y-4" onSubmit={handleAddProject}>
-            {formFields(formData, setFormData, newDocName, setNewDocName)}
+            {formFields(formData, setFormData, templateSearch, setTemplateSearch, documentSearch, setDocumentSearch)}
             {createProjectMutation.isError ? (
               <Alert type="error">{createProjectMutation.error.message}</Alert>
             ) : null}
@@ -811,6 +1015,7 @@ const Projects = () => {
             <p><b>Tax Declaration No.:</b> {viewProject.tax_declaration_no || "-"}</p>
             <p><b>PIN:</b> {viewProject.pin || "-"}</p>
             <p><b>Status:</b> {viewProject.status}</p>
+            <p><b>Document Template:</b> {viewProject.document_template_name || "Manual / Custom"}</p>
             <p><b>Default Documents:</b> {Number(viewProject.document_count || 0)}</p>
             <p><b>Required Documents:</b> {Number(viewProject.required_document_count || 0)}</p>
             <p><b>Ended At:</b> {formatDate(viewProject.ended_at)}</p>
@@ -853,7 +1058,7 @@ const Projects = () => {
         <Modal onClose={() => setEditProjectId(null)} title="Edit Project" size="xl">
           {isEditLoading ? <LoadingState message="Loading project documents..." /> : null}
           <form className="space-y-4" onSubmit={handleUpdateProject}>
-            {formFields(editFormData, setEditFormData, editNewDocName, setEditNewDocName)}
+            {formFields(editFormData, setEditFormData, editTemplateSearch, setEditTemplateSearch, editDocumentSearch, setEditDocumentSearch)}
             {updateProjectMutation.isError ? (
               <Alert type="error">{updateProjectMutation.error.message}</Alert>
             ) : null}
