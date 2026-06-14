@@ -185,10 +185,10 @@ const navGroups: NavGroup[] = [
 const roleAllowedPaths: Record<string, string[]> = {
   super_admin: ["/dashboard", "/projects", "/listings", "/clients", "/client", "/accreditted_sellers", "/payments", "/commissions", "/cash-advances", "/documents", "/audit-logs", "/reports", "/employees", "/attendance", "/settings", "/users", "/change-password"],
   admin: ["/dashboard", "/projects", "/listings", "/clients", "/client", "/accreditted_sellers", "/payments", "/commissions", "/cash-advances", "/documents", "/audit-logs", "/reports", "/employees", "/attendance", "/settings", "/users", "/change-password"],
-  broker_network_manager: ["/seller-dashboard", "/available-units", "/my-team", "/team-sales", "/commissions", "/cash-advances", "/change-password"],
-  broker: ["/seller-dashboard", "/available-units", "/my-team", "/team-sales", "/commissions", "/cash-advances", "/change-password"],
-  manager: ["/seller-dashboard", "/available-units", "/my-team", "/team-sales", "/commissions", "/cash-advances", "/change-password"],
-  agent: ["/seller-dashboard", "/available-units", "/team-sales", "/commissions", "/cash-advances", "/change-password"],
+  broker_network_manager: ["/seller-dashboard", "/available-units", "/my-team", "/team-sales", "/change-password"],
+  broker: ["/seller-dashboard", "/available-units", "/my-team", "/team-sales", "/change-password"],
+  manager: ["/seller-dashboard", "/available-units", "/my-team", "/team-sales", "/change-password"],
+  agent: ["/seller-dashboard", "/available-units", "/team-sales", "/change-password"],
 }
 
 const canAccessPath = (role: string | undefined, path: string) => {

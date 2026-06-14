@@ -20,7 +20,7 @@ const adminFeatures = [
   'settings',
 ]
 
-const sellerFeatures = ['seller-dashboard', 'available-units', 'team-sales', 'commissions', 'cash-advances']
+const sellerFeatures = ['seller-dashboard', 'available-units', 'team-sales']
 
 const getFeaturesForRole = (role) => {
   if (['super_admin', 'admin'].includes(role)) return adminFeatures

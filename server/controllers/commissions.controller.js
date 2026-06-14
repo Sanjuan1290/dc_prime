@@ -202,6 +202,7 @@
         commission_pool_rate,
         personal_commission_rate,
         override_commission_rate,
+        direct_to_developer_rate,
         max_downline_rate,
         status
       FROM accredited_sellers
@@ -254,6 +255,10 @@
 
     if (rateType === 'personal' && !isMissing(seller?.personal_commission_rate)) {
       return normalizeRate(seller.personal_commission_rate)
+    }
+
+    if (rateType === 'direct_to_developer' && !isMissing(seller?.direct_to_developer_rate)) {
+      return normalizeRate(seller.direct_to_developer_rate)
     }
 
     if (!isMissing(seller?.commission_rate)) return normalizeRate(seller.commission_rate)
@@ -764,8 +769,8 @@
           seller: manager,
           rate: managerOverrideRate,
           sourceType: 'override',
-          commissionRole: 'override',
-          label: 'Manager override',
+          commissionRole: 'manager',
+          label: 'Manager release milestone',
         })
         allocatedBelowBroker = normalizeRate(allocatedBelowBroker + managerOverrideRate)
       }
@@ -792,8 +797,8 @@
             seller: broker,
             rate: brokerResidualRate,
             sourceType: 'override',
-            commissionRole: 'override',
-            label: 'Broker residual commission',
+            commissionRole: 'broker',
+            label: 'Broker release milestone',
           })
         }
       } else {
@@ -818,8 +823,8 @@
             seller: bnm,
             rate: bnmResidualRate,
             sourceType: 'override',
-            commissionRole: 'override',
-            label: 'Broker network manager residual commission',
+            commissionRole: 'broker_network_manager',
+            label: 'Broker Network Manager release milestone',
           })
         }
       }
@@ -843,11 +848,13 @@
   }) => {
     const connectionOrDb = connection || db
 
-    if (saleType === 'direct') {
+    if (saleType === 'direct' || saleType === 'direct_to_developer') {
       const seller = await getSeller(connectionOrDb, sellerId)
-      const personalRate = !isMissing(seller?.personal_commission_rate)
-        ? normalizeRate(seller.personal_commission_rate)
-        : null
+      const personalRate = saleType === 'direct_to_developer'
+        ? await getFinalRate({ connectionOrDb, seller, rateType: 'direct_to_developer' })
+        : (!isMissing(seller?.personal_commission_rate)
+          ? normalizeRate(seller.personal_commission_rate)
+          : null)
 
       const mainCommission = await createAutoCommissionForClientUnit({
         connection: connectionOrDb,
@@ -857,7 +864,7 @@
         commissionRole: seller?.seller_role || null,
         sourceType: 'main',
         parentCommissionId: null,
-        saleType: 'direct',
+        saleType: saleType === 'direct_to_developer' ? 'direct_to_developer' : 'direct',
         notes,
         actorRole,
       })
@@ -937,13 +944,14 @@
       connectionOrDb,
       seller,
       rate: rateOverride,
+      rateType: saleType === 'direct_to_developer' ? 'direct_to_developer' : 'personal',
     })
 
     const commissionBase = normalizeMoney(clientUnit.commission_base)
     const grossCommission = calculateGrossCommission(commissionBase, finalRate)
     const finalCommissionRole = nullableValue(commissionRole) || seller.seller_role
     const finalSourceType = sourceType === 'override' ? 'override' : 'main'
-    const finalSaleType = saleType === 'direct' ? 'direct' : 'distributed'
+    const finalSaleType = saleType === 'direct_to_developer' ? 'direct_to_developer' : saleType === 'direct' ? 'direct' : 'distributed'
 
     const [duplicateRows] = await connectionOrDb.query(
       `

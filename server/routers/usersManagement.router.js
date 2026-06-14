@@ -4,6 +4,8 @@ import { requireRole } from '../middlewares/role.middleware.js'
 import {
   createUser,
   deactivateUser,
+  getCommissionRoleDefaults,
+  updateCommissionRoleDefaults,
   getUsers,
   linkUserToSeller,
   resetUserTemporaryPassword,
@@ -11,6 +13,9 @@ import {
 } from '../controllers/usersManagement.controller.js'
 
 const router = express.Router()
+
+router.get('/commission-role-defaults', auth, requireRole('super_admin', 'admin'), getCommissionRoleDefaults)
+router.patch('/commission-role-defaults', auth, requireRole('super_admin'), updateCommissionRoleDefaults)
 
 router.get('/users', auth, requireRole('super_admin', 'admin'), getUsers)
 router.post('/users', auth, requireRole('super_admin', 'admin'), createUser)

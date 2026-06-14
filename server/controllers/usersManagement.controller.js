@@ -63,6 +63,7 @@ const userFields = `
   seller.commission_pool_rate,
   seller.personal_commission_rate,
   seller.override_commission_rate,
+  seller.direct_to_developer_rate,
   seller.residual_commission_rate,
   seller.max_downline_rate,
   seller.rate_set_by,
@@ -128,6 +129,65 @@ const getSellerByUserId = async (userId, connectionOrDb = db) => {
   return rows[0] || null
 }
 
+
+const defaultCommissionRows = [
+  ['bnm_pool_rate', 'Broker Network Manager Pool Rate', 'broker_network_manager', 'pool', 10],
+  ['broker_pool_rate', 'Broker Pool Rate', 'broker', 'pool', 8],
+  ['manager_override_rate', 'Manager Override Rate', 'manager', 'override', 2],
+  ['agent_commission_rate', 'Agent Commission Rate', 'agent', 'commission', 5],
+  ['agent_direct_to_developer_rate', 'Agent Direct-to-Developer Rate', 'agent', 'direct_to_developer', 5],
+]
+
+const seedCommissionDefaults = async (connectionOrDb = db) => {
+  for (const [settingKey, label, role, rateType, defaultRate] of defaultCommissionRows) {
+    await connectionOrDb.query(
+      `
+      INSERT INTO commission_role_defaults (
+        setting_key,
+        label,
+        role,
+        rate_type,
+        default_rate
+      ) VALUES (?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE
+        label = VALUES(label),
+        role = VALUES(role),
+        rate_type = VALUES(rate_type)
+      `,
+      [settingKey, label, role, rateType, defaultRate]
+    )
+  }
+}
+
+const getCommissionDefaultsMap = async (connectionOrDb = db) => {
+  await seedCommissionDefaults(connectionOrDb)
+  const [rows] = await connectionOrDb.query(
+    `
+    SELECT setting_key, label, role, rate_type, default_rate
+    FROM commission_role_defaults
+    ORDER BY id ASC
+    `
+  )
+
+  return rows.reduce((map, row) => {
+    map[row.setting_key] = row
+    return map
+  }, {})
+}
+
+const getDefaultRateForSellerRole = async (role, key, connectionOrDb = db) => {
+  const defaults = await getCommissionDefaultsMap(connectionOrDb)
+
+  if (key && defaults[key]) return normalizeRate(defaults[key].default_rate)
+
+  if (role === 'broker_network_manager') return normalizeRate(defaults.bnm_pool_rate?.default_rate || 0)
+  if (role === 'broker') return normalizeRate(defaults.broker_pool_rate?.default_rate || 0)
+  if (role === 'manager') return normalizeRate(defaults.manager_override_rate?.default_rate || 0)
+  if (role === 'agent') return normalizeRate(defaults.agent_commission_rate?.default_rate || 0)
+
+  return null
+}
+
 const validateParentSeller = async ({ role, parentSellerId, connection }) => {
   const allowedParentRoles = sellerParentRoleMap[role] || []
 
@@ -180,16 +240,22 @@ const normalizeSellerProfile = ({ role, body, userFullName, userEmail, userStatu
   const commissionPoolRate = ['broker_network_manager', 'broker'].includes(role)
     ? normalizeRate(sellerProfile.commission_pool_rate)
     : null
-  const personalCommissionRate = normalizeRate(sellerProfile.personal_commission_rate)
+  const agentCommissionRate = role === 'agent'
+    ? normalizeRate(sellerProfile.agent_commission_rate ?? sellerProfile.personal_commission_rate)
+    : null
   const overrideCommissionRate = role === 'manager'
     ? normalizeRate(sellerProfile.override_commission_rate)
+    : null
+  const directToDeveloperRate = role === 'agent'
+    ? normalizeRate(sellerProfile.direct_to_developer_rate)
     : null
   const maxDownlineRate = normalizeRate(sellerProfile.max_downline_rate)
 
   const rateErrors = [
     validateRate(commissionPoolRate, 'Commission pool rate'),
-    validateRate(personalCommissionRate, 'Personal commission rate'),
-    validateRate(overrideCommissionRate, 'Override commission rate'),
+    validateRate(agentCommissionRate, 'Agent commission rate'),
+    validateRate(overrideCommissionRate, 'Manager override rate'),
+    validateRate(directToDeveloperRate, 'Direct-to-developer rate'),
     validateRate(maxDownlineRate, 'Max downline rate'),
   ].filter(Boolean)
 
@@ -207,10 +273,11 @@ const normalizeSellerProfile = ({ role, body, userFullName, userEmail, userStatu
       parent_seller_id: nullableValue(sellerProfile.parent_seller_id),
       status: finalStatus,
       accreditation_date: nullableValue(sellerProfile.accreditation_date),
-      commission_rate: personalCommissionRate,
+      commission_rate: agentCommissionRate,
       commission_pool_rate: commissionPoolRate,
-      personal_commission_rate: personalCommissionRate,
+      personal_commission_rate: agentCommissionRate,
       override_commission_rate: overrideCommissionRate,
+      direct_to_developer_rate: directToDeveloperRate,
       max_downline_rate: maxDownlineRate,
     },
   }
@@ -279,10 +346,11 @@ const createLinkedSeller = async ({ connection, userId, role, sellerProfile, act
       commission_pool_rate,
       personal_commission_rate,
       override_commission_rate,
+      direct_to_developer_rate,
       max_downline_rate,
       rate_set_by,
       rate_updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+    ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
     `,
     [
       userId,
@@ -297,6 +365,7 @@ const createLinkedSeller = async ({ connection, userId, role, sellerProfile, act
       sellerProfile.commission_pool_rate,
       sellerProfile.personal_commission_rate,
       sellerProfile.override_commission_rate,
+      sellerProfile.direct_to_developer_rate,
       sellerProfile.max_downline_rate,
       actingUserId,
     ]
@@ -328,6 +397,7 @@ const updateLinkedSeller = async ({ connection, userId, role, sellerProfile, act
       commission_pool_rate = ?,
       personal_commission_rate = ?,
       override_commission_rate = ?,
+      direct_to_developer_rate = ?,
       max_downline_rate = ?,
       rate_set_by = ?,
       rate_updated_at = NOW()
@@ -345,6 +415,7 @@ const updateLinkedSeller = async ({ connection, userId, role, sellerProfile, act
       sellerProfile.commission_pool_rate,
       sellerProfile.personal_commission_rate,
       sellerProfile.override_commission_rate,
+      sellerProfile.direct_to_developer_rate,
       sellerProfile.max_downline_rate,
       actingUserId,
       existingSeller.id,
@@ -352,6 +423,75 @@ const updateLinkedSeller = async ({ connection, userId, role, sellerProfile, act
   )
 
   return existingSeller.id
+}
+
+
+export const getCommissionRoleDefaults = async (req, res) => {
+  const defaultsMap = await getCommissionDefaultsMap()
+  const defaults = Object.values(defaultsMap)
+  res.status(200).json({
+    message: 'Commission role defaults fetched successfully',
+    defaults,
+    defaultsMap,
+    data: defaults,
+  })
+}
+
+export const updateCommissionRoleDefaults = async (req, res) => {
+  if (req.user.role !== 'super_admin') {
+    return res.status(403).json({ message: 'Only super admin can update default commission rates' })
+  }
+
+  const { defaults = {} } = req.body
+  await seedCommissionDefaults()
+
+  const allowedKeys = defaultCommissionRows.map(([key]) => key)
+  const connection = await db.getConnection()
+
+  try {
+    await connection.beginTransaction()
+
+    for (const key of allowedKeys) {
+      if (defaults[key] === undefined) continue
+      const rate = normalizeRate(defaults[key])
+      const error = validateRate(rate, key.replaceAll('_', ' '))
+      if (error) {
+        await connection.rollback()
+        return res.status(400).json({ message: error })
+      }
+
+      await connection.query(
+        `
+        UPDATE commission_role_defaults
+        SET default_rate = ?, updated_by = ?, updated_at = NOW()
+        WHERE setting_key = ?
+        `,
+        [rate, req.user.id, key]
+      )
+    }
+
+    await connection.commit()
+
+    await createAuditLog({
+      userId: req.user.id,
+      action: 'update',
+      module: 'Commission Defaults',
+      description: 'Updated role default commission rates',
+      ipAddress: getClientIp(req),
+    })
+
+    const defaultsMap = await getCommissionDefaultsMap()
+    res.status(200).json({
+      message: 'Default commission rates updated successfully',
+      defaults: Object.values(defaultsMap),
+      defaultsMap,
+    })
+  } catch (error) {
+    await connection.rollback()
+    throw error
+  } finally {
+    connection.release()
+  }
 }
 
 export const getUsers = async (req, res) => {
@@ -395,8 +535,8 @@ export const createUser = async (req, res) => {
     return res.status(400).json({ message: 'Invalid user status' })
   }
 
-  if (req.user.role !== 'super_admin' && finalRole === 'super_admin') {
-    return res.status(403).json({ message: 'Only super admin can create another super admin' })
+  if (req.user.role !== 'super_admin' && ['super_admin', 'admin'].includes(finalRole)) {
+    return res.status(403).json({ message: 'Only super admin can create admin or super admin accounts' })
   }
 
   const [existing] = await db.query(`SELECT id FROM users WHERE email = ? LIMIT 1`, [finalEmail])
@@ -427,6 +567,25 @@ export const createUser = async (req, res) => {
       }
 
       normalizedSeller = sellerProfileResult.sellerProfile
+
+      if (finalRole === 'broker_network_manager' && normalizedSeller.commission_pool_rate === null) {
+        normalizedSeller.commission_pool_rate = await getDefaultRateForSellerRole(finalRole, 'bnm_pool_rate', connection)
+      }
+      if (finalRole === 'broker' && normalizedSeller.commission_pool_rate === null) {
+        normalizedSeller.commission_pool_rate = await getDefaultRateForSellerRole(finalRole, 'broker_pool_rate', connection)
+      }
+      if (finalRole === 'manager' && normalizedSeller.override_commission_rate === null) {
+        normalizedSeller.override_commission_rate = await getDefaultRateForSellerRole(finalRole, 'manager_override_rate', connection)
+      }
+      if (finalRole === 'agent') {
+        if (normalizedSeller.personal_commission_rate === null) {
+          normalizedSeller.personal_commission_rate = await getDefaultRateForSellerRole(finalRole, 'agent_commission_rate', connection)
+          normalizedSeller.commission_rate = normalizedSeller.personal_commission_rate
+        }
+        if (normalizedSeller.direct_to_developer_rate === null) {
+          normalizedSeller.direct_to_developer_rate = await getDefaultRateForSellerRole(finalRole, 'agent_direct_to_developer_rate', connection)
+        }
+      }
 
       const parentValidation = await validateParentSeller({
         role: finalRole,
@@ -548,8 +707,8 @@ export const updateUser = async (req, res) => {
     return res.status(400).json({ message: 'Invalid user status' })
   }
 
-  if (req.user.role !== 'super_admin' && (existingUser.role === 'super_admin' || finalRole === 'super_admin')) {
-    return res.status(403).json({ message: 'Only super admin can edit super admin accounts' })
+  if (req.user.role !== 'super_admin' && (['super_admin', 'admin'].includes(existingUser.role) || ['super_admin', 'admin'].includes(finalRole))) {
+    return res.status(403).json({ message: 'Only super admin can edit admin or super admin accounts' })
   }
 
   if (!isMissing(finalEmail) && finalEmail !== existingUser.email) {
@@ -585,6 +744,25 @@ export const updateUser = async (req, res) => {
       }
 
       normalizedSeller = sellerProfileResult.sellerProfile
+
+      if (finalRole === 'broker_network_manager' && normalizedSeller.commission_pool_rate === null) {
+        normalizedSeller.commission_pool_rate = await getDefaultRateForSellerRole(finalRole, 'bnm_pool_rate', connection)
+      }
+      if (finalRole === 'broker' && normalizedSeller.commission_pool_rate === null) {
+        normalizedSeller.commission_pool_rate = await getDefaultRateForSellerRole(finalRole, 'broker_pool_rate', connection)
+      }
+      if (finalRole === 'manager' && normalizedSeller.override_commission_rate === null) {
+        normalizedSeller.override_commission_rate = await getDefaultRateForSellerRole(finalRole, 'manager_override_rate', connection)
+      }
+      if (finalRole === 'agent') {
+        if (normalizedSeller.personal_commission_rate === null) {
+          normalizedSeller.personal_commission_rate = await getDefaultRateForSellerRole(finalRole, 'agent_commission_rate', connection)
+          normalizedSeller.commission_rate = normalizedSeller.personal_commission_rate
+        }
+        if (normalizedSeller.direct_to_developer_rate === null) {
+          normalizedSeller.direct_to_developer_rate = await getDefaultRateForSellerRole(finalRole, 'agent_direct_to_developer_rate', connection)
+        }
+      }
 
       const parentValidation = await validateParentSeller({
         role: finalRole,
@@ -677,8 +855,8 @@ export const deactivateUser = async (req, res) => {
   const existingUser = await getUserById(id)
   if (!existingUser) return res.status(404).json({ message: 'User not found' })
 
-  if (req.user.role !== 'super_admin' && existingUser.role === 'super_admin') {
-    return res.status(403).json({ message: 'Only super admin can deactivate super admin accounts' })
+  if (req.user.role !== 'super_admin' && ['super_admin', 'admin'].includes(existingUser.role)) {
+    return res.status(403).json({ message: 'Only super admin can deactivate admin or super admin accounts' })
   }
 
   const connection = await db.getConnection()
@@ -715,8 +893,8 @@ export const resetUserTemporaryPassword = async (req, res) => {
   const existingUser = await getUserById(id)
   if (!existingUser) return res.status(404).json({ message: 'User not found' })
 
-  if (req.user.role !== 'super_admin' && existingUser.role === 'super_admin') {
-    return res.status(403).json({ message: 'Only super admin can reset super admin accounts' })
+  if (req.user.role !== 'super_admin' && ['super_admin', 'admin'].includes(existingUser.role)) {
+    return res.status(403).json({ message: 'Only super admin can reset admin or super admin accounts' })
   }
 
   const temporaryPassword = generateTemporaryPassword()

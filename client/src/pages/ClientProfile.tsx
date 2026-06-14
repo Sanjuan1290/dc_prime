@@ -210,7 +210,7 @@ type ClientUnit = {
   seller_name: string | null
   seller_role: string | null
   seller_commission_rate?: number | string | null
-  sale_type?: "distributed" | "direct" | string | null
+  sale_type?: "distributed" | "direct_to_developer" | string | null
   reports_under: string | null
   document_total_count?: number | string
   document_checklist_count?: number | string
@@ -330,7 +330,7 @@ type ReserveListingData = {
   payment_terms_months: 36 | 60 | ""
   interest_rate: string
   monthly_amortization: string
-  sale_type: "distributed" | "direct"
+  sale_type: "distributed" | "direct_to_developer"
   override_seller_id: number | ""
   override_rate: string
   override_notes: string
@@ -345,7 +345,7 @@ type EditUnitData = {
   status: string
   mode_of_payment: "cash" | "installment"
   regenerate_commission: boolean
-  sale_type: "distributed" | "direct"
+  sale_type: "distributed" | "direct_to_developer"
   override_seller_id: string
   override_rate: string
   override_notes: string
@@ -1610,7 +1610,7 @@ const ClientProfile = () => {
       mode_of_payment:
         unit.mode_of_payment === "cash" ? "cash" : "installment",
       regenerate_commission: false,
-      sale_type: unit.sale_type === "direct" ? "direct" : "distributed",
+      sale_type: unit.sale_type === "direct_to_developer" || unit.sale_type === "direct" ? "direct_to_developer" : "distributed",
       override_seller_id: "",
       override_rate: "",
       override_notes: "",
@@ -2776,10 +2776,10 @@ const ClientProfile = () => {
               </Select>
 
               <Select
-                label="Sale Type"
+                label="Sale Channel"
                 value={reserveData.sale_type}
                 onChange={(e) => {
-                  const saleType = e.target.value as "distributed" | "direct"
+                  const saleType = e.target.value as "distributed" | "direct_to_developer"
 
                   setReserveData({
                     ...reserveData,
@@ -2788,7 +2788,7 @@ const ClientProfile = () => {
                 }}
               >
                 <option value="distributed">Distributed</option>
-                <option value="direct">Direct</option>
+                <option value="direct_to_developer">Direct to Developer</option>
               </Select>
             </div>
 
@@ -2840,7 +2840,7 @@ const ClientProfile = () => {
                   }}
                 />
 
-                {reserveData.mode_of_payment === "cash" ? (
+            {reserveData.mode_of_payment === "cash" ? (
                   <Input
                     label="Deferred Cash Amount"
                     type="number"
@@ -3008,6 +3008,19 @@ const ClientProfile = () => {
               </div>
             ) : null}
 
+
+
+            {reserveData.sale_type === "direct_to_developer" ? (
+              <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-4">
+                <h3 className="text-sm font-bold text-slate-900">
+                  Direct to Developer Commission
+                </h3>
+                <p className="mt-1 text-sm text-slate-600">
+                  Only the selected agent/seller receives commission. Manager, broker, and BNM override releases will not be generated for this sale.
+                </p>
+              </div>
+            ) : null}
+
             {reserveData.mode_of_payment === "cash" ? (
               <div className="rounded-xl border border-amber-100 bg-amber-50 p-4">
                 <h3 className="text-sm font-bold text-slate-900">
@@ -3146,10 +3159,10 @@ const ClientProfile = () => {
             </Select>
 
             <Select
-              label="Sale Type"
+              label="Sale Channel"
               value={editUnitData.sale_type}
               onChange={(e) => {
-                const saleType = e.target.value as "distributed" | "direct"
+                const saleType = e.target.value as "distributed" | "direct_to_developer"
 
                 setEditUnitData({
                   ...editUnitData,
@@ -3158,7 +3171,7 @@ const ClientProfile = () => {
               }}
             >
               <option value="distributed">Distributed</option>
-              <option value="direct">Direct</option>
+              <option value="direct_to_developer">Direct to Developer</option>
             </Select>
 
             <label className="flex items-center gap-2 rounded-xl border border-slate-200 p-3 text-sm text-slate-700">
@@ -3185,6 +3198,12 @@ const ClientProfile = () => {
               <p className="mt-1 text-xs text-slate-600">
                 Regenerating commission will use the selected seller hierarchy and saved pool/split rates. Manual override seller/rate is no longer used.
               </p>
+            </div>
+          ) : null}
+
+          {editUnitData.sale_type === "direct_to_developer" ? (
+            <div className="mt-4 rounded-xl border border-emerald-100 bg-emerald-50 p-4 text-sm text-slate-600">
+              Direct-to-developer sales generate only the selected seller commission. No hierarchy override milestones will be created.
             </div>
           ) : null}
 

@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { FiPlus, FiSearch, FiUserPlus } from "react-icons/fi"
+import { FiPlus, FiSearch, FiSettings, FiUserPlus } from "react-icons/fi"
 import Alert from "../components/ui/Alert"
 import Button from "../components/ui/Button"
 import EmptyState from "../components/ui/EmptyState"
@@ -13,6 +13,7 @@ import StatusBadge from "../components/ui/StatusBadge"
 import TableContainer from "../components/ui/TableContainer"
 import { API_URL, getErrorMessage } from "../utils/api"
 import { formatDate, formatNumber, formatText } from "../utils/formatters"
+import useCurrentUser from "../utils/useCurrentUser"
 
 type UserRole = "super_admin" | "admin" | "broker_network_manager" | "broker" | "manager" | "agent"
 
@@ -26,7 +27,6 @@ type User = {
   created_at: string
   seller_id: number | null
   seller_full_name: string | null
-  seller_email: string | null
   seller_contact_no: string | null
   seller_role: string | null
   parent_seller_id: number | null
@@ -38,17 +38,15 @@ type User = {
   commission_pool_rate: number | string | null
   personal_commission_rate: number | string | null
   override_commission_rate: number | string | null
+  direct_to_developer_rate?: number | string | null
   max_downline_rate: number | string | null
   must_change_password?: boolean | number
   temp_password_sent_at?: string | null
-  password_changed_at?: string | null
 }
 
 type AccreditedSeller = {
   id: number
   full_name: string
-  email: string | null
-  contact_no: string | null
   seller_role: string
   parent_seller_id: number | null
   parent_seller_name: string | null
@@ -57,18 +55,40 @@ type AccreditedSeller = {
   commission_pool_rate: number | string | null
   personal_commission_rate: number | string | null
   override_commission_rate: number | string | null
+  direct_to_developer_rate?: number | string | null
+}
+
+type CurrentUserResponse = {
+  user?: {
+    role?: string
+  }
 }
 
 type UsersResponse = { users?: User[]; data?: User[] }
 type SellersResponse = { accreditedSellers?: AccreditedSeller[]; sellers?: AccreditedSeller[]; data?: AccreditedSeller[] }
+
+type CommissionDefault = {
+  setting_key: string
+  label: string
+  role: string
+  rate_type: string
+  default_rate: number | string
+}
+
+type DefaultsResponse = {
+  defaults?: CommissionDefault[]
+  data?: CommissionDefault[]
+  defaultsMap?: Record<string, CommissionDefault>
+}
 
 type SellerProfileForm = {
   contact_no: string
   accreditation_date: string
   parent_seller_id: string
   commission_pool_rate: string
-  personal_commission_rate: string
+  agent_commission_rate: string
   override_commission_rate: string
+  direct_to_developer_rate: string
   max_downline_rate: string
 }
 
@@ -80,17 +100,35 @@ type UserForm = {
   seller_profile: SellerProfileForm
 }
 
-const roles: UserRole[] = ["super_admin", "admin", "broker_network_manager", "broker", "manager", "agent"]
+type DefaultsForm = {
+  bnm_pool_rate: string
+  broker_pool_rate: string
+  manager_override_rate: string
+  agent_commission_rate: string
+  agent_direct_to_developer_rate: string
+}
+
+const allRoles: UserRole[] = ["super_admin", "admin", "broker_network_manager", "broker", "manager", "agent"]
+const adminCreatableRoles: UserRole[] = ["broker_network_manager", "broker", "manager", "agent"]
 const sellerRoles: UserRole[] = ["broker_network_manager", "broker", "manager", "agent"]
 const statuses = ["active", "inactive"]
+
+const defaultDefaultsForm: DefaultsForm = {
+  bnm_pool_rate: "10",
+  broker_pool_rate: "8",
+  manager_override_rate: "2",
+  agent_commission_rate: "5",
+  agent_direct_to_developer_rate: "5",
+}
 
 const emptySellerProfile: SellerProfileForm = {
   contact_no: "",
   accreditation_date: "",
   parent_seller_id: "",
   commission_pool_rate: "",
-  personal_commission_rate: "",
+  agent_commission_rate: "",
   override_commission_rate: "",
+  direct_to_developer_rate: "",
   max_downline_rate: "",
 }
 
@@ -103,6 +141,7 @@ const emptyForm: UserForm = {
 }
 
 const isSellerRole = (role: string) => sellerRoles.includes(role as UserRole)
+const toNumberOrNull = (value: string) => (value === "" ? null : Number(value))
 
 const fetchUsers = async () => {
   const res = await fetch(`${API_URL}/users`, { credentials: "include" })
@@ -118,7 +157,35 @@ const fetchSellers = async () => {
   return data.accreditedSellers || data.sellers || data.data || []
 }
 
-const toNumberOrNull = (value: string) => (value === "" ? null : Number(value))
+const fetchDefaults = async () => {
+  const res = await fetch(`${API_URL}/commission-role-defaults`, { credentials: "include" })
+  if (!res.ok) throw new Error(await getErrorMessage(res))
+  const data = (await res.json()) as DefaultsResponse
+  return data.defaults || data.data || []
+}
+
+const getDefaultsFormFromRows = (rows: CommissionDefault[]): DefaultsForm => {
+  const next = { ...defaultDefaultsForm }
+  rows.forEach((row) => {
+    if (row.setting_key in next) {
+      next[row.setting_key as keyof DefaultsForm] = String(row.default_rate ?? "")
+    }
+  })
+  return next
+}
+
+const getDefaultForRole = (role: UserRole, defaults: DefaultsForm): Partial<SellerProfileForm> => {
+  if (role === "broker_network_manager") return { commission_pool_rate: defaults.bnm_pool_rate }
+  if (role === "broker") return { commission_pool_rate: defaults.broker_pool_rate }
+  if (role === "manager") return { override_commission_rate: defaults.manager_override_rate }
+  if (role === "agent") {
+    return {
+      agent_commission_rate: defaults.agent_commission_rate,
+      direct_to_developer_rate: defaults.agent_direct_to_developer_rate,
+    }
+  }
+  return {}
+}
 
 const getPayload = (form: UserForm) => {
   const payload: Record<string, unknown> = {
@@ -128,7 +195,6 @@ const getPayload = (form: UserForm) => {
     status: form.status,
   }
 
-
   if (isSellerRole(form.role)) {
     payload.seller_profile = {
       full_name: form.full_name.trim(),
@@ -137,8 +203,10 @@ const getPayload = (form: UserForm) => {
       accreditation_date: form.seller_profile.accreditation_date || null,
       parent_seller_id: form.seller_profile.parent_seller_id || null,
       commission_pool_rate: toNumberOrNull(form.seller_profile.commission_pool_rate),
-      personal_commission_rate: toNumberOrNull(form.seller_profile.personal_commission_rate),
+      agent_commission_rate: toNumberOrNull(form.seller_profile.agent_commission_rate),
+      personal_commission_rate: toNumberOrNull(form.seller_profile.agent_commission_rate),
       override_commission_rate: toNumberOrNull(form.seller_profile.override_commission_rate),
+      direct_to_developer_rate: toNumberOrNull(form.seller_profile.direct_to_developer_rate),
       max_downline_rate: toNumberOrNull(form.seller_profile.max_downline_rate),
       status: form.status,
     }
@@ -158,6 +226,16 @@ const saveUser = async ({ id, form }: { id?: number; form: UserForm }) => {
   return res.json()
 }
 
+const saveDefaults = async (defaults: DefaultsForm) => {
+  const res = await fetch(`${API_URL}/commission-role-defaults`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ defaults }),
+  })
+  if (!res.ok) throw new Error(await getErrorMessage(res))
+  return res.json()
+}
 
 const resetTemporaryPassword = async (id: number) => {
   const res = await fetch(`${API_URL}/users/${id}/reset-temporary-password`, {
@@ -196,10 +274,10 @@ const getParentLabel = (role: string) => {
 }
 
 const getSellerSetupNote = (role: string) => {
-  if (role === "broker_network_manager") return "BNM has no parent. Admin sets the BNM pool."
-  if (role === "broker") return "Select the BNM if this broker belongs to a network. Leave blank only for company/direct broker."
-  if (role === "manager") return "Select only the broker. The BNM is detected from that broker automatically."
-  if (role === "agent") return "Select only the manager. The broker and BNM are detected from that manager automatically."
+  if (role === "broker_network_manager") return "BNM has no parent. Only the BNM pool rate is needed."
+  if (role === "broker") return "Select BNM if this broker belongs to a network. Broker pool cannot exceed the BNM pool."
+  if (role === "manager") return "Select only the broker. Manager override cannot exceed the broker pool."
+  if (role === "agent") return "Select only the manager. Agent commission plus manager override cannot exceed the broker pool. Direct-to-developer creates no override release."
   return ""
 }
 
@@ -208,13 +286,14 @@ const sellerProfileFromUser = (user: User): SellerProfileForm => ({
   accreditation_date: user.accreditation_date ? user.accreditation_date.slice(0, 10) : "",
   parent_seller_id: user.parent_seller_id ? String(user.parent_seller_id) : "",
   commission_pool_rate: user.commission_pool_rate === null || user.commission_pool_rate === undefined ? "" : String(user.commission_pool_rate),
-  personal_commission_rate:
+  agent_commission_rate:
     user.personal_commission_rate === null || user.personal_commission_rate === undefined
       ? user.commission_rate === null || user.commission_rate === undefined
         ? ""
         : String(user.commission_rate)
       : String(user.personal_commission_rate),
   override_commission_rate: user.override_commission_rate === null || user.override_commission_rate === undefined ? "" : String(user.override_commission_rate),
+  direct_to_developer_rate: user.direct_to_developer_rate === null || user.direct_to_developer_rate === undefined ? "" : String(user.direct_to_developer_rate),
   max_downline_rate: user.max_downline_rate === null || user.max_downline_rate === undefined ? "" : String(user.max_downline_rate),
 })
 
@@ -222,9 +301,16 @@ const Users = () => {
   const queryClient = useQueryClient()
   const [search, setSearch] = useState("")
   const [isOpen, setIsOpen] = useState(false)
+  const [isDefaultsOpen, setIsDefaultsOpen] = useState(false)
   const [editUser, setEditUser] = useState<User | null>(null)
   const [form, setForm] = useState<UserForm>(emptyForm)
+  const [defaultsForm, setDefaultsForm] = useState<DefaultsForm>(defaultDefaultsForm)
   const [message, setMessage] = useState("")
+
+  const { data: currentUserData } = useCurrentUser()
+  const currentUser = (currentUserData as CurrentUserResponse | null)?.user
+  const canEditDefaults = currentUser?.role === "super_admin"
+  const availableRoles = canEditDefaults ? allRoles : adminCreatableRoles
 
   const { data: users = [], isLoading, error } = useQuery<User[]>({
     queryKey: ["users"],
@@ -235,6 +321,15 @@ const Users = () => {
     queryKey: ["accredited-sellers-for-user-management"],
     queryFn: fetchSellers,
   })
+
+  const { data: defaults = [] } = useQuery<CommissionDefault[]>({
+    queryKey: ["commission-role-defaults"],
+    queryFn: fetchDefaults,
+  })
+
+  useEffect(() => {
+    setDefaultsForm(getDefaultsFormFromRows(defaults))
+  }, [defaults])
 
   const filteredUsers = useMemo(() => {
     const term = search.toLowerCase().trim()
@@ -262,17 +357,16 @@ const Users = () => {
       queryClient.invalidateQueries({ queryKey: ["accredited-sellers"] })
       setIsOpen(false)
       setEditUser(null)
-      setForm(emptyForm)
-      setMessage(editUser ? "User saved successfully" : "User saved successfully. Temporary password was emailed if SMTP is configured.")
+      setMessage("User saved successfully. Temporary password was emailed for new users.")
     },
   })
 
-  const deactivateMutation = useMutation({
-    mutationFn: deactivateUser,
+  const defaultsMutation = useMutation({
+    mutationFn: saveDefaults,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["users"] })
-      queryClient.invalidateQueries({ queryKey: ["accredited-sellers"] })
-      setMessage("User deactivated successfully")
+      queryClient.invalidateQueries({ queryKey: ["commission-role-defaults"] })
+      setIsDefaultsOpen(false)
+      setMessage("Default commission rates updated successfully.")
     },
   })
 
@@ -280,17 +374,57 @@ const Users = () => {
     mutationFn: resetTemporaryPassword,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["users"] })
-      setMessage("Temporary password was reset and emailed if SMTP is configured")
+      setMessage("Temporary password reset and emailed.")
     },
   })
 
-  const openAdd = () => {
+  const deactivateMutation = useMutation({
+    mutationFn: deactivateUser,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["users"] })
+      setMessage("User deactivated successfully.")
+    },
+  })
+
+  const updateForm = (values: Partial<UserForm>) => setForm((prev) => ({ ...prev, ...values }))
+  const updateSellerProfile = (values: Partial<SellerProfileForm>) =>
+    setForm((prev) => ({
+      ...prev,
+      seller_profile: { ...prev.seller_profile, ...values },
+    }))
+
+  const handleRoleChange = (role: UserRole) => {
+    const defaultsForRole = getDefaultForRole(role, defaultsForm)
+    setForm((prev) => ({
+      ...prev,
+      role,
+      seller_profile: {
+        ...emptySellerProfile,
+        ...defaultsForRole,
+      },
+    }))
+  }
+
+  const openCreate = () => {
+    const role = canEditDefaults ? "admin" : "agent"
     setEditUser(null)
-    setForm(emptyForm)
+    setForm({
+      ...emptyForm,
+      role,
+      seller_profile: {
+        ...emptySellerProfile,
+        ...getDefaultForRole(role, defaultsForm),
+      },
+    })
     setIsOpen(true)
   }
 
   const openEdit = (user: User) => {
+    if (!canEditDefaults && ["super_admin", "admin"].includes(String(user.role))) {
+      setMessage("Only super admin can edit admin or super admin accounts.")
+      return
+    }
+
     setEditUser(user)
     setForm({
       full_name: user.full_name,
@@ -302,30 +436,14 @@ const Users = () => {
     setIsOpen(true)
   }
 
-  const updateForm = (updates: Partial<UserForm>) => {
-    setForm((current) => ({ ...current, ...updates }))
-  }
-
-  const updateSellerProfile = (updates: Partial<SellerProfileForm>) => {
-    setForm((current) => ({
-      ...current,
-      seller_profile: {
-        ...current.seller_profile,
-        ...updates,
-      },
-    }))
-  }
-
-  const handleRoleChange = (role: UserRole) => {
-    updateForm({
-      role,
-      seller_profile: {
-        ...form.seller_profile,
-        parent_seller_id: "",
-        commission_pool_rate: ["broker_network_manager", "broker"].includes(role) ? form.seller_profile.commission_pool_rate : "",
-        override_commission_rate: role === "manager" ? form.seller_profile.override_commission_rate : "",
-      },
-    })
+  const rateSummary = (user: User) => {
+    if (user.role === "broker_network_manager") return `BNM Pool: ${formatRate(user.commission_pool_rate)}`
+    if (user.role === "broker") return `Broker Pool: ${formatRate(user.commission_pool_rate)}`
+    if (user.role === "manager") return `Manager Override: ${formatRate(user.override_commission_rate)}`
+    if (user.role === "agent") {
+      return `Agent: ${formatRate(user.personal_commission_rate || user.commission_rate)} · Direct Dev: ${formatRate(user.direct_to_developer_rate)}`
+    }
+    return "-"
   }
 
   return (
@@ -333,8 +451,19 @@ const Users = () => {
       <PageHeader
         icon={<FiUserPlus />}
         title="User Management"
-        subtitle="Create system accounts. Seller roles automatically create linked accredited seller profiles."
-        actions={<Button icon={<FiPlus />} onClick={openAdd} variant="primary">Create User</Button>}
+        subtitle="Create accounts, link seller profiles, and set hierarchy rates."
+        actions={
+          <div className="flex flex-wrap gap-2">
+            {canEditDefaults ? (
+              <Button icon={<FiSettings />} onClick={() => setIsDefaultsOpen(true)} variant="secondary">
+                Commission Defaults
+              </Button>
+            ) : null}
+            <Button icon={<FiPlus />} onClick={openCreate} variant="primary">
+              Create User
+            </Button>
+          </div>
+        }
       />
 
       {message ? <Alert variant="success" title={message} /> : null}
@@ -342,6 +471,7 @@ const Users = () => {
       {saveMutation.error ? <Alert variant="error" title={saveMutation.error instanceof Error ? saveMutation.error.message : "Failed to save user"} /> : null}
       {deactivateMutation.error ? <Alert variant="error" title={deactivateMutation.error instanceof Error ? deactivateMutation.error.message : "Failed to deactivate user"} /> : null}
       {resetPasswordMutation.error ? <Alert variant="error" title={resetPasswordMutation.error instanceof Error ? resetPasswordMutation.error.message : "Failed to reset password"} /> : null}
+      {defaultsMutation.error ? <Alert variant="error" title={defaultsMutation.error instanceof Error ? defaultsMutation.error.message : "Failed to save defaults"} /> : null}
 
       <div className="mb-4 max-w-md">
         <Input icon={<FiSearch />} placeholder="Search users..." value={search} onChange={(e) => setSearch(e.target.value)} />
@@ -359,7 +489,7 @@ const Users = () => {
                 <th className="px-4 py-3 text-left">Role</th>
                 <th className="px-4 py-3 text-left">Seller Profile</th>
                 <th className="px-4 py-3 text-left">Reports Under</th>
-                <th className="px-4 py-3 text-left">Rates</th>
+                <th className="px-4 py-3 text-left">Commission Setup</th>
                 <th className="px-4 py-3 text-left">Status</th>
                 <th className="px-4 py-3 text-left">Last Login</th>
                 <th className="px-4 py-3 text-left">Action</th>
@@ -391,12 +521,9 @@ const Users = () => {
                       </>
                     ) : isSellerRole(user.role) ? "Company / None" : "-"}
                   </td>
-                  <td className="px-4 py-3 text-slate-600">
-                    <p>Pool: {formatRate(user.commission_pool_rate)}</p>
-                    <p>Personal: {formatRate(user.personal_commission_rate || user.commission_rate)}</p>
-                    <p>Override: {formatRate(user.override_commission_rate)}</p>
-                  </td>
-                  <td className="px-4 py-3"><StatusBadge status={user.status} />
+                  <td className="px-4 py-3 text-slate-600">{rateSummary(user)}</td>
+                  <td className="px-4 py-3">
+                    <StatusBadge status={user.status} />
                     {user.must_change_password ? <p className="mt-1 text-xs font-semibold text-amber-600">Password change required</p> : null}
                     {user.temp_password_sent_at ? <p className="mt-1 text-xs text-slate-400">Temp sent {formatDate(user.temp_password_sent_at)}</p> : null}
                   </td>
@@ -437,7 +564,7 @@ const Users = () => {
             <Input label="Full Name" value={form.full_name} onChange={(e) => updateForm({ full_name: e.target.value })} required />
             <Input label="Email" type="email" value={form.email} onChange={(e) => updateForm({ email: e.target.value })} required />
             <Select label="Role" value={form.role} onChange={(e) => handleRoleChange(e.target.value as UserRole)}>
-              {roles.map((role) => <option value={role} key={role}>{formatText(role)}</option>)}
+              {availableRoles.map((role) => <option value={role} key={role}>{formatText(role)}</option>)}
             </Select>
             <Select label="Status" value={form.status} onChange={(e) => updateForm({ status: e.target.value })}>
               {statuses.map((status) => <option value={status} key={status}>{formatText(status)}</option>)}
@@ -466,39 +593,24 @@ const Users = () => {
                   </Select>
                 ) : null}
 
-                {["broker_network_manager", "broker"].includes(form.role) ? (
-                  <Input
-                    label={form.role === "broker_network_manager" ? "BNM Pool Rate (%)" : "Broker Pool Rate (%)"}
-                    type="number"
-                    min={0}
-                    max={100}
-                    step="0.01"
-                    value={form.seller_profile.commission_pool_rate}
-                    onChange={(e) => updateSellerProfile({ commission_pool_rate: e.target.value })}
-                  />
+                {form.role === "broker_network_manager" ? (
+                  <Input label="BNM Pool Rate (%)" type="number" min={0} max={100} step="0.01" value={form.seller_profile.commission_pool_rate} onChange={(e) => updateSellerProfile({ commission_pool_rate: e.target.value })} />
+                ) : null}
+
+                {form.role === "broker" ? (
+                  <Input label="Broker Pool Rate (%)" type="number" min={0} max={100} step="0.01" value={form.seller_profile.commission_pool_rate} onChange={(e) => updateSellerProfile({ commission_pool_rate: e.target.value })} />
                 ) : null}
 
                 {form.role === "manager" ? (
-                  <Input
-                    label="Manager Override Rate (%)"
-                    type="number"
-                    min={0}
-                    max={100}
-                    step="0.01"
-                    value={form.seller_profile.override_commission_rate}
-                    onChange={(e) => updateSellerProfile({ override_commission_rate: e.target.value })}
-                  />
+                  <Input label="Manager Override Rate (%)" type="number" min={0} max={100} step="0.01" value={form.seller_profile.override_commission_rate} onChange={(e) => updateSellerProfile({ override_commission_rate: e.target.value })} />
                 ) : null}
 
-                <Input
-                  label="Personal Commission Rate (%)"
-                  type="number"
-                  min={0}
-                  max={100}
-                  step="0.01"
-                  value={form.seller_profile.personal_commission_rate}
-                  onChange={(e) => updateSellerProfile({ personal_commission_rate: e.target.value })}
-                />
+                {form.role === "agent" ? (
+                  <>
+                    <Input label="Agent Commission Rate (%)" type="number" min={0} max={100} step="0.01" value={form.seller_profile.agent_commission_rate} onChange={(e) => updateSellerProfile({ agent_commission_rate: e.target.value })} />
+                    <Input label="Direct-to-Developer Rate (%)" type="number" min={0} max={100} step="0.01" value={form.seller_profile.direct_to_developer_rate} onChange={(e) => updateSellerProfile({ direct_to_developer_rate: e.target.value })} />
+                  </>
+                ) : null}
               </div>
 
               {selectedParent ? (
@@ -509,12 +621,37 @@ const Users = () => {
                     {selectedParent.parent_seller_name ? ` → ${selectedParent.parent_seller_name}` : ""}
                   </p>
                   <p className="mt-1 text-xs text-slate-500">
-                    Existing rates: pool {formatRate(selectedParent.commission_pool_rate)}, personal {formatRate(selectedParent.personal_commission_rate)}, override {formatRate(selectedParent.override_commission_rate)}
+                    Parent rates: pool {formatRate(selectedParent.commission_pool_rate)}, agent {formatRate(selectedParent.personal_commission_rate)}, override {formatRate(selectedParent.override_commission_rate)}
                   </p>
                 </div>
               ) : null}
             </div>
           ) : null}
+        </Modal>
+      ) : null}
+
+      {isDefaultsOpen ? (
+        <Modal
+          title="Default Commission Rates"
+          onClose={() => setIsDefaultsOpen(false)}
+          size="lg"
+          footer={
+            <div className="flex justify-end gap-2">
+              <Button onClick={() => setIsDefaultsOpen(false)}>Cancel</Button>
+              <Button disabled={defaultsMutation.isPending} onClick={() => defaultsMutation.mutate(defaultsForm)} variant="primary">
+                {defaultsMutation.isPending ? "Saving..." : "Save Defaults"}
+              </Button>
+            </div>
+          }
+        >
+          <Alert variant="warning" title="Only super admin can update default rates. These defaults auto-fill new seller accounts, but each seller can still have their own assigned rate." />
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <Input label="Default BNM Pool Rate (%)" type="number" min={0} max={100} step="0.01" value={defaultsForm.bnm_pool_rate} onChange={(e) => setDefaultsForm({ ...defaultsForm, bnm_pool_rate: e.target.value })} />
+            <Input label="Default Broker Pool Rate (%)" type="number" min={0} max={100} step="0.01" value={defaultsForm.broker_pool_rate} onChange={(e) => setDefaultsForm({ ...defaultsForm, broker_pool_rate: e.target.value })} />
+            <Input label="Default Manager Override Rate (%)" type="number" min={0} max={100} step="0.01" value={defaultsForm.manager_override_rate} onChange={(e) => setDefaultsForm({ ...defaultsForm, manager_override_rate: e.target.value })} />
+            <Input label="Default Agent Commission Rate (%)" type="number" min={0} max={100} step="0.01" value={defaultsForm.agent_commission_rate} onChange={(e) => setDefaultsForm({ ...defaultsForm, agent_commission_rate: e.target.value })} />
+            <Input label="Default Direct-to-Developer Agent Rate (%)" type="number" min={0} max={100} step="0.01" value={defaultsForm.agent_direct_to_developer_rate} onChange={(e) => setDefaultsForm({ ...defaultsForm, agent_direct_to_developer_rate: e.target.value })} />
+          </div>
         </Modal>
       ) : null}
     </div>

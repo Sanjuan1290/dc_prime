@@ -19,35 +19,36 @@ import {
   getApprovedCashAdvancesBySeller,
   markClientUnitRetentionEligible,
 } from '../controllers/commissions.controller.js'
-import { auth } from '../middlewares/auth.middleware.js'
+import { auth, adminOnly } from '../middlewares/auth.middleware.js'
 
 const router = express.Router()
 
-router.get('/commissions', auth, getCommissions)
-router.get('/commissions-summary', auth, getCommissionSummary)
+router.use(auth, adminOnly)
 
-router.get('/commissions/:id/releases', auth, getCommissionReleases)
-router.post('/commissions/:id/releases/generate', auth, generateReleaseMilestones)
-router.post('/commissions/:id/missing-override', auth, addMissingOverrideCommission)
+router.get('/commissions', getCommissions)
+router.get('/commissions-summary', getCommissionSummary)
 
-router.patch('/commission-releases/:id/mark-released', auth, markReleaseStage)
-router.patch('/commission-releases/:id/deduct-advance', auth, deductCashAdvance)
-router.patch('/commission-releases/:id/cancel', auth, cancelRelease)
-router.patch('/commission-releases/:id/hold', auth, holdRelease)
-router.patch('/commission-releases/:id/unhold', auth, unholdRelease)
-router.patch('/commission-releases/:id/restore-cancelled', auth, restoreCancelledRelease)
+router.get('/commissions/:id/releases', getCommissionReleases)
+router.post('/commissions/:id/releases/generate', generateReleaseMilestones)
+router.post('/commissions/:id/missing-override', addMissingOverrideCommission)
 
-router.get('/sellers/:sellerId/approved-cash-advances', auth, getApprovedCashAdvancesBySeller)
+router.patch('/commission-releases/:id/mark-released', markReleaseStage)
+router.patch('/commission-releases/:id/deduct-advance', deductCashAdvance)
+router.patch('/commission-releases/:id/cancel', cancelRelease)
+router.patch('/commission-releases/:id/hold', holdRelease)
+router.patch('/commission-releases/:id/unhold', unholdRelease)
+router.patch('/commission-releases/:id/restore-cancelled', restoreCancelledRelease)
 
-router.get('/commissions/:id', auth, getCommission)
-router.post('/commissions', auth, createCommission)
-router.patch('/commissions/:id', auth, updateCommission)
+router.get('/sellers/:sellerId/approved-cash-advances', getApprovedCashAdvancesBySeller)
 
-router.patch('/client-units/:clientUnitId/commission-retention/eligible', auth, markClientUnitRetentionEligible)
-router.get('/client-units/:clientUnitId/commissions', auth, getCommissionsByClientUnit)
+router.get('/commissions/:id', getCommission)
+router.post('/commissions', createCommission)
+router.patch('/commissions/:id', updateCommission)
+
+router.patch('/client-units/:clientUnitId/commission-retention/eligible', markClientUnitRetentionEligible)
+router.get('/client-units/:clientUnitId/commissions', getCommissionsByClientUnit)
 router.post(
   '/client-units/:clientUnitId/commissions/generate-hierarchy',
-  auth,
   createHierarchyCommissions
 )
 

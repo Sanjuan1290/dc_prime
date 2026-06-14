@@ -15,7 +15,7 @@ const allowedClientUnitStatuses = [
   'closed',
 ]
 
-const allowedSaleTypes = ['distributed', 'direct']
+const allowedSaleTypes = ['distributed', 'direct', 'direct_to_developer']
 const allowedModeOfPayments = ['cash', 'installment']
 const allowedPaymentTermsMonths = [36, 60]
 const defaultContractProcessingStatus = 'pending_profile'
@@ -147,6 +147,7 @@ const validateClientUnitStatus = (status) => {
 
 const validateSaleType = (saleType) => {
   if (isMissing(saleType)) return 'distributed'
+  if (saleType === 'direct') return 'direct_to_developer'
   if (!allowedSaleTypes.includes(saleType)) return 'distributed'
   return saleType
 }
@@ -622,7 +623,7 @@ const createReservationCommissions = async ({
     return []
   }
 
-  if (saleType === 'direct') {
+  if (saleType === 'direct' || saleType === 'direct_to_developer') {
     const mainCommission = await createAutoCommissionForClientUnit({
       connection,
       clientUnitId,
@@ -631,11 +632,11 @@ const createReservationCommissions = async ({
       commissionRole: null,
       sourceType: 'main',
       parentCommissionId: null,
-      saleType,
+      saleType: saleType === 'direct' ? 'direct_to_developer' : saleType,
       cashKaliwaanAmount,
       cashKaliwaanDate,
       cashKaliwaanNotes,
-      notes: `Direct commission from reservation of ${listing.unit_id}`,
+      notes: `Direct-to-developer commission from reservation of ${listing.unit_id}`,
       actorRole,
     })
 
@@ -1107,8 +1108,9 @@ export const reserveListing = async (req, res) => {
         payment_terms_months,
         interest_rate,
         monthly_amortization,
-        contract_processing_status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        contract_processing_status,
+        sale_type
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         clientId,
@@ -1130,6 +1132,7 @@ export const reserveListing = async (req, res) => {
         terms.interestRate,
         terms.monthlyAmortization,
         terms.contractProcessingStatus,
+        finalSaleType,
       ]
     )
 
@@ -1192,6 +1195,7 @@ export const reserveListing = async (req, res) => {
         interest_rate: terms.interestRate,
         monthly_amortization: terms.monthlyAmortization,
         contract_processing_status: terms.contractProcessingStatus,
+        sale_type: finalSaleType,
       },
     })
   } catch (err) {
@@ -1252,6 +1256,12 @@ export const updateClientUnit = async (req, res) => {
     isMissing(mode_of_payment)
       ? existingClientUnit.mode_of_payment
       : mode_of_payment
+  )
+
+  const finalSaleType = validateSaleType(
+    isMissing(sale_type)
+      ? existingClientUnit.sale_type
+      : sale_type
   )
 
   const connection = await db.getConnection()
@@ -1338,6 +1348,13 @@ export const updateClientUnit = async (req, res) => {
 
     let regeneratedCommission = null
 
+    if (!isMissing(sale_type)) {
+      await connection.query(
+        `UPDATE client_units SET sale_type = ? WHERE id = ?`,
+        [finalSaleType, id]
+      )
+    }
+
     if (regenerate_commission && !isMissing(finalSellerId)) {
       await connection.query(
         `
@@ -1360,7 +1377,6 @@ export const updateClientUnit = async (req, res) => {
       )
 
       const listing = await getListingById(connection, existingClientUnit.listing_id)
-      const finalSaleType = validateSaleType(sale_type)
 
       regeneratedCommission = await createReservationCommissions({
         connection,
