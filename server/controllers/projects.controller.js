@@ -134,7 +134,7 @@ export const createProject = async (req, res) => {
       tax_declaration_no,
       pin,
       status
-    ) VALUES (?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
     `,
     [
       name,
