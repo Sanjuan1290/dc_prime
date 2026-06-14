@@ -52,7 +52,7 @@ CREATE TABLE `accredited_sellers` (
   CONSTRAINT `fk_accredited_sellers_parent` FOREIGN KEY (`parent_seller_id`) REFERENCES `accredited_sellers` (`id`),
   CONSTRAINT `fk_accredited_sellers_rate_set_by` FOREIGN KEY (`rate_set_by`) REFERENCES `users` (`id`) ON DELETE SET NULL,
   CONSTRAINT `fk_accredited_sellers_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=16 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=8 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -61,7 +61,7 @@ CREATE TABLE `accredited_sellers` (
 
 LOCK TABLES `accredited_sellers` WRITE;
 /*!40000 ALTER TABLE `accredited_sellers` DISABLE KEYS */;
-INSERT INTO `accredited_sellers` VALUES (1,2,'Rowena M. Cortez','rowena.cortez.bnm@test.com','09000000001','broker_network_manager',NULL,NULL,'active','2026-06-14','2026-06-14 03:30:04','2026-06-14 03:30:04',8.00,8.00,NULL,NULL,NULL,NULL,NULL,1,'2026-06-14 11:30:04'),(2,3,'Broker One Under Rowena','broker.one@test.com','09000000002','broker',1,NULL,'active','2026-06-14','2026-06-14 03:30:04','2026-06-14 03:42:25',7.00,7.00,NULL,NULL,NULL,NULL,NULL,2,'2026-06-14 11:42:25'),(3,4,'Broker Two Independent','broker.two@test.com','09000000003','broker',NULL,NULL,'active','2026-06-14','2026-06-14 03:30:04','2026-06-14 03:30:04',7.00,7.00,NULL,NULL,NULL,NULL,NULL,1,'2026-06-14 11:30:04'),(4,5,'Manager One A','manager.one.a@test.com','09000000004','manager',2,NULL,'active','2026-06-14','2026-06-14 03:30:04','2026-06-14 03:30:04',5.00,NULL,5.00,NULL,NULL,NULL,NULL,1,'2026-06-14 11:30:04'),(5,6,'Manager One B','manager.one.b@test.com','09000000005','manager',2,NULL,'active','2026-06-14','2026-06-14 03:30:04','2026-06-14 03:38:14',6.00,NULL,6.00,NULL,NULL,NULL,NULL,3,'2026-06-14 11:38:14'),(6,7,'Manager Two A','manager.two.a@test.com','09000000006','manager',3,NULL,'active','2026-06-14','2026-06-14 03:30:04','2026-06-14 03:30:04',5.00,NULL,5.00,NULL,NULL,NULL,NULL,1,'2026-06-14 11:30:04'),(7,8,'Manager Two B','manager.two.b@test.com','09000000007','manager',3,NULL,'active','2026-06-14','2026-06-14 03:30:04','2026-06-14 03:30:04',5.00,NULL,5.00,NULL,NULL,NULL,NULL,1,'2026-06-14 11:30:04'),(8,9,'Agent One A1','agent.one.a1@test.com','09000000008','agent',4,NULL,'active','2026-06-14','2026-06-14 03:30:04','2026-06-14 03:37:42',5.00,NULL,5.00,NULL,5.00,NULL,NULL,5,'2026-06-14 11:37:42'),(9,10,'Agent One A2','agent.one.a2@test.com','09000000009','agent',4,NULL,'active','2026-06-14','2026-06-14 03:30:04','2026-06-14 03:30:04',3.00,NULL,3.00,NULL,3.00,NULL,NULL,1,'2026-06-14 11:30:04'),(10,11,'Agent One B1','agent.one.b1@test.com','09000000010','agent',5,NULL,'active','2026-06-14','2026-06-14 03:30:04','2026-06-14 03:40:49',3.00,NULL,3.00,NULL,3.00,NULL,NULL,6,'2026-06-14 11:40:49'),(11,12,'Agent One B2','agent.one.b2@test.com','09000000011','agent',5,NULL,'active','2026-06-14','2026-06-14 03:30:04','2026-06-14 03:30:04',3.00,NULL,3.00,NULL,3.00,NULL,NULL,1,'2026-06-14 11:30:04'),(12,13,'Agent Two A1','agent.two.a1@test.com','09000000012','agent',6,NULL,'active','2026-06-14','2026-06-14 03:30:04','2026-06-14 03:30:04',3.00,NULL,3.00,NULL,3.00,NULL,NULL,1,'2026-06-14 11:30:04'),(13,14,'Agent Two A2','agent.two.a2@test.com','09000000013','agent',6,NULL,'inactive','2026-06-14','2026-06-14 03:30:04','2026-06-14 03:46:36',3.00,NULL,3.00,NULL,3.00,NULL,NULL,1,'2026-06-14 11:30:04'),(14,15,'Agent Two B1','agent.two.b1@test.com','09000000014','agent',7,NULL,'active','2026-06-14','2026-06-14 03:30:04','2026-06-14 03:30:04',3.00,NULL,3.00,NULL,3.00,NULL,NULL,1,'2026-06-14 11:30:04'),(15,16,'Agent Two B2','agent.two.b2@test.com','09000000015','agent',7,NULL,'active','2026-06-14','2026-06-14 03:30:04','2026-06-14 03:30:04',3.00,NULL,3.00,NULL,3.00,NULL,NULL,1,'2026-06-14 11:30:04');
+INSERT INTO `accredited_sellers` VALUES (1,3,'Rowena M. Cortez','rowena.cortez.bnm@test.com','09000000001','broker_network_manager',NULL,NULL,'active','2026-06-14','2026-06-14 06:48:38','2026-06-14 06:48:38',8.00,8.00,NULL,NULL,NULL,NULL,NULL,1,'2026-06-14 14:48:38'),(2,4,'Broker One Under Rowena','broker.one@test.com','09000000002','broker',1,NULL,'active','2026-06-14','2026-06-14 06:48:38','2026-06-14 06:48:38',7.00,7.00,NULL,NULL,NULL,NULL,NULL,1,'2026-06-14 14:48:38'),(3,5,'Manager One A','manager.one.a@test.com','09000000003','manager',2,NULL,'active','2026-06-14','2026-06-14 06:48:38','2026-06-14 06:48:38',5.00,NULL,5.00,NULL,NULL,NULL,NULL,1,'2026-06-14 14:48:38'),(4,6,'Agent One A1','agent.one.a1@test.com','09000000004','agent',3,NULL,'active','2026-06-14','2026-06-14 06:48:38','2026-06-14 07:03:14',3.00,NULL,3.00,NULL,3.00,NULL,NULL,5,'2026-06-14 15:03:14'),(5,7,'Broker Two Independent','broker.two@test.com','09000000005','broker',NULL,NULL,'active','2026-06-14','2026-06-14 06:48:38','2026-06-14 06:48:38',7.00,7.00,NULL,NULL,NULL,NULL,NULL,1,'2026-06-14 14:48:38'),(6,8,'Manager Two A','manager.two.a@test.com','09000000006','manager',5,NULL,'active','2026-06-13','2026-06-14 06:48:38','2026-06-14 07:46:15',6.00,NULL,6.00,NULL,NULL,NULL,NULL,2,'2026-06-14 15:46:15'),(7,9,'Agent Two A1','agent.two.a1@test.com','09000000007','agent',6,NULL,'active','2026-06-13','2026-06-14 06:48:38','2026-06-14 07:45:34',5.00,NULL,5.00,NULL,5.00,NULL,NULL,2,'2026-06-14 15:45:34');
 /*!40000 ALTER TABLE `accredited_sellers` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -120,7 +120,7 @@ CREATE TABLE `audit_logs` (
   PRIMARY KEY (`id`),
   KEY `fk_audit_logs_user` (`user_id`),
   CONSTRAINT `fk_audit_logs_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=35 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=74 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -129,7 +129,7 @@ CREATE TABLE `audit_logs` (
 
 LOCK TABLES `audit_logs` WRITE;
 /*!40000 ALTER TABLE `audit_logs` DISABLE KEYS */;
-INSERT INTO `audit_logs` VALUES (1,1,'login','Auth','Super Admin logged in','::1','2026-06-14 02:11:04'),(2,1,'login','Auth','Super Admin logged in','::1','2026-06-14 02:11:15'),(3,1,'create','Projects','Created project Bailen ','::1','2026-06-14 02:22:14'),(4,1,'create','Projects','Created project Maragondon','::1','2026-06-14 02:23:28'),(5,1,'create','Listings','Created listing LA-0208','127.0.0.1','2026-06-14 02:28:08'),(6,1,'update','Commission Defaults','Updated role default commission rates','127.0.0.1','2026-06-14 03:23:22'),(7,5,'login','Auth','Manager One A logged in','::1','2026-06-14 03:30:58'),(8,5,'login','Auth','Manager One A logged in','::1','2026-06-14 03:32:33'),(9,3,'login','Auth','Broker One Under Rowena logged in','::1','2026-06-14 03:37:55'),(10,5,'login','Auth','Manager One A logged in','::1','2026-06-14 03:38:20'),(11,6,'login','Auth','Manager One B logged in','::1','2026-06-14 03:40:33'),(12,15,'login','Auth','Agent Two B1 logged in','::1','2026-06-14 03:40:58'),(13,2,'login','Auth','Rowena M. Cortez logged in','::1','2026-06-14 03:41:53'),(14,1,'login','Auth','Super Admin logged in','::1','2026-06-14 03:43:15'),(15,1,'reset_password','Users','Reset temporary password for user 14','127.0.0.1','2026-06-14 03:45:46'),(16,1,'deactivate','Users','Deactivated user 14','127.0.0.1','2026-06-14 03:46:36'),(17,1,'login','Auth','Super Admin logged in','::1','2026-06-14 03:47:06'),(18,17,'login','Auth','Admin logged in','::1','2026-06-14 03:48:49'),(19,17,'update','Settings','Updated system settings','127.0.0.1','2026-06-14 04:09:09'),(20,17,'create','Listings','Created listing LA-101','127.0.0.1','2026-06-14 04:42:44'),(21,17,'create','Listings','Created listing LA-102','127.0.0.1','2026-06-14 04:43:23'),(22,17,'create','Listings','Created listing LA-502','127.0.0.1','2026-06-14 04:44:26'),(23,17,'create','Documents','Created document reservation agreement','127.0.0.1','2026-06-14 04:46:10'),(24,1,'login','Auth','Super Admin logged in','::1','2026-06-14 05:07:42'),(25,17,'login','Auth','Admin logged in','::1','2026-06-14 05:08:34'),(26,17,'create','Documents','Created document client registration form seller\'s copy','127.0.0.1','2026-06-14 05:14:51'),(27,17,'create','Documents','Created document client registration form administrator copy','127.0.0.1','2026-06-14 05:14:55'),(28,17,'update','Documents','Updated document reservation agreement','127.0.0.1','2026-06-14 05:15:50'),(29,17,'create','Documents','Created document Passport ID','127.0.0.1','2026-06-14 05:55:00'),(30,17,'archive','Documents','Archived document Passport ID','127.0.0.1','2026-06-14 05:55:16'),(31,17,'update','Documents','Updated document Passport ID','127.0.0.1','2026-06-14 05:55:20'),(32,1,'login','Auth','Super Admin logged in','::1','2026-06-14 05:55:40'),(33,1,'create','Document Templates','Created document template temp2','127.0.0.1','2026-06-14 05:57:57'),(34,1,'reset','Listing Documents','Reset listing documents for LA-502 to project defaults','127.0.0.1','2026-06-14 06:16:11');
+INSERT INTO `audit_logs` VALUES (1,1,'update','Projects','Updated project Maragondon','127.0.0.1','2026-06-14 06:56:50'),(2,1,'update','Projects','Updated project Bailen','127.0.0.1','2026-06-14 06:57:00'),(3,1,'reset','Listing Documents','Reset listing documents for PE-1005 to project defaults','127.0.0.1','2026-06-14 06:57:19'),(4,3,'login','Auth','Rowena M. Cortez logged in','::1','2026-06-14 07:00:08'),(5,4,'login','Auth','Broker One Under Rowena logged in','::1','2026-06-14 07:01:26'),(6,5,'login','Auth','Manager One A logged in','::1','2026-06-14 07:02:57'),(7,6,'login','Auth','Agent One A1 logged in','::1','2026-06-14 07:03:45'),(8,2,'login','Auth','Admin logged in','::1','2026-06-14 07:06:13'),(9,4,'login','Auth','Broker One Under Rowena logged in','::1','2026-06-14 07:15:20'),(10,1,'login','Auth','Super Admin logged in','::1','2026-06-14 07:15:36'),(11,1,'update','Settings','Updated system settings','127.0.0.1','2026-06-14 07:16:06'),(12,4,'login','Auth','Broker One Under Rowena logged in','::1','2026-06-14 07:16:14'),(13,1,'login','Auth','Super Admin logged in','::1','2026-06-14 07:23:09'),(14,1,'update','Settings','Updated system settings','127.0.0.1','2026-06-14 07:23:31'),(15,3,'login','Auth','Rowena M. Cortez logged in','::1','2026-06-14 07:24:03'),(16,1,'login','Auth','Super Admin logged in','::1','2026-06-14 07:34:51'),(17,2,'login','Auth','Admin logged in','::1','2026-06-14 07:36:04'),(18,2,'create','Clients','Created client robert','127.0.0.1','2026-06-14 07:39:39'),(19,2,'update','Users','Updated user 9 and linked seller profile 7','127.0.0.1','2026-06-14 07:45:34'),(20,2,'update','Users','Updated user 8 and linked seller profile 6','127.0.0.1','2026-06-14 07:46:15'),(21,2,'update','Buyer Profile','Updated buyer profile for robert','127.0.0.1','2026-06-14 07:50:15'),(22,2,'update','Buyer Profile','Updated co-buyers for robert','127.0.0.1','2026-06-14 07:50:15'),(23,2,'update','Buyer Profile','Updated employment details for robert','127.0.0.1','2026-06-14 07:50:15'),(24,2,'update','Buyer Profile','Updated buyer profile for robert','127.0.0.1','2026-06-14 07:50:16'),(25,2,'update','Buyer Profile','Updated co-buyers for robert','127.0.0.1','2026-06-14 07:50:16'),(26,2,'update','Buyer Profile','Updated employment details for robert','127.0.0.1','2026-06-14 07:50:16'),(27,2,'update','Buyer Profile','Updated buyer profile for robert','127.0.0.1','2026-06-14 07:50:16'),(28,2,'update','Buyer Profile','Updated co-buyers for robert','127.0.0.1','2026-06-14 07:50:16'),(29,2,'update','Buyer Profile','Updated employment details for robert','127.0.0.1','2026-06-14 07:50:16'),(30,2,'update','Buyer Profile','Updated buyer profile for robert','127.0.0.1','2026-06-14 07:50:16'),(31,2,'update','Buyer Profile','Updated co-buyers for robert','127.0.0.1','2026-06-14 07:50:16'),(32,2,'update','Buyer Profile','Updated employment details for robert','127.0.0.1','2026-06-14 07:50:16'),(33,2,'update','Buyer Profile','Updated buyer profile for robert','127.0.0.1','2026-06-14 07:50:16'),(34,2,'update','Buyer Profile','Updated co-buyers for robert','127.0.0.1','2026-06-14 07:50:16'),(35,2,'update','Buyer Profile','Updated employment details for robert','127.0.0.1','2026-06-14 07:50:16'),(36,2,'update','Buyer Profile','Updated buyer profile for robert','127.0.0.1','2026-06-14 08:04:50'),(37,2,'update','Buyer Profile','Updated co-buyers for robert','127.0.0.1','2026-06-14 08:04:50'),(38,2,'update','Buyer Profile','Updated employment details for robert','127.0.0.1','2026-06-14 08:04:50'),(39,2,'update','Buyer Profile','Updated buyer profile for robert','127.0.0.1','2026-06-14 08:04:50'),(40,2,'update','Buyer Profile','Updated buyer profile for robert','127.0.0.1','2026-06-14 08:04:53'),(41,2,'update','Buyer Profile','Updated co-buyers for robert','127.0.0.1','2026-06-14 08:04:53'),(42,2,'update','Buyer Profile','Updated employment details for robert','127.0.0.1','2026-06-14 08:04:53'),(43,2,'update','Buyer Profile','Updated buyer profile for robert','127.0.0.1','2026-06-14 08:04:53'),(44,2,'update','Buyer Profile','Updated buyer profile for robert','127.0.0.1','2026-06-14 08:06:41'),(45,2,'update','Buyer Profile','Updated co-buyers for robert','127.0.0.1','2026-06-14 08:06:41'),(46,2,'update','Buyer Profile','Updated employment details for robert','127.0.0.1','2026-06-14 08:06:41'),(47,2,'update','Buyer Profile','Updated buyer profile for robert','127.0.0.1','2026-06-14 08:06:41'),(48,2,'reserve','Client Units','Reserved LA-1007 for robert','127.0.0.1','2026-06-14 08:17:42'),(49,2,'create','Client Documents','Created listing-based document checklist for client unit 1','127.0.0.1','2026-06-14 08:17:49'),(50,2,'create','Client Documents','Created listing-based document checklist for client unit 1','127.0.0.1','2026-06-14 08:17:49'),(51,2,'create','Client Documents','Created listing-based document checklist for client unit 1','127.0.0.1','2026-06-14 08:17:50'),(52,2,'create','Client Documents','Created listing-based document checklist for client unit 1','127.0.0.1','2026-06-14 08:17:50'),(53,2,'create','Client Documents','Created listing-based document checklist for client unit 1','127.0.0.1','2026-06-14 08:17:50'),(54,2,'create','Client Documents','Created listing-based document checklist for client unit 1','127.0.0.1','2026-06-14 08:17:51'),(55,2,'create','Client Documents','Created listing-based document checklist for client unit 1','127.0.0.1','2026-06-14 08:17:51'),(56,2,'create','Client Documents','Created listing-based document checklist for client unit 1','127.0.0.1','2026-06-14 08:17:51'),(57,2,'create','Client Documents','Created listing-based document checklist for client unit 1','127.0.0.1','2026-06-14 08:17:52'),(58,2,'create','Client Documents','Created listing-based document checklist for client unit 1','127.0.0.1','2026-06-14 08:17:52'),(59,2,'print','Client Forms','Printed statement_of_account for client unit 1','127.0.0.1','2026-06-14 08:19:24'),(60,2,'print','Client Forms','Printed statement_of_account for client unit 1','127.0.0.1','2026-06-14 08:19:24'),(61,2,'payment','Payments','Added payment for client unit 1','127.0.0.1','2026-06-14 08:20:28'),(62,2,'print','Client Forms','Printed offer_to_buy_buyers_profile for client unit 1','127.0.0.1','2026-06-14 08:20:54'),(63,2,'print','Client Forms','Printed offer_to_buy_buyers_profile for client unit 1','127.0.0.1','2026-06-14 08:20:54'),(64,2,'print','Client Forms','Printed statement_of_account for client unit 1','127.0.0.1','2026-06-14 08:22:01'),(65,2,'print','Client Forms','Printed statement_of_account for client unit 1','127.0.0.1','2026-06-14 08:22:01'),(66,2,'create','Client Documents','Created listing-based document checklist for client unit 1','127.0.0.1','2026-06-14 08:22:15'),(67,2,'create','Client Documents','Created listing-based document checklist for client unit 1','127.0.0.1','2026-06-14 08:22:22'),(68,2,'create','Client Documents','Created listing-based document checklist for client unit 1','127.0.0.1','2026-06-14 08:22:22'),(69,2,'update','Client Units','Updated client unit 1','127.0.0.1','2026-06-14 08:31:15'),(70,2,'print','Client Forms','Printed statement_of_account for client unit 1','127.0.0.1','2026-06-14 08:31:19'),(71,2,'print','Client Forms','Printed statement_of_account for client unit 1','127.0.0.1','2026-06-14 08:31:19'),(72,2,'print','Client Forms','Printed statement_of_account for client unit 1','127.0.0.1','2026-06-14 08:31:23'),(73,2,'print','Client Forms','Printed statement_of_account for client unit 1','127.0.0.1','2026-06-14 08:31:23');
 /*!40000 ALTER TABLE `audit_logs` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -297,7 +297,7 @@ CREATE TABLE `client_document_list` (
   CONSTRAINT `fk_client_documents_client_unit` FOREIGN KEY (`client_unit_id`) REFERENCES `client_units` (`id`),
   CONSTRAINT `fk_client_documents_document` FOREIGN KEY (`document_id`) REFERENCES `documents` (`id`),
   CONSTRAINT `fk_client_documents_reviewer` FOREIGN KEY (`reviewed_by`) REFERENCES `users` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=25 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -306,6 +306,7 @@ CREATE TABLE `client_document_list` (
 
 LOCK TABLES `client_document_list` WRITE;
 /*!40000 ALTER TABLE `client_document_list` DISABLE KEYS */;
+INSERT INTO `client_document_list` VALUES (1,1,1,1,'project_default',NULL,'google_drive',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,'not_submitted',NULL,NULL,'2026-06-14 08:22:15','2026-06-14 08:22:15'),(2,1,2,1,'project_default',NULL,'google_drive',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,'not_submitted',NULL,NULL,'2026-06-14 08:22:15','2026-06-14 08:22:15'),(3,1,3,1,'project_default',NULL,'google_drive',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,'not_submitted',NULL,NULL,'2026-06-14 08:22:15','2026-06-14 08:22:15'),(4,1,4,1,'project_default',NULL,'google_drive',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,'not_submitted',NULL,NULL,'2026-06-14 08:22:15','2026-06-14 08:22:15'),(5,1,5,1,'project_default',NULL,'google_drive',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,'not_submitted',NULL,NULL,'2026-06-14 08:22:15','2026-06-14 08:22:15'),(6,1,8,1,'project_default',NULL,'google_drive',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,'not_submitted',NULL,NULL,'2026-06-14 08:22:15','2026-06-14 08:22:15'),(7,1,9,1,'project_default',NULL,'google_drive',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,'not_submitted',NULL,NULL,'2026-06-14 08:22:15','2026-06-14 08:22:15'),(8,1,10,0,'project_default',NULL,'google_drive',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,'not_submitted',NULL,NULL,'2026-06-14 08:22:15','2026-06-14 08:22:15');
 /*!40000 ALTER TABLE `client_document_list` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -336,7 +337,7 @@ CREATE TABLE `client_employment_details` (
   KEY `idx_client_employment_details_client_buyer_id` (`client_buyer_id`),
   CONSTRAINT `fk_client_employment_details_buyer` FOREIGN KEY (`client_buyer_id`) REFERENCES `client_buyers` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_client_employment_details_client` FOREIGN KEY (`client_id`) REFERENCES `clients` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -345,6 +346,7 @@ CREATE TABLE `client_employment_details` (
 
 LOCK TABLES `client_employment_details` WRITE;
 /*!40000 ALTER TABLE `client_employment_details` DISABLE KEYS */;
+INSERT INTO `client_employment_details` VALUES (3,1,NULL,'principal','employed_private',NULL,'dcprime','Indang, Cavite','4122','real estate','IT',40000.00,'2026-06-14 08:06:41','2026-06-14 08:06:41');
 /*!40000 ALTER TABLE `client_employment_details` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -367,7 +369,7 @@ CREATE TABLE `client_unit_form_prints` (
   KEY `idx_client_unit_form_prints_printed_by` (`printed_by`),
   CONSTRAINT `fk_client_unit_form_prints_client_unit` FOREIGN KEY (`client_unit_id`) REFERENCES `client_units` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_client_unit_form_prints_printed_by` FOREIGN KEY (`printed_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=11 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -376,6 +378,7 @@ CREATE TABLE `client_unit_form_prints` (
 
 LOCK TABLES `client_unit_form_prints` WRITE;
 /*!40000 ALTER TABLE `client_unit_form_prints` DISABLE KEYS */;
+INSERT INTO `client_unit_form_prints` VALUES (1,1,'statement_of_account',2,'2026-06-14 16:19:24',NULL),(2,1,'statement_of_account',2,'2026-06-14 16:19:24',NULL),(3,1,'offer_to_buy_buyers_profile',2,'2026-06-14 16:20:54',NULL),(4,1,'offer_to_buy_buyers_profile',2,'2026-06-14 16:20:54',NULL),(5,1,'statement_of_account',2,'2026-06-14 16:22:01',NULL),(6,1,'statement_of_account',2,'2026-06-14 16:22:01',NULL),(7,1,'statement_of_account',2,'2026-06-14 16:31:19',NULL),(8,1,'statement_of_account',2,'2026-06-14 16:31:19',NULL),(9,1,'statement_of_account',2,'2026-06-14 16:31:23',NULL),(10,1,'statement_of_account',2,'2026-06-14 16:31:23',NULL);
 /*!40000 ALTER TABLE `client_unit_form_prints` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -430,7 +433,7 @@ CREATE TABLE `client_units` (
   CONSTRAINT `fk_client_units_listing` FOREIGN KEY (`listing_id`) REFERENCES `listings` (`id`),
   CONSTRAINT `fk_client_units_seller` FOREIGN KEY (`seller_id`) REFERENCES `accredited_sellers` (`id`),
   CONSTRAINT `chk_due_day` CHECK ((`due_day` between 1 and 31))
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -439,6 +442,7 @@ CREATE TABLE `client_units` (
 
 LOCK TABLES `client_units` WRITE;
 /*!40000 ALTER TABLE `client_units` DISABLE KEYS */;
+INSERT INTO `client_units` VALUES (1,1,7,2,4,'reserved','installment',989500.00,18,'2026-06-14','2026-06-14',1039500.00,50000.00,0.00,0.00,989500.00,36,6.00,29135.28,'pending_profile',NULL,NULL,NULL,NULL,NULL,'2026-06-14 08:17:42','2026-06-14 08:31:15','distributed');
 /*!40000 ALTER TABLE `client_units` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -476,7 +480,7 @@ CREATE TABLE `clients` (
   PRIMARY KEY (`id`),
   KEY `fk_clients_default_seller` (`default_seller_id`),
   CONSTRAINT `fk_clients_default_seller` FOREIGN KEY (`default_seller_id`) REFERENCES `accredited_sellers` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -485,6 +489,7 @@ CREATE TABLE `clients` (
 
 LOCK TABLES `clients` WRITE;
 /*!40000 ALTER TABLE `clients` DISABLE KEYS */;
+INSERT INTO `clients` VALUES (1,'robert',NULL,'single','2005-01-16','imus','FIlipino','male','single','robertrenbysanjuan@gmail.com','09876598765','0905456754','3456-5678-5679-0000','complete','GEN TRI','GEN TRI','4107',NULL,NULL,'REGION 4A',7,'2026-06-14 07:39:39','2026-06-14 08:06:41');
 /*!40000 ALTER TABLE `clients` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -517,7 +522,7 @@ CREATE TABLE `commission_releases` (
   KEY `fk_commission_releases_released_by` (`released_by`),
   CONSTRAINT `fk_commission_releases_commission` FOREIGN KEY (`commission_id`) REFERENCES `commissions` (`id`),
   CONSTRAINT `fk_commission_releases_released_by` FOREIGN KEY (`released_by`) REFERENCES `users` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=21 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -526,6 +531,7 @@ CREATE TABLE `commission_releases` (
 
 LOCK TABLES `commission_releases` WRITE;
 /*!40000 ALTER TABLE `commission_releases` DISABLE KEYS */;
+INSERT INTO `commission_releases` VALUES (1,1,'1st_release',20.00,20.00,20.00,5670.00,0.00,5670.00,'pending',NULL,NULL,NULL,'2026-06-14 08:17:42','2026-06-14 08:17:42'),(2,1,'2nd_release',40.00,20.00,40.00,5670.00,0.00,5670.00,'pending',NULL,NULL,NULL,'2026-06-14 08:17:42','2026-06-14 08:17:42'),(3,1,'3rd_release',60.00,20.00,60.00,5670.00,0.00,5670.00,'pending',NULL,NULL,NULL,'2026-06-14 08:17:42','2026-06-14 08:17:42'),(4,1,'4th_release',75.00,15.00,75.00,4252.50,0.00,4252.50,'pending',NULL,NULL,NULL,'2026-06-14 08:17:42','2026-06-14 08:17:42'),(5,1,'retention',NULL,25.00,100.00,7087.50,0.00,7087.50,'pending',NULL,NULL,NULL,'2026-06-14 08:17:42','2026-06-14 08:17:42'),(6,2,'1st_release',20.00,20.00,20.00,3780.00,0.00,3780.00,'pending',NULL,NULL,NULL,'2026-06-14 08:17:42','2026-06-14 08:17:42'),(7,2,'2nd_release',40.00,20.00,40.00,3780.00,0.00,3780.00,'pending',NULL,NULL,NULL,'2026-06-14 08:17:42','2026-06-14 08:17:42'),(8,2,'3rd_release',60.00,20.00,60.00,3780.00,0.00,3780.00,'pending',NULL,NULL,NULL,'2026-06-14 08:17:42','2026-06-14 08:17:42'),(9,2,'4th_release',75.00,15.00,75.00,2835.00,0.00,2835.00,'pending',NULL,NULL,NULL,'2026-06-14 08:17:42','2026-06-14 08:17:42'),(10,2,'retention',NULL,25.00,100.00,4725.00,0.00,4725.00,'pending',NULL,NULL,NULL,'2026-06-14 08:17:42','2026-06-14 08:17:42'),(11,3,'1st_release',20.00,20.00,20.00,3780.00,0.00,3780.00,'pending',NULL,NULL,NULL,'2026-06-14 08:17:42','2026-06-14 08:17:42'),(12,3,'2nd_release',40.00,20.00,40.00,3780.00,0.00,3780.00,'pending',NULL,NULL,NULL,'2026-06-14 08:17:42','2026-06-14 08:17:42'),(13,3,'3rd_release',60.00,20.00,60.00,3780.00,0.00,3780.00,'pending',NULL,NULL,NULL,'2026-06-14 08:17:42','2026-06-14 08:17:42'),(14,3,'4th_release',75.00,15.00,75.00,2835.00,0.00,2835.00,'pending',NULL,NULL,NULL,'2026-06-14 08:17:42','2026-06-14 08:17:42'),(15,3,'retention',NULL,25.00,100.00,4725.00,0.00,4725.00,'pending',NULL,NULL,NULL,'2026-06-14 08:17:42','2026-06-14 08:17:42'),(16,4,'1st_release',20.00,20.00,20.00,1890.00,0.00,1890.00,'pending',NULL,NULL,NULL,'2026-06-14 08:17:42','2026-06-14 08:17:42'),(17,4,'2nd_release',40.00,20.00,40.00,1890.00,0.00,1890.00,'pending',NULL,NULL,NULL,'2026-06-14 08:17:42','2026-06-14 08:17:42'),(18,4,'3rd_release',60.00,20.00,60.00,1890.00,0.00,1890.00,'pending',NULL,NULL,NULL,'2026-06-14 08:17:42','2026-06-14 08:17:42'),(19,4,'4th_release',75.00,15.00,75.00,1417.50,0.00,1417.50,'pending',NULL,NULL,NULL,'2026-06-14 08:17:42','2026-06-14 08:17:42'),(20,4,'retention',NULL,25.00,100.00,2362.50,0.00,2362.50,'pending',NULL,NULL,NULL,'2026-06-14 08:17:42','2026-06-14 08:17:42');
 /*!40000 ALTER TABLE `commission_releases` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -551,7 +557,7 @@ CREATE TABLE `commission_role_defaults` (
   KEY `idx_commission_role_defaults_role` (`role`),
   KEY `idx_commission_role_defaults_updated_by` (`updated_by`),
   CONSTRAINT `fk_commission_role_defaults_updated_by` FOREIGN KEY (`updated_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
-) ENGINE=InnoDB AUTO_INCREMENT=224 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=47 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -560,7 +566,7 @@ CREATE TABLE `commission_role_defaults` (
 
 LOCK TABLES `commission_role_defaults` WRITE;
 /*!40000 ALTER TABLE `commission_role_defaults` DISABLE KEYS */;
-INSERT INTO `commission_role_defaults` VALUES (1,'bnm_pool_rate','Broker Network Manager Pool Rate','broker_network_manager','pool',8.00,1,'2026-06-14 02:05:36','2026-06-14 03:23:22'),(2,'broker_pool_rate','Broker Pool Rate','broker','pool',7.00,1,'2026-06-14 02:05:36','2026-06-14 03:23:22'),(3,'manager_override_rate','Manager Override Rate','manager','override',2.00,NULL,'2026-06-14 02:05:36','2026-06-14 02:05:36'),(4,'agent_commission_rate','Agent Commission Rate','agent','commission',5.00,NULL,'2026-06-14 02:05:36','2026-06-14 02:05:36'),(5,'agent_direct_to_developer_rate','Agent Direct-to-Developer Rate','agent','direct_to_developer',5.00,NULL,'2026-06-14 02:05:36','2026-06-14 02:05:36');
+INSERT INTO `commission_role_defaults` VALUES (1,'bnm_pool_rate','Broker Network Manager Pool Rate','broker_network_manager','pool',8.00,1,'2026-06-14 06:48:38','2026-06-14 06:48:38'),(2,'broker_pool_rate','Broker Pool Rate','broker','pool',7.00,1,'2026-06-14 06:48:38','2026-06-14 06:48:38');
 /*!40000 ALTER TABLE `commission_role_defaults` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -603,7 +609,7 @@ CREATE TABLE `commissions` (
   CONSTRAINT `fk_commissions_client_unit` FOREIGN KEY (`client_unit_id`) REFERENCES `client_units` (`id`),
   CONSTRAINT `fk_commissions_parent` FOREIGN KEY (`parent_commission_id`) REFERENCES `commissions` (`id`),
   CONSTRAINT `fk_commissions_seller` FOREIGN KEY (`seller_id`) REFERENCES `accredited_sellers` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -612,6 +618,7 @@ CREATE TABLE `commissions` (
 
 LOCK TABLES `commissions` WRITE;
 /*!40000 ALTER TABLE `commissions` DISABLE KEYS */;
+INSERT INTO `commissions` VALUES (1,1,4,'agent',3.00,945000.00,28350.00,'main',NULL,'distributed',0.00,NULL,NULL,NULL,28350.00,0.00,'active','Auto-generated hierarchy commission from reservation of LA-1007','2026-06-14 08:17:42','2026-06-14 08:17:42'),(2,1,3,'manager',2.00,945000.00,18900.00,'override',1,'distributed',0.00,NULL,NULL,'Manager residual release milestone',18900.00,0.00,'active','Auto-generated hierarchy commission from reservation of LA-1007','2026-06-14 08:17:42','2026-06-14 08:17:42'),(3,1,2,'broker',2.00,945000.00,18900.00,'override',1,'distributed',0.00,NULL,NULL,'Broker residual release milestone',18900.00,0.00,'active','Auto-generated hierarchy commission from reservation of LA-1007','2026-06-14 08:17:42','2026-06-14 08:17:42'),(4,1,1,'broker_network_manager',1.00,945000.00,9450.00,'override',1,'distributed',0.00,NULL,NULL,'Broker Network Manager residual release milestone',9450.00,0.00,'active','Auto-generated hierarchy commission from reservation of LA-1007','2026-06-14 08:17:42','2026-06-14 08:17:42');
 /*!40000 ALTER TABLE `commissions` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -638,7 +645,7 @@ CREATE TABLE `document_template_items` (
   KEY `idx_document_template_items_status` (`status`),
   CONSTRAINT `fk_document_template_items_document` FOREIGN KEY (`document_id`) REFERENCES `documents` (`id`),
   CONSTRAINT `fk_document_template_items_template` FOREIGN KEY (`template_id`) REFERENCES `document_templates` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=6 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=13 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -647,7 +654,7 @@ CREATE TABLE `document_template_items` (
 
 LOCK TABLES `document_template_items` WRITE;
 /*!40000 ALTER TABLE `document_template_items` DISABLE KEYS */;
-INSERT INTO `document_template_items` VALUES (1,1,1,1,'active',1,'2026-06-14 05:33:17','2026-06-14 05:33:17'),(2,1,2,0,'active',2,'2026-06-14 05:33:17','2026-06-14 05:33:17'),(3,1,3,0,'active',3,'2026-06-14 05:33:17','2026-06-14 05:33:17'),(4,2,5,1,'active',1,'2026-06-14 05:57:57','2026-06-14 05:57:57'),(5,2,6,1,'active',2,'2026-06-14 05:57:57','2026-06-14 05:57:57');
+INSERT INTO `document_template_items` VALUES (1,1,1,1,'active',1,'2026-06-14 06:48:38','2026-06-14 06:48:38'),(2,1,2,1,'active',2,'2026-06-14 06:48:38','2026-06-14 06:48:38'),(3,1,3,1,'active',3,'2026-06-14 06:48:38','2026-06-14 06:48:38'),(4,1,4,1,'active',4,'2026-06-14 06:48:38','2026-06-14 06:48:38'),(5,1,5,1,'active',5,'2026-06-14 06:48:38','2026-06-14 06:48:38'),(6,1,8,1,'active',6,'2026-06-14 06:48:38','2026-06-14 06:48:38'),(7,1,9,1,'active',7,'2026-06-14 06:48:38','2026-06-14 06:48:38'),(8,1,10,0,'active',8,'2026-06-14 06:48:38','2026-06-14 06:48:38'),(9,2,6,1,'active',1,'2026-06-14 06:48:38','2026-06-14 06:48:38'),(10,2,7,0,'active',2,'2026-06-14 06:48:38','2026-06-14 06:48:38'),(11,2,8,1,'active',3,'2026-06-14 06:48:38','2026-06-14 06:48:38'),(12,2,9,1,'active',4,'2026-06-14 06:48:38','2026-06-14 06:48:38');
 /*!40000 ALTER TABLE `document_template_items` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -680,7 +687,7 @@ CREATE TABLE `document_templates` (
 
 LOCK TABLES `document_templates` WRITE;
 /*!40000 ALTER TABLE `document_templates` DISABLE KEYS */;
-INSERT INTO `document_templates` VALUES (1,'Default Buyer Requirements','Default reusable checklist for buyer/client requirements.','active',1,'2026-06-14 05:33:17','2026-06-14 05:33:17'),(2,'temp2',NULL,'active',1,'2026-06-14 05:57:57','2026-06-14 05:57:57');
+INSERT INTO `document_templates` VALUES (1,'Default Buyer Requirements','Standard buyer/client checklist used for most project reservations.','active',1,'2026-06-14 06:48:38','2026-06-14 06:48:38'),(2,'Legal and Closing Requirements','Additional documents normally needed for contract, title, and closing stages.','active',1,'2026-06-14 06:48:38','2026-06-14 06:48:38');
 /*!40000 ALTER TABLE `document_templates` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -701,7 +708,7 @@ CREATE TABLE `documents` (
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=7 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=11 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -710,7 +717,7 @@ CREATE TABLE `documents` (
 
 LOCK TABLES `documents` WRITE;
 /*!40000 ALTER TABLE `documents` DISABLE KEYS */;
-INSERT INTO `documents` VALUES (1,'reservation agreement','sdfsd',1,0,'active','2026-06-14 04:46:10','2026-06-14 05:15:50'),(2,'client registration form seller\'s copy',NULL,0,0,'active','2026-06-14 05:14:51','2026-06-14 05:14:51'),(3,'client registration form administrator copy',NULL,0,0,'active','2026-06-14 05:14:55','2026-06-14 05:14:55'),(4,'Passport ID',NULL,0,1,'active','2026-06-14 05:55:00','2026-06-14 05:55:20'),(5,'CENOMAR','(if the buyer has kids but not married)',0,1,'active','2026-06-14 05:57:57','2026-06-14 05:57:57'),(6,'Valid ID\'s of both Principal and Representative',NULL,0,1,'active','2026-06-14 05:57:57','2026-06-14 05:57:57');
+INSERT INTO `documents` VALUES (1,'Client Registration Form - Seller Copy','Seller copy of the buyer registration form.',0,1,'active','2026-06-14 06:48:38','2026-06-14 06:48:38'),(2,'Client Registration Form - Administrator Copy','Administrator copy of the buyer registration form.',0,1,'active','2026-06-14 06:48:38','2026-06-14 06:48:38'),(3,'Intent to Buy','Signed statement showing buyer intent to purchase the selected unit.',0,1,'active','2026-06-14 06:48:38','2026-06-14 06:48:38'),(4,'Offer to Buy and Buyer Profile','Offer to buy form with buyer personal/profile information.',0,1,'active','2026-06-14 06:48:38','2026-06-14 06:48:38'),(5,'Reservation Agreement','Signed reservation agreement for the selected unit.',0,1,'active','2026-06-14 06:48:38','2026-06-14 06:48:38'),(6,'Contract to Sell','Contract to sell document after reservation and payment terms are finalized.',0,1,'active','2026-06-14 06:48:38','2026-06-14 06:48:38'),(7,'Deed of Absolute Sale','Final deed used after full payment or closing requirements.',0,1,'active','2026-06-14 06:48:38','2026-06-14 06:48:38'),(8,'Valid Government IDs','Clear copies of valid government-issued IDs.',0,1,'active','2026-06-14 06:48:38','2026-06-14 06:48:38'),(9,'TIN ID or BIR TIN Verification','Tax identification document or TIN verification record.',0,1,'active','2026-06-14 06:48:38','2026-06-14 06:48:38'),(10,'Marriage Certificate or CENOMAR','Marriage certificate for married buyers or CENOMAR for single buyers when required.',0,1,'active','2026-06-14 06:48:38','2026-06-14 06:48:38');
 /*!40000 ALTER TABLE `documents` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -765,7 +772,7 @@ CREATE TABLE `listing_document_requirements` (
   KEY `idx_listing_document_requirements_document_id` (`document_id`),
   CONSTRAINT `fk_listing_document_requirements_document` FOREIGN KEY (`document_id`) REFERENCES `documents` (`id`) ON DELETE RESTRICT,
   CONSTRAINT `fk_listing_document_requirements_listing` FOREIGN KEY (`listing_id`) REFERENCES `listings` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=9 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=46 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -774,7 +781,7 @@ CREATE TABLE `listing_document_requirements` (
 
 LOCK TABLES `listing_document_requirements` WRITE;
 /*!40000 ALTER TABLE `listing_document_requirements` DISABLE KEYS */;
-INSERT INTO `listing_document_requirements` VALUES (1,1,1,1,'active',1,'project_default','2026-06-14 05:12:50','2026-06-14 05:12:50'),(2,2,1,1,'active',1,'project_default','2026-06-14 05:12:50','2026-06-14 05:12:50'),(3,3,1,1,'active',1,'project_default','2026-06-14 05:12:50','2026-06-14 05:12:50'),(8,4,1,1,'active',1,'project_default','2026-06-14 06:16:11','2026-06-14 06:16:11');
+INSERT INTO `listing_document_requirements` VALUES (16,15,1,1,'active',1,'project_default','2026-06-14 06:57:19','2026-06-14 06:57:19'),(17,15,2,1,'active',2,'project_default','2026-06-14 06:57:19','2026-06-14 06:57:19'),(18,15,3,1,'active',3,'project_default','2026-06-14 06:57:19','2026-06-14 06:57:19'),(19,15,4,1,'active',4,'project_default','2026-06-14 06:57:19','2026-06-14 06:57:19'),(20,15,5,1,'active',5,'project_default','2026-06-14 06:57:19','2026-06-14 06:57:19'),(21,15,8,1,'active',6,'project_default','2026-06-14 06:57:19','2026-06-14 06:57:19'),(22,15,9,1,'active',7,'project_default','2026-06-14 06:57:19','2026-06-14 06:57:19'),(23,15,10,0,'active',8,'project_default','2026-06-14 06:57:19','2026-06-14 06:57:19'),(31,7,1,1,'active',1,'project_default','2026-06-14 08:18:03','2026-06-14 08:18:03'),(32,7,2,1,'active',2,'project_default','2026-06-14 08:18:03','2026-06-14 08:18:03'),(33,7,3,1,'active',3,'project_default','2026-06-14 08:18:03','2026-06-14 08:18:03'),(34,7,4,1,'active',4,'project_default','2026-06-14 08:18:03','2026-06-14 08:18:03'),(35,7,5,1,'active',5,'project_default','2026-06-14 08:18:03','2026-06-14 08:18:03'),(36,7,8,1,'active',6,'project_default','2026-06-14 08:18:03','2026-06-14 08:18:03'),(37,7,9,1,'active',7,'project_default','2026-06-14 08:18:03','2026-06-14 08:18:03'),(38,7,10,0,'active',8,'project_default','2026-06-14 08:18:03','2026-06-14 08:18:03');
 /*!40000 ALTER TABLE `listing_document_requirements` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -804,7 +811,7 @@ CREATE TABLE `listings` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_listing_project_unit` (`project_id`,`unit_id`),
   CONSTRAINT `fk_listings_project` FOREIGN KEY (`project_id`) REFERENCES `projects` (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=16 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -813,7 +820,7 @@ CREATE TABLE `listings` (
 
 LOCK TABLES `listings` WRITE;
 /*!40000 ALTER TABLE `listings` DISABLE KEYS */;
-INSERT INTO `listings` (`id`, `project_id`, `cadastral_lot_no`, `unit_id`, `lot_type`, `reservation_fee`, `price_per_sqm`, `lot_area_sqm`, `legal_misc_rate`, `status`, `created_at`, `updated_at`) VALUES (1,1,'1306','LA-0208','corner',50000.00,2600.00,300.00,10.00,'available','2026-06-14 02:28:08','2026-06-14 02:28:08'),(2,1,'1306','LA-101','corner',50000.00,1900.00,300.00,10.00,'available','2026-06-14 04:42:44','2026-06-14 04:42:44'),(3,1,'1306','LA-102','inner',50000.00,1900.00,450.00,0.00,'available','2026-06-14 04:43:23','2026-06-14 04:43:23'),(4,1,'1314','LA-502','inner',50000.00,1000.00,600.00,10.00,'available','2026-06-14 04:44:26','2026-06-14 04:44:26');
+INSERT INTO `listings` (`id`, `project_id`, `cadastral_lot_no`, `unit_id`, `lot_type`, `reservation_fee`, `price_per_sqm`, `lot_area_sqm`, `legal_misc_rate`, `status`, `created_at`, `updated_at`) VALUES (1,1,'1306','LA-1001','inner',50000.00,2600.00,300.00,10.00,'available','2026-06-14 06:55:11','2026-06-14 06:55:11'),(2,1,'1306','LA-1002','inner',50000.00,2600.00,300.00,10.00,'available','2026-06-14 06:55:11','2026-06-14 06:55:11'),(3,1,'1306','LA-1003','corner',50000.00,2700.00,350.00,10.00,'available','2026-06-14 06:55:11','2026-06-14 06:55:11'),(4,1,'1306','LA-1004','end',50000.00,2600.00,300.00,10.00,'available','2026-06-14 06:55:11','2026-06-14 06:55:11'),(5,1,'1306','LA-1005','inner',50000.00,2500.00,400.00,10.00,'available','2026-06-14 06:55:11','2026-06-14 06:55:11'),(6,1,'1307','LA-1006','inner',50000.00,2600.00,300.00,10.00,'available','2026-06-14 06:55:11','2026-06-14 06:55:11'),(7,1,'1307','LA-1007','corner',50000.00,2700.00,350.00,10.00,'reserved','2026-06-14 06:55:11','2026-06-14 08:17:42'),(8,1,'1307','LA-1008','end',50000.00,2600.00,300.00,10.00,'available','2026-06-14 06:55:11','2026-06-14 06:55:11'),(9,1,'1307','LA-1009','inner',50000.00,2500.00,450.00,10.00,'available','2026-06-14 06:55:11','2026-06-14 06:55:11'),(10,1,'1307','LA-1010','corner',50000.00,2700.00,500.00,10.00,'available','2026-06-14 06:55:11','2026-06-14 06:55:11'),(11,2,'2201','PE-1001','inner',50000.00,2200.00,300.00,10.00,'available','2026-06-14 06:55:11','2026-06-14 06:55:11'),(12,2,'2201','PE-1002','corner',50000.00,2300.00,350.00,10.00,'available','2026-06-14 06:55:11','2026-06-14 06:55:11'),(13,2,'2201','PE-1003','end',50000.00,2200.00,300.00,10.00,'available','2026-06-14 06:55:11','2026-06-14 06:55:11'),(14,2,'2202','PE-1004','inner',50000.00,2100.00,400.00,10.00,'available','2026-06-14 06:55:11','2026-06-14 06:55:11'),(15,2,'2202','PE-1005','corner',50000.00,2300.00,500.00,10.00,'available','2026-06-14 06:55:11','2026-06-14 06:55:11');
 /*!40000 ALTER TABLE `listings` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -843,7 +850,7 @@ CREATE TABLE `payments` (
   KEY `idx_payments_reference_id` (`reference_id`),
   CONSTRAINT `fk_payments_client_unit` FOREIGN KEY (`client_unit_id`) REFERENCES `client_units` (`id`),
   CONSTRAINT `fk_payments_verified_by` FOREIGN KEY (`verified_by`) REFERENCES `users` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -852,6 +859,7 @@ CREATE TABLE `payments` (
 
 LOCK TABLES `payments` WRITE;
 /*!40000 ALTER TABLE `payments` DISABLE KEYS */;
+INSERT INTO `payments` VALUES (1,1,50000.00,'reservation_fee','bank_transfer','iujthygrfvd657456tg','2026-06-14','verified',2,'2026-06-14 16:20:29','2026-06-14 08:20:28','2026-06-14 08:20:28');
 /*!40000 ALTER TABLE `payments` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -877,7 +885,7 @@ CREATE TABLE `project_document_requirements` (
   KEY `idx_project_document_requirements_document_id` (`document_id`),
   CONSTRAINT `fk_project_document_requirements_document` FOREIGN KEY (`document_id`) REFERENCES `documents` (`id`) ON DELETE RESTRICT,
   CONSTRAINT `fk_project_document_requirements_project` FOREIGN KEY (`project_id`) REFERENCES `projects` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=17 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -886,7 +894,7 @@ CREATE TABLE `project_document_requirements` (
 
 LOCK TABLES `project_document_requirements` WRITE;
 /*!40000 ALTER TABLE `project_document_requirements` DISABLE KEYS */;
-INSERT INTO `project_document_requirements` VALUES (1,1,1,1,'active',1,'2026-06-14 05:12:50','2026-06-14 05:12:50'),(2,2,1,1,'active',1,'2026-06-14 05:12:50','2026-06-14 05:12:50');
+INSERT INTO `project_document_requirements` VALUES (1,2,1,1,'active',1,'2026-06-14 06:56:50','2026-06-14 06:56:50'),(2,2,2,1,'active',2,'2026-06-14 06:56:50','2026-06-14 06:56:50'),(3,2,3,1,'active',3,'2026-06-14 06:56:50','2026-06-14 06:56:50'),(4,2,4,1,'active',4,'2026-06-14 06:56:50','2026-06-14 06:56:50'),(5,2,5,1,'active',5,'2026-06-14 06:56:50','2026-06-14 06:56:50'),(6,2,8,1,'active',6,'2026-06-14 06:56:50','2026-06-14 06:56:50'),(7,2,9,1,'active',7,'2026-06-14 06:56:50','2026-06-14 06:56:50'),(8,2,10,0,'active',8,'2026-06-14 06:56:50','2026-06-14 06:56:50'),(9,1,1,1,'active',1,'2026-06-14 06:56:59','2026-06-14 06:56:59'),(10,1,2,1,'active',2,'2026-06-14 06:56:59','2026-06-14 06:56:59'),(11,1,3,1,'active',3,'2026-06-14 06:56:59','2026-06-14 06:56:59'),(12,1,4,1,'active',4,'2026-06-14 06:56:59','2026-06-14 06:56:59'),(13,1,5,1,'active',5,'2026-06-14 06:56:59','2026-06-14 06:56:59'),(14,1,8,1,'active',6,'2026-06-14 06:56:59','2026-06-14 06:56:59'),(15,1,9,1,'active',7,'2026-06-14 06:56:59','2026-06-14 06:56:59'),(16,1,10,0,'active',8,'2026-06-14 06:56:59','2026-06-14 06:56:59');
 /*!40000 ALTER TABLE `project_document_requirements` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -923,7 +931,7 @@ CREATE TABLE `projects` (
 
 LOCK TABLES `projects` WRITE;
 /*!40000 ALTER TABLE `projects` DISABLE KEYS */;
-INSERT INTO `projects` VALUES (1,'Bailen ','Bailen, Cavite','LA','IMELDA B. VILLALOBOS','AA-06-0005-00105','022-06-0005-003-04','active',NULL,NULL,'2026-06-14 02:22:14','2026-06-14 02:22:14'),(2,'Maragondon','Maragondon, Cavite','PE','SANTOS S. VILLAMOR','AA-06-0125-02105','023-05-0025-013-04','active',NULL,NULL,'2026-06-14 02:23:28','2026-06-14 02:23:28');
+INSERT INTO `projects` VALUES (1,'Bailen','Bailen, Cavite','LA','IMELDA B. VILLALOBOS','AA-06-0005-00105','022-06-0005-003-04','active',1,NULL,'2026-06-14 06:53:24','2026-06-14 06:56:59'),(2,'Maragondon','Maragondon, Cavite','PE','SANTOS S. VILLAMOR','AA-06-0125-02105','023-05-0025-013-04','active',1,NULL,'2026-06-14 06:53:24','2026-06-14 06:56:50');
 /*!40000 ALTER TABLE `projects` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -969,7 +977,7 @@ CREATE TABLE `settings` (
   `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `setting_key` (`setting_key`)
-) ENGINE=InnoDB AUTO_INCREMENT=6 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=25 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -978,7 +986,7 @@ CREATE TABLE `settings` (
 
 LOCK TABLES `settings` WRITE;
 /*!40000 ALTER TABLE `settings` DISABLE KEYS */;
-INSERT INTO `settings` VALUES (1,'company_name','D&C Prime Realty','2026-06-14 04:09:09','2026-06-14 04:09:09'),(2,'company_email','dcprime@gmail.com','2026-06-14 04:09:09','2026-06-14 04:09:09'),(3,'company_contact','09045463456','2026-06-14 04:09:09','2026-06-14 04:09:09'),(4,'company_address','Indang, Cavite','2026-06-14 04:09:09','2026-06-14 04:09:09'),(5,'system_status','active','2026-06-14 04:09:09','2026-06-14 04:09:09');
+INSERT INTO `settings` VALUES (1,'company_name','D&C Prime Realty','2026-06-14 06:48:38','2026-06-14 06:48:38'),(2,'company_email','dcprime@gmail.com','2026-06-14 06:48:38','2026-06-14 06:48:38'),(3,'company_contact','09436532220','2026-06-14 06:48:38','2026-06-14 07:23:31'),(4,'company_address','Indang, Cavite','2026-06-14 06:48:38','2026-06-14 06:48:38'),(5,'system_status','active','2026-06-14 06:48:38','2026-06-14 06:48:38'),(6,'reservation_contact_name','Admin','2026-06-14 07:14:28','2026-06-14 07:14:28'),(7,'reservation_contact_email','admin@gmail.com','2026-06-14 07:14:28','2026-06-14 07:14:28'),(8,'reservation_contact_no','09055432543','2026-06-14 07:14:28','2026-06-14 07:16:06');
 /*!40000 ALTER TABLE `settings` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -1007,7 +1015,7 @@ CREATE TABLE `users` (
   KEY `idx_users_role` (`role`),
   KEY `idx_users_status` (`status`),
   KEY `idx_users_must_change_password` (`must_change_password`)
-) ENGINE=InnoDB AUTO_INCREMENT=18 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=10 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1016,7 +1024,7 @@ CREATE TABLE `users` (
 
 LOCK TABLES `users` WRITE;
 /*!40000 ALTER TABLE `users` DISABLE KEYS */;
-INSERT INTO `users` VALUES (1,'Super Admin','superadmin@gmail.com','$2b$10$NctIePlPkOKirDJpOSR5PemQyFQydpwRSK2uE2oTj5e1dmbpPwGGy','super_admin','active',0,'2026-06-14 13:55:40',NULL,'2026-06-14 10:10:56','2026-06-14 02:05:36','2026-06-14 05:55:40'),(2,'Rowena M. Cortez','rowena.cortez.bnm@test.com','$2b$10$NctIePlPkOKirDJpOSR5PemQyFQydpwRSK2uE2oTj5e1dmbpPwGGy','broker_network_manager','active',0,'2026-06-14 11:41:53',NULL,'2026-06-14 11:30:04','2026-06-14 03:30:04','2026-06-14 03:41:53'),(3,'Broker One Under Rowena','broker.one@test.com','$2b$10$NctIePlPkOKirDJpOSR5PemQyFQydpwRSK2uE2oTj5e1dmbpPwGGy','broker','active',0,'2026-06-14 11:37:55',NULL,'2026-06-14 11:30:04','2026-06-14 03:30:04','2026-06-14 03:37:55'),(4,'Broker Two Independent','broker.two@test.com','$2b$10$NctIePlPkOKirDJpOSR5PemQyFQydpwRSK2uE2oTj5e1dmbpPwGGy','broker','active',0,NULL,NULL,'2026-06-14 11:30:04','2026-06-14 03:30:04','2026-06-14 03:30:04'),(5,'Manager One A','manager.one.a@test.com','$2b$10$NctIePlPkOKirDJpOSR5PemQyFQydpwRSK2uE2oTj5e1dmbpPwGGy','manager','active',0,'2026-06-14 11:38:20',NULL,'2026-06-14 11:30:04','2026-06-14 03:30:04','2026-06-14 03:38:20'),(6,'Manager One B','manager.one.b@test.com','$2b$10$NctIePlPkOKirDJpOSR5PemQyFQydpwRSK2uE2oTj5e1dmbpPwGGy','manager','active',0,'2026-06-14 11:40:33',NULL,'2026-06-14 11:30:04','2026-06-14 03:30:04','2026-06-14 03:40:33'),(7,'Manager Two A','manager.two.a@test.com','$2b$10$NctIePlPkOKirDJpOSR5PemQyFQydpwRSK2uE2oTj5e1dmbpPwGGy','manager','active',0,NULL,NULL,'2026-06-14 11:30:04','2026-06-14 03:30:04','2026-06-14 03:30:04'),(8,'Manager Two B','manager.two.b@test.com','$2b$10$NctIePlPkOKirDJpOSR5PemQyFQydpwRSK2uE2oTj5e1dmbpPwGGy','manager','active',0,NULL,NULL,'2026-06-14 11:30:04','2026-06-14 03:30:04','2026-06-14 03:30:04'),(9,'Agent One A1','agent.one.a1@test.com','$2b$10$NctIePlPkOKirDJpOSR5PemQyFQydpwRSK2uE2oTj5e1dmbpPwGGy','agent','active',0,NULL,NULL,'2026-06-14 11:30:04','2026-06-14 03:30:04','2026-06-14 03:30:04'),(10,'Agent One A2','agent.one.a2@test.com','$2b$10$NctIePlPkOKirDJpOSR5PemQyFQydpwRSK2uE2oTj5e1dmbpPwGGy','agent','active',0,NULL,NULL,'2026-06-14 11:30:04','2026-06-14 03:30:04','2026-06-14 03:30:04'),(11,'Agent One B1','agent.one.b1@test.com','$2b$10$NctIePlPkOKirDJpOSR5PemQyFQydpwRSK2uE2oTj5e1dmbpPwGGy','agent','active',0,NULL,NULL,'2026-06-14 11:30:04','2026-06-14 03:30:04','2026-06-14 03:30:04'),(12,'Agent One B2','agent.one.b2@test.com','$2b$10$NctIePlPkOKirDJpOSR5PemQyFQydpwRSK2uE2oTj5e1dmbpPwGGy','agent','active',0,NULL,NULL,'2026-06-14 11:30:04','2026-06-14 03:30:04','2026-06-14 03:30:04'),(13,'Agent Two A1','agent.two.a1@test.com','$2b$10$NctIePlPkOKirDJpOSR5PemQyFQydpwRSK2uE2oTj5e1dmbpPwGGy','agent','active',0,NULL,NULL,'2026-06-14 11:30:04','2026-06-14 03:30:04','2026-06-14 03:30:04'),(14,'Agent Two A2','agent.two.a2@test.com','$2b$10$BuV2JEGiedPx/h4yjDWPHutn6g/LXGx3HtXQtjIDjPzpq8M64mGcK','agent','inactive',1,NULL,'2026-06-14 11:45:46','2026-06-14 11:30:04','2026-06-14 03:30:04','2026-06-14 03:46:36'),(15,'Agent Two B1','agent.two.b1@test.com','$2b$10$NctIePlPkOKirDJpOSR5PemQyFQydpwRSK2uE2oTj5e1dmbpPwGGy','agent','active',0,'2026-06-14 11:40:58',NULL,'2026-06-14 11:30:04','2026-06-14 03:30:04','2026-06-14 03:40:58'),(16,'Agent Two B2','agent.two.b2@test.com','$2b$10$NctIePlPkOKirDJpOSR5PemQyFQydpwRSK2uE2oTj5e1dmbpPwGGy','agent','active',0,NULL,NULL,'2026-06-14 11:30:04','2026-06-14 03:30:04','2026-06-14 03:30:04'),(17,'Admin','admin@gmail.com','$2b$10$NctIePlPkOKirDJpOSR5PemQyFQydpwRSK2uE2oTj5e1dmbpPwGGy','admin','active',0,'2026-06-14 13:08:34',NULL,'2026-06-14 11:48:18','2026-06-14 03:48:18','2026-06-14 05:08:34');
+INSERT INTO `users` VALUES (1,'Super Admin','superadmin@gmail.com','$2b$10$NctIePlPkOKirDJpOSR5PemQyFQydpwRSK2uE2oTj5e1dmbpPwGGy','super_admin','active',0,'2026-06-14 15:34:51',NULL,'2026-06-14 14:48:38','2026-06-14 06:48:38','2026-06-14 07:34:51'),(2,'Admin','admin@gmail.com','$2b$10$NctIePlPkOKirDJpOSR5PemQyFQydpwRSK2uE2oTj5e1dmbpPwGGy','admin','active',0,'2026-06-14 15:36:04',NULL,'2026-06-14 14:48:38','2026-06-14 06:48:38','2026-06-14 07:36:04'),(3,'Rowena M. Cortez','rowena.cortez.bnm@test.com','$2b$10$NctIePlPkOKirDJpOSR5PemQyFQydpwRSK2uE2oTj5e1dmbpPwGGy','broker_network_manager','active',0,'2026-06-14 15:24:03',NULL,'2026-06-14 14:48:38','2026-06-14 06:48:38','2026-06-14 07:24:03'),(4,'Broker One Under Rowena','broker.one@test.com','$2b$10$NctIePlPkOKirDJpOSR5PemQyFQydpwRSK2uE2oTj5e1dmbpPwGGy','broker','active',0,'2026-06-14 15:16:14',NULL,'2026-06-14 14:48:38','2026-06-14 06:48:38','2026-06-14 07:16:14'),(5,'Manager One A','manager.one.a@test.com','$2b$10$NctIePlPkOKirDJpOSR5PemQyFQydpwRSK2uE2oTj5e1dmbpPwGGy','manager','active',0,'2026-06-14 15:02:57',NULL,'2026-06-14 14:48:38','2026-06-14 06:48:38','2026-06-14 07:02:57'),(6,'Agent One A1','agent.one.a1@test.com','$2b$10$NctIePlPkOKirDJpOSR5PemQyFQydpwRSK2uE2oTj5e1dmbpPwGGy','agent','active',0,'2026-06-14 15:03:45',NULL,'2026-06-14 14:48:38','2026-06-14 06:48:38','2026-06-14 07:03:45'),(7,'Broker Two Independent','broker.two@test.com','$2b$10$NctIePlPkOKirDJpOSR5PemQyFQydpwRSK2uE2oTj5e1dmbpPwGGy','broker','active',0,NULL,NULL,'2026-06-14 14:48:38','2026-06-14 06:48:38','2026-06-14 06:48:38'),(8,'Manager Two A','manager.two.a@test.com','$2b$10$NctIePlPkOKirDJpOSR5PemQyFQydpwRSK2uE2oTj5e1dmbpPwGGy','manager','active',0,NULL,NULL,'2026-06-14 14:48:38','2026-06-14 06:48:38','2026-06-14 06:48:38'),(9,'Agent Two A1','agent.two.a1@test.com','$2b$10$NctIePlPkOKirDJpOSR5PemQyFQydpwRSK2uE2oTj5e1dmbpPwGGy','agent','active',0,NULL,NULL,'2026-06-14 14:48:38','2026-06-14 06:48:38','2026-06-14 06:48:38');
 /*!40000 ALTER TABLE `users` ENABLE KEYS */;
 UNLOCK TABLES;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
@@ -1029,4 +1037,4 @@ UNLOCK TABLES;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2026-06-14 14:19:48
+-- Dump completed on 2026-06-14 16:35:37
