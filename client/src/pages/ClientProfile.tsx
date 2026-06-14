@@ -341,7 +341,7 @@ type ReserveListingData = {
 
 type EditUnitData = {
   seller_id: string
-  due_day: string
+  due_date: string
   status: string
   mode_of_payment: "cash" | "installment"
   regenerate_commission: boolean
@@ -387,7 +387,7 @@ const createDefaultReserveData = (): ReserveListingData => ({
 
 const defaultEditUnitData: EditUnitData = {
   seller_id: "",
-  due_day: "",
+  due_date: "",
   status: "reserved",
   mode_of_payment: "installment",
   regenerate_commission: false,
@@ -859,7 +859,7 @@ const updateClientUnit = async ({
     },
     body: JSON.stringify({
       seller_id: unitData.seller_id ? Number(unitData.seller_id) : null,
-      due_day: unitData.due_day ? Number(unitData.due_day) : null,
+      due_date: unitData.due_date || null,
       status: unitData.status,
       mode_of_payment: unitData.mode_of_payment,
       regenerate_commission: unitData.regenerate_commission,
@@ -1605,7 +1605,7 @@ const ClientProfile = () => {
     setEditUnit(unit)
     setEditUnitData({
       seller_id: unit.seller_id ? String(unit.seller_id) : "",
-      due_day: unit.due_day ? String(unit.due_day) : "",
+      due_date: unit.due_date ? String(unit.due_date).slice(0, 10) : "",
       status: unit.status || "reserved",
       mode_of_payment:
         unit.mode_of_payment === "cash" ? "cash" : "installment",
@@ -3128,15 +3128,13 @@ const ClientProfile = () => {
             </Select>
 
             <Input
-              label="Due Day"
-              type="number"
-              min={1}
-              max={31}
-              value={editUnitData.due_day}
+              label="First Due Date"
+              type="date"
+              value={editUnitData.due_date}
               onChange={(e) =>
                 setEditUnitData({
                   ...editUnitData,
-                  due_day: e.target.value,
+                  due_date: e.target.value,
                 })
               }
             />
@@ -3185,7 +3183,7 @@ const ClientProfile = () => {
                   })
                 }
               />
-              Regenerate commission
+              Recalculate pending commissions
             </label>
           </div>
 
@@ -3196,7 +3194,7 @@ const ClientProfile = () => {
               </h3>
 
               <p className="mt-1 text-xs text-slate-600">
-                Regenerating commission will use the selected seller hierarchy and saved pool/split rates. Manual override seller/rate is no longer used.
+                Recalculate only when seller/rates were corrected. This cancels old pending commission records and creates new ones using the current saved rates. Released commissions and cash-advance-linked commissions are locked.
               </p>
             </div>
           ) : null}
@@ -3208,7 +3206,7 @@ const ClientProfile = () => {
           ) : null}
 
           <p className="mt-3 text-sm text-slate-500">
-            Seller/rate cannot be changed if a commission release was already paid.
+            Seller/rate changes are blocked after a commission release is paid or when this unit has pending/approved/deducted cash advances.
           </p>
         </Modal>
       ) : null}
@@ -3322,7 +3320,7 @@ const ClientProfile = () => {
                     })
                   }
                 />
-                Cancel old pending commissions and regenerate commission
+                Recalculate pending commissions for the new unit
               </label>
             </div>
 
@@ -3824,4 +3822,3 @@ const MiniDetail = ({
 }
 
 export default ClientProfile
-

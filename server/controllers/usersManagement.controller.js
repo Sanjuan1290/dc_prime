@@ -193,7 +193,7 @@ const validateParentSeller = async ({ role, parentSellerId, connection }) => {
     return { isValid: true, parentSeller: null }
   }
 
-  if (role === 'broker' && isMissing(parentSellerId)) {
+  if (['broker', 'manager'].includes(role) && isMissing(parentSellerId)) {
     return { isValid: true, parentSeller: null }
   }
 
@@ -243,7 +243,9 @@ const normalizeSellerProfile = ({ role, body, userFullName, userEmail, userStatu
     : null
   const directToDeveloperRate = role === 'agent'
     ? agentCommissionRate
-    : null
+    : role === 'manager'
+      ? managerAssignedRate
+      : null
   const maxDownlineRate = normalizeRate(sellerProfile.max_downline_rate)
 
   const rateErrors = [
@@ -945,5 +947,3 @@ export const linkUserToSeller = async (req, res) => {
 
   res.status(200).json({ message: 'User linked to seller successfully' })
 }
-
-

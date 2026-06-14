@@ -999,6 +999,7 @@
       WHERE client_unit_id = ?
         AND seller_id = ?
         AND source_type = ?
+        AND status <> 'cancelled'
         AND (
           parent_commission_id <=> ?
         )
@@ -2680,6 +2681,3 @@ export const addMissingOverrideCommission = async (req, res) => {
       data: rows,
     })
   }
-
-
-

@@ -384,8 +384,8 @@ const clientUnitFields = `
       CURDATE()
     )
   END AS days_until_due,
-  cu.starting_date,
-  cu.due_date,
+  DATE_FORMAT(cu.starting_date, '%Y-%m-%d') AS starting_date,
+  DATE_FORMAT(cu.due_date, '%Y-%m-%d') AS due_date,
   cu.offer_purchase_price,
   cu.reservation_fee_amount,
   cu.downpayment_amount,
@@ -1182,6 +1182,7 @@ export const updateClientUnit = async (req, res) => {
     assigned_user_id,
     seller_id,
     due_day,
+    due_date,
     status,
     mode_of_payment,
     regenerate_commission = false,
@@ -1216,6 +1217,13 @@ export const updateClientUnit = async (req, res) => {
     })
   }
 
+  const parsedDueDate = isMissing(due_date) ? null : parseDateOnly(due_date)
+
+  if (!isMissing(due_date) && !parsedDueDate) {
+    return res.status(400).json({
+      message: 'First due date must be a valid YYYY-MM-DD date',
+    })
+  }
 
   const finalSellerId = !isMissing(seller_id)
     ? seller_id
@@ -1273,9 +1281,15 @@ export const updateClientUnit = async (req, res) => {
       })
     }
 
-    const nextDueDay = isMissing(due_day)
-      ? existingClientUnit.due_day
-      : dueDayValidation.value
+    const nextDueDate = !isMissing(due_date)
+      ? parsedDueDate
+      : existingClientUnit.due_date
+
+    const nextDueDay = !isMissing(due_date)
+      ? getDueDayFromDate(parsedDueDate)
+      : isMissing(due_day)
+        ? existingClientUnit.due_day
+        : dueDayValidation.value
 
     const nextAssignedUserId = isMissing(assigned_user_id)
       ? existingClientUnit.assigned_user_id
@@ -1288,6 +1302,7 @@ export const updateClientUnit = async (req, res) => {
         assigned_user_id = ?,
         seller_id = ?,
         due_day = ?,
+        due_date = ?,
         status = ?,
         mode_of_payment = ?
       WHERE id = ?
@@ -1296,6 +1311,7 @@ export const updateClientUnit = async (req, res) => {
         nextAssignedUserId,
         nullableValue(finalSellerId),
         nextDueDay,
+        nullableValue(nextDueDate),
         finalStatus,
         finalModeOfPayment,
         id,
@@ -1325,23 +1341,50 @@ export const updateClientUnit = async (req, res) => {
     }
 
     if (regenerate_commission && !isMissing(finalSellerId)) {
+      const [cashAdvanceRows] = await connection.query(
+        `
+        SELECT COUNT(id) AS cash_advance_count
+        FROM cash_advances
+        WHERE client_unit_id = ?
+          AND status IN ('pending', 'approved', 'partially_deducted', 'deducted')
+        `,
+        [id]
+      )
+
+      if (Number(cashAdvanceRows[0]?.cash_advance_count || 0) > 0) {
+        await connection.rollback()
+        return res.status(400).json({
+          message: 'Cannot recalculate commissions while this unit has pending, approved, or deducted cash advances. Cancel or settle the cash advance first.',
+        })
+      }
+
+      if (releasedCount > 0) {
+        await connection.rollback()
+        return res.status(400).json({
+          message: 'Cannot recalculate commissions after a commission release has been paid.',
+        })
+      }
+
       await connection.query(
         `
-        DELETE cr
-        FROM commission_releases cr
+        UPDATE commission_releases cr
         INNER JOIN commissions cm ON cm.id = cr.commission_id
+        SET cr.status = 'cancelled'
         WHERE cm.client_unit_id = ?
           AND cr.status <> 'released'
-      `,
+        `,
         [id]
       )
 
       await connection.query(
         `
-        DELETE FROM commissions
+        UPDATE commissions
+        SET
+          status = 'cancelled',
+          notes = CONCAT(COALESCE(notes, ''), CASE WHEN COALESCE(notes, '') = '' THEN '' ELSE '\n' END, 'Cancelled before commission recalculation.')
         WHERE client_unit_id = ?
           AND status <> 'released'
-      `,
+        `,
         [id]
       )
 
@@ -1507,40 +1550,59 @@ export const changeClientUnitListing = async (req, res) => {
       [new_listing_id, finalStatus, normalizeMoney(newListing.total_contract_price), id]
     )
 
-    await connection.query(
-      `
-      UPDATE commission_releases cr
-      INNER JOIN commissions cm ON cm.id = cr.commission_id
-      SET cr.status = 'cancelled'
-      WHERE cm.client_unit_id = ?
-        AND cr.status <> 'released'
-      `,
-      [id]
-    )
-
-    await connection.query(
-      `
-      UPDATE commissions
-      SET status = 'cancelled'
-      WHERE client_unit_id = ?
-        AND status <> 'released'
-      `,
-      [id]
-    )
-
     let regeneratedCommission = null
 
     if (regenerate_commission && !isMissing(existingClientUnit.seller_id)) {
-      regeneratedCommission = await createAutoCommissionForClientUnit({
+      const [cashAdvanceRows] = await connection.query(
+        `
+        SELECT COUNT(id) AS cash_advance_count
+        FROM cash_advances
+        WHERE client_unit_id = ?
+          AND status IN ('pending', 'approved', 'partially_deducted', 'deducted')
+        `,
+        [id]
+      )
+
+      if (Number(cashAdvanceRows[0]?.cash_advance_count || 0) > 0) {
+        await connection.rollback()
+        return res.status(400).json({
+          message: 'Cannot change unit and recalculate commissions while this unit has pending, approved, or deducted cash advances. Cancel or settle the cash advance first.',
+        })
+      }
+
+      await connection.query(
+        `
+        UPDATE commission_releases cr
+        INNER JOIN commissions cm ON cm.id = cr.commission_id
+        SET cr.status = 'cancelled'
+        WHERE cm.client_unit_id = ?
+          AND cr.status <> 'released'
+        `,
+        [id]
+      )
+
+      await connection.query(
+        `
+        UPDATE commissions
+        SET
+          status = 'cancelled',
+          notes = CONCAT(COALESCE(notes, ''), CASE WHEN COALESCE(notes, '') = '' THEN '' ELSE '\n' END, 'Cancelled before unit-change commission recalculation.')
+        WHERE client_unit_id = ?
+          AND status <> 'released'
+        `,
+        [id]
+      )
+
+      regeneratedCommission = await createReservationCommissions({
         connection,
         clientUnitId: id,
+        listing: newListing,
         sellerId: existingClientUnit.seller_id,
-        rateOverride: null,
-        commissionRole: null,
-        sourceType: 'main',
-        parentCommissionId: null,
-        saleType: 'distributed',
-        notes: `Regenerated after unit change from ${oldListing?.unit_id || 'old unit'} to ${newListing.unit_id}`,
+        mainRateOverride: null,
+        saleType: existingClientUnit.sale_type || 'distributed',
+        cashKaliwaanAmount: 0,
+        cashKaliwaanDate: null,
+        cashKaliwaanNotes: null,
         actorRole: req.user.role,
       })
     }
@@ -1748,5 +1810,3 @@ export const deleteClientUnit = async (req, res) => {
     connection.release()
   }
 }
-
-

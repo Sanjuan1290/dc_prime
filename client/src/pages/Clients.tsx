@@ -640,31 +640,44 @@ const ClientForm = ({
           required
         />
 
-        <Input
-          label="Spouse / Co-owner Name"
-          value={clientData.spouse_co_owner_name}
-          onChange={(e) =>
-            setClientData({
-              ...clientData,
-              spouse_co_owner_name: e.target.value,
-            })
-          }
-        />
-
         <Select
           label="Buyer Type"
           value={clientData.buyer_type}
-          onChange={(e) =>
+          onChange={(e) => {
+            const buyerType = e.target.value as ClientFormData["buyer_type"]
             setClientData({
               ...clientData,
-              buyer_type: e.target.value as ClientFormData["buyer_type"],
+              buyer_type: buyerType,
+              spouse_co_owner_name:
+                buyerType === "single" ? "" : clientData.spouse_co_owner_name,
             })
-          }
+          }}
         >
           <option value="single">Single</option>
           <option value="spouses">Spouses</option>
           <option value="and_account">And Account</option>
         </Select>
+
+        {clientData.buyer_type !== "single" ? (
+          <Input
+            label={
+              clientData.buyer_type === "spouses"
+                ? "Spouse's Name (optional)"
+                : "Second Buyer's Name (optional)"
+            }
+            value={clientData.spouse_co_owner_name}
+            onChange={(e) =>
+              setClientData({
+                ...clientData,
+                spouse_co_owner_name: e.target.value,
+              })
+            }
+          />
+        ) : (
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500">
+            No spouse or second buyer for single buyer type.
+          </div>
+        )}
 
         <Input
           label="Email"
@@ -744,3 +757,6 @@ const ClientForm = ({
 };
 
 export default Clients;
+
+
+

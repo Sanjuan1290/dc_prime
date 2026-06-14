@@ -4,6 +4,7 @@ import { getClientIp } from '../utils/getClientIp.js'
 import { refreshCommissionEligibility } from './commissions.controller.js'
 import {
   copyProjectRequirementsToListing,
+  ensureClientDocumentChecklistForClientUnit,
   getListingDocumentRequirements as loadListingDocumentRequirements,
   replaceListingDocumentRequirements,
 } from '../utils/documentRequirements.js'
@@ -428,6 +429,8 @@ export const getListingFullDetails = async (req, res) => {
   }
 
   if (clientUnit) {
+    await ensureClientDocumentChecklistForClientUnit(db, clientUnit.id)
+
     const [paymentRows] = await db.query(
       `
       SELECT
@@ -934,4 +937,7 @@ export const deleteListing = async (req, res) => {
 
   return res.status(200).json({ message: 'Listing deleted successfully' })
 }
+
+
+
 

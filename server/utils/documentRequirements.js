@@ -286,7 +286,7 @@ export const createClientDocumentChecklistFromListing = async (
     return { insertedCount: 0 }
   }
 
-  const [requirements] = await connectionOrDb.query(
+  let [requirements] = await connectionOrDb.query(
     `
     SELECT
       ldr.document_id,
@@ -301,6 +301,40 @@ export const createClientDocumentChecklistFromListing = async (
     `,
     [clientUnit.listing_id]
   )
+
+  if (requirements.length === 0) {
+    const [listingRows] = await connectionOrDb.query(
+      `SELECT id, project_id FROM listings WHERE id = ? LIMIT 1`,
+      [clientUnit.listing_id]
+    )
+
+    const listing = listingRows[0]
+
+    if (listing?.project_id) {
+      await copyProjectRequirementsToListing(
+        connectionOrDb,
+        clientUnit.listing_id,
+        listing.project_id,
+        { overwrite: false }
+      )
+
+      ;[requirements] = await connectionOrDb.query(
+        `
+        SELECT
+          ldr.document_id,
+          ldr.is_required,
+          ldr.source
+        FROM listing_document_requirements ldr
+        INNER JOIN documents d ON d.id = ldr.document_id
+        WHERE ldr.listing_id = ?
+          AND ldr.status = 'active'
+          AND d.status = 'active'
+        ORDER BY ldr.sort_order ASC, ldr.id ASC
+        `,
+        [clientUnit.listing_id]
+      )
+    }
+  }
 
   if (requirements.length === 0) {
     return { insertedCount: 0 }
@@ -328,6 +362,49 @@ export const createClientDocumentChecklistFromListing = async (
   )
 
   return { insertedCount: result.affectedRows }
+}
+
+
+export const ensureClientDocumentChecklistForClientUnit = async (
+  connectionOrDb,
+  clientUnitId
+) => {
+  if (isMissing(clientUnitId)) return { insertedCount: 0 }
+
+  const [clientUnitRows] = await connectionOrDb.query(
+    `SELECT id, listing_id FROM client_units WHERE id = ? LIMIT 1`,
+    [clientUnitId]
+  )
+
+  const clientUnit = clientUnitRows[0]
+
+  if (!clientUnit) return { insertedCount: 0 }
+
+  return createClientDocumentChecklistFromListing(connectionOrDb, clientUnit)
+}
+
+export const ensureClientDocumentChecklistsForClient = async (
+  connectionOrDb,
+  clientId
+) => {
+  if (isMissing(clientId)) return { insertedCount: 0 }
+
+  const [clientUnitRows] = await connectionOrDb.query(
+    `SELECT id, listing_id FROM client_units WHERE client_id = ?`,
+    [clientId]
+  )
+
+  let insertedCount = 0
+
+  for (const clientUnit of clientUnitRows) {
+    const result = await createClientDocumentChecklistFromListing(
+      connectionOrDb,
+      clientUnit
+    )
+    insertedCount += Number(result.insertedCount || 0)
+  }
+
+  return { insertedCount }
 }
 
 export const getDocumentTemplateItems = async (connectionOrDb, templateId) => {
@@ -450,3 +527,6 @@ export const getDocumentTemplates = async (connectionOrDb) => {
 
   return hydrated
 }
+
+
+

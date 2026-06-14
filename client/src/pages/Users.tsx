@@ -261,16 +261,16 @@ const getParentOptions = (role: string, sellers: AccreditedSeller[]) => {
 
 const getParentLabel = (role: string) => {
   if (role === "broker") return "Reports Under Broker Network Manager"
-  if (role === "manager") return "Reports Under Broker"
+  if (role === "manager") return "Reports Under Broker (optional)"
   if (role === "agent") return "Reports Under Manager"
   return "Reports Under"
 }
 
 const getSellerSetupNote = (role: string) => {
   if (role === "broker_network_manager") return "BNM has no parent. Only the BNM pool rate is needed."
-  if (role === "broker") return "Select BNM if this broker belongs to a network. Broker pool cannot exceed the BNM pool."
-  if (role === "manager") return "Select only the broker. Manager rate cannot exceed the broker pool. Broker can edit this later in My Team."
-  if (role === "agent") return "Select only the manager. Agent rate cannot exceed the manager rate. Direct-to-developer creates no override release."
+  if (role === "broker") return "Select BNM only if this broker belongs to a network. Independent brokers can stay Company / No BNM."
+  if (role === "manager") return "Reports Under is optional. Leave it blank for a company/direct-to-developer manager. If under a broker, manager rate cannot exceed the broker pool."
+  if (role === "agent") return "Reports Under Manager is required. Agent rate cannot exceed the manager rate. Direct-to-developer creates no override release."
   return ""
 }
 
@@ -708,7 +708,13 @@ const Users = () => {
 
                 {form.role !== "broker_network_manager" ? (
                   <Select label={getParentLabel(form.role)} value={form.seller_profile.parent_seller_id} onChange={(e) => updateSellerProfile({ parent_seller_id: e.target.value })}>
-                    {form.role === "broker" ? <option value="">Company / No BNM</option> : <option value="">Select {getParentLabel(form.role).replace("Reports Under ", "")}</option>}
+                    {form.role === "broker" ? (
+                      <option value="">Company / No BNM</option>
+                    ) : form.role === "manager" ? (
+                      <option value="">Company / Direct to Developer</option>
+                    ) : (
+                      <option value="">Select Manager</option>
+                    )}
                     {parentOptions.map((seller) => (
                       <option key={seller.id} value={seller.id}>
                         {seller.full_name} {seller.reports_under_display ? `— under ${seller.reports_under_display}` : ""}
@@ -777,5 +783,3 @@ const Users = () => {
 }
 
 export default Users
-
-
