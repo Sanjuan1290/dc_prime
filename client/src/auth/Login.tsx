@@ -44,8 +44,12 @@ const Login = () => {
 
       return res.json()
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["token"] })
+      if (data?.user?.must_change_password) {
+        navigate("/change-password", { replace: true })
+        return
+      }
       navigate(redirectPath, { replace: true })
     },
   })
@@ -80,7 +84,7 @@ const Login = () => {
               Sign in
             </h2>
             <p className="mt-2 text-sm text-slate-500">
-              Use your D&C Prime admin credentials to continue.
+              Use your D&C Prime account credentials to continue.
             </p>
           </div>
 

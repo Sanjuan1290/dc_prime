@@ -1117,7 +1117,7 @@ const Commissions = () => {
       <PageHeader
         icon={<FiDollarSign />}
         title="Commissions"
-        subtitle="Track main commissions, optional override commissions, release milestones, and cash advance deductions"
+        subtitle="Track main commissions, manager, broker, and BNM override commissions, release milestones, and cash advance deductions"
       />
 
       {successMessage ? <Alert variant="success" title={successMessage} /> : null}
@@ -1244,7 +1244,7 @@ const Commissions = () => {
                     <th className="px-4 py-3 text-left">Client / Unit</th>
                     <th className="px-4 py-3 text-left">Main Commission</th>
                     <th className="px-4 py-3 text-left">
-                      Agent / Optional Override Commission
+                      Commission Chain / Override Milestones
                     </th>
                     <th className="px-4 py-3 text-left">TCP / Paid</th>
                     <th className="px-4 py-3 text-left">Release Progress</th>
@@ -1318,7 +1318,7 @@ const Commissions = () => {
                                   onClick={() => openMissingOverrideModal(main)}
                                   variant="secondary"
                                 >
-                                  Add Missing Override
+                                  Add Manual Override
                                 </Button>
                               ) : null}
                             </div>
@@ -1563,7 +1563,7 @@ const Commissions = () => {
             editData.sale_type === "distributed" ? (
               <div className="rounded-xl border border-blue-100 bg-blue-50 p-4">
                 <h3 className="text-sm font-bold text-slate-900">
-                  Agent / Optional Override Commission
+                  Commission Chain / Override Milestones
                 </h3>
 
                 <p className="mt-1 text-xs text-slate-600">
@@ -1575,7 +1575,7 @@ const Commissions = () => {
 
                 <div className="mt-4 grid gap-4 md:grid-cols-2">
                   <Select
-                    label="Override Seller"
+                    label="Override / Residual Seller"
                     value={editData.override_seller_id}
                     onChange={(e) =>
                       setEditData({
@@ -1597,7 +1597,7 @@ const Commissions = () => {
                   </Select>
 
                   <Input
-                    label="Override Rate (%)"
+                    label="Override / Residual Rate (%)"
                     type="number"
                     min={0}
                     step="0.01"
@@ -1612,7 +1612,7 @@ const Commissions = () => {
 
                   <label className="block md:col-span-2">
                     <span className="mb-1.5 block text-sm font-semibold text-slate-700">
-                      Override Notes
+                      Override / Residual Notes
                     </span>
                     <textarea
                       className="min-h-24 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
@@ -1630,7 +1630,7 @@ const Commissions = () => {
                 {selectedOverrideSeller ? (
                   <div className="mt-4 rounded-lg border border-blue-100 bg-white p-3">
                     <p className="text-xs font-semibold uppercase text-slate-400">
-                      Selected Override Seller
+                      Selected Override / Residual Seller
                     </p>
                     <p className="mt-1 text-sm font-bold text-slate-900">
                       {selectedOverrideSeller.full_name}
@@ -1714,7 +1714,7 @@ const Commissions = () => {
 
       {missingOverrideMain ? (
         <Modal
-          title={`Add Missing Override - ${missingOverrideMain.client_name}`}
+          title={`Add Manual Override - ${missingOverrideMain.client_name}`}
           onClose={() => {
             setMissingOverrideMain(null)
             setMissingOverrideData(defaultMissingOverrideData)
@@ -1741,7 +1741,7 @@ const Commissions = () => {
               >
                 {addMissingOverrideMutation.isPending
                   ? "Saving..."
-                  : "Add Missing Override"}
+                  : "Add Manual Override"}
               </Button>
             </div>
           }
@@ -1773,7 +1773,7 @@ const Commissions = () => {
 
             <div className="grid gap-4 md:grid-cols-2">
               <Select
-                label="Override Seller"
+                label="Override / Residual Seller"
                 value={missingOverrideData.seller_id}
                 onChange={(e) =>
                   setMissingOverrideData({
@@ -1793,7 +1793,7 @@ const Commissions = () => {
               </Select>
 
               <Input
-                label="Override Rate (%)"
+                label="Override / Residual Rate (%)"
                 type="number"
                 min={0}
                 step="0.01"
@@ -1834,7 +1834,7 @@ const Commissions = () => {
 
               <label className="block md:col-span-2">
                 <span className="mb-1.5 block text-sm font-semibold text-slate-700">
-                  Override Notes
+                  Override / Residual Notes
                 </span>
                 <textarea
                   className="min-h-24 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
@@ -1885,7 +1885,7 @@ const Commissions = () => {
             {selectedMissingOverrideSeller ? (
               <div className="rounded-lg border border-blue-100 bg-blue-50 p-3">
                 <p className="text-xs font-semibold uppercase text-slate-400">
-                  Selected Override Seller
+                  Selected Override / Residual Seller
                 </p>
                 <p className="mt-1 text-sm font-bold text-slate-900">
                   {selectedMissingOverrideSeller.full_name}

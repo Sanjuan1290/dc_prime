@@ -17,6 +17,7 @@ import {
   unholdRelease,
   restoreCancelledRelease,
   getApprovedCashAdvancesBySeller,
+  markClientUnitRetentionEligible,
 } from '../controllers/commissions.controller.js'
 import { auth } from '../middlewares/auth.middleware.js'
 
@@ -42,6 +43,7 @@ router.get('/commissions/:id', auth, getCommission)
 router.post('/commissions', auth, createCommission)
 router.patch('/commissions/:id', auth, updateCommission)
 
+router.patch('/client-units/:clientUnitId/commission-retention/eligible', auth, markClientUnitRetentionEligible)
 router.get('/client-units/:clientUnitId/commissions', auth, getCommissionsByClientUnit)
 router.post(
   '/client-units/:clientUnitId/commissions/generate-hierarchy',

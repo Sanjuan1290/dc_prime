@@ -21,6 +21,11 @@ import CashAdvances from "./pages/CashAdvances"
 import OfferToBuyPrint from "./pages/OfferToBuyPrint"
 import StatementOfAccountPrint from "./pages/StatementOfAccountPrint"
 import Users from "./pages/Users"
+import TeamSales from "./pages/TeamSales"
+import MyTeam from "./pages/MyTeam"
+import AvailableUnits from "./pages/AvailableUnits"
+import SellerDashboard from "./pages/SellerDashboard"
+import ChangePassword from "./pages/ChangePassword"
 
 
 const App = () => {
@@ -47,6 +52,11 @@ const App = () => {
         <Route path="users" element={<Users/>} />
         <Route path="employees" element={<Employees/>} />
         <Route path="attendance" element={<Attendance/>} />
+        <Route path="change-password" element={<ChangePassword />} />
+        <Route path="seller-dashboard" element={<SellerDashboard />} />
+        <Route path="available-units" element={<AvailableUnits />} />
+        <Route path="my-team" element={<MyTeam />} />
+        <Route path="team-sales" element={<TeamSales />} />
       </Route>
 
       <Route path="client/:clientId/units/:clientUnitId/offer-to-buy/print" element={<OfferToBuyPrint />} />

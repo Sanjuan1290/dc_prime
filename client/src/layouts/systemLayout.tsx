@@ -40,6 +40,7 @@ type CurrentUserResponse = {
     email?: string
     full_name?: string
     role?: string
+    must_change_password?: boolean
   }
 }
 
@@ -114,6 +115,17 @@ const navGroups: NavGroup[] = [
     items: [{ label: "Dashboard", to: "/dashboard", icon: FiHome, tone: "blue" }],
   },
   {
+    title: "Seller Portal",
+    description: "Team and seller tools",
+    tone: "emerald",
+    items: [
+      { label: "Seller Dashboard", to: "/seller-dashboard", icon: FiHome, tone: "blue" },
+      { label: "Available Units", to: "/available-units", icon: FiGrid, tone: "emerald" },
+      { label: "My Team", to: "/my-team", icon: FiUsers, tone: "emerald" },
+      { label: "Team Sales", to: "/team-sales", icon: FiBarChart2, tone: "rose" },
+    ],
+  },
+  {
     title: "Management",
     description: "Projects, units, and buyers",
     tone: "emerald",
@@ -171,12 +183,12 @@ const navGroups: NavGroup[] = [
 
 
 const roleAllowedPaths: Record<string, string[]> = {
-  super_admin: ["/dashboard", "/projects", "/listings", "/clients", "/client", "/accreditted_sellers", "/payments", "/commissions", "/cash-advances", "/documents", "/audit-logs", "/reports", "/employees", "/attendance", "/settings", "/users"],
-  admin: ["/dashboard", "/projects", "/listings", "/clients", "/client", "/accreditted_sellers", "/payments", "/commissions", "/cash-advances", "/documents", "/audit-logs", "/reports", "/employees", "/attendance", "/settings"],
-  broker_network_manager: ["/dashboard", "/commissions", "/cash-advances"],
-  broker: ["/dashboard", "/commissions", "/cash-advances"],
-  manager: ["/dashboard", "/commissions", "/cash-advances"],
-  agent: ["/dashboard", "/commissions", "/cash-advances"],
+  super_admin: ["/dashboard", "/projects", "/listings", "/clients", "/client", "/accreditted_sellers", "/payments", "/commissions", "/cash-advances", "/documents", "/audit-logs", "/reports", "/employees", "/attendance", "/settings", "/users", "/change-password"],
+  admin: ["/dashboard", "/projects", "/listings", "/clients", "/client", "/accreditted_sellers", "/payments", "/commissions", "/cash-advances", "/documents", "/audit-logs", "/reports", "/employees", "/attendance", "/settings", "/users", "/change-password"],
+  broker_network_manager: ["/seller-dashboard", "/available-units", "/my-team", "/team-sales", "/commissions", "/cash-advances", "/change-password"],
+  broker: ["/seller-dashboard", "/available-units", "/my-team", "/team-sales", "/commissions", "/cash-advances", "/change-password"],
+  manager: ["/seller-dashboard", "/available-units", "/my-team", "/team-sales", "/commissions", "/cash-advances", "/change-password"],
+  agent: ["/seller-dashboard", "/available-units", "/team-sales", "/commissions", "/cash-advances", "/change-password"],
 }
 
 const canAccessPath = (role: string | undefined, path: string) => {
@@ -234,8 +246,15 @@ const SystemLayout = () => {
     return <Navigate to="/" replace state={{ from: location.pathname }} />
   }
 
+  if (currentUser.must_change_password && location.pathname !== "/change-password") {
+    return <Navigate to="/change-password" replace />
+  }
+
+  const sellerRoles = ["broker_network_manager", "broker", "manager", "agent"]
+  const defaultPath = sellerRoles.includes(currentUser.role || "") ? "/seller-dashboard" : "/dashboard"
+
   if (!canAccessPath(currentUser.role, location.pathname)) {
-    return <Navigate to="/dashboard" replace />
+    return <Navigate to={defaultPath} replace />
   }
 
   const sidebar = (

@@ -20,7 +20,8 @@ export const auth = async (req, res, next) => {
         full_name,
         email,
         role,
-        status
+        status,
+        must_change_password
       FROM users
       WHERE id = ?
       LIMIT 1

@@ -1,6 +1,7 @@
   import { db } from '../db/connect.js'
   import { createAuditLog } from '../utils/createAuditLog.js'
   import { getClientIp } from '../utils/getClientIp.js'
+  import { getVisibleSellerIdsForUser, isOfficeRole } from '../utils/sellerVisibility.js'
 
   const isMissing = (value) => {
     return value === undefined || value === null || value === ''
@@ -1042,6 +1043,16 @@
     const conditions = []
     const params = []
 
+    const visibleSellerIds = await getVisibleSellerIdsForUser(req.user)
+    if (visibleSellerIds !== null) {
+      if (visibleSellerIds.length === 0) {
+        conditions.push('1 = 0')
+      } else {
+        conditions.push(`cm.seller_id IN (${visibleSellerIds.map(() => '?').join(', ')})`)
+        params.push(...visibleSellerIds)
+      }
+    }
+
     if (!isMissing(search)) {
       const searchTerm = `%${search}%`
 
@@ -1077,7 +1088,7 @@
       params.push(status)
     }
 
-    if (!isMissing(seller_id) && seller_id !== 'all') {
+    if (isOfficeRole(req.user.role) && !isMissing(seller_id) && seller_id !== 'all') {
       conditions.push('cm.seller_id = ?')
       params.push(seller_id)
     }
@@ -1843,6 +1854,96 @@ export const addMissingOverrideCommission = async (req, res) => {
       message:
         'Automatic hierarchy commissions are disabled. Use optional override commission instead.',
     })
+  }
+
+
+  export const markClientUnitRetentionEligible = async (req, res) => {
+    const { clientUnitId } = req.params
+
+    if (req.user.role !== 'super_admin') {
+      return res.status(403).json({
+        message: 'Only super admin can make retention eligible.',
+      })
+    }
+
+    const connection = await db.getConnection()
+
+    try {
+      await connection.beginTransaction()
+
+      const [clientUnitRows] = await connection.query(
+        `
+        SELECT id, status
+        FROM client_units
+        WHERE id = ?
+        LIMIT 1
+        FOR UPDATE
+        `,
+        [clientUnitId]
+      )
+
+      const clientUnit = clientUnitRows[0]
+      if (!clientUnit) {
+        await connection.rollback()
+        return res.status(404).json({ message: 'Client unit not found' })
+      }
+
+      if (!['fully_paid', 'closed'].includes(clientUnit.status)) {
+        await connection.rollback()
+        return res.status(400).json({
+          message: 'Retention can only become eligible when the account is fully paid or closed.',
+        })
+      }
+
+      const documentStatus = await getDocumentStatusForClientUnit(connection, clientUnitId)
+      if (!documentStatus.isComplete) {
+        await connection.rollback()
+        return res.status(400).json({
+          message: 'Retention cannot become eligible until required documents are complete.',
+        })
+      }
+
+      const [result] = await connection.query(
+        `
+        UPDATE commission_releases cr
+        INNER JOIN commissions cm ON cm.id = cr.commission_id
+        SET cr.status = 'eligible'
+        WHERE cm.client_unit_id = ?
+          AND cr.release_stage = 'retention'
+          AND cr.status = 'pending'
+        `,
+        [clientUnitId]
+      )
+
+      const [commissionRows] = await connection.query(
+        `SELECT id FROM commissions WHERE client_unit_id = ?`,
+        [clientUnitId]
+      )
+
+      for (const commission of commissionRows) {
+        await refreshCommissionStatus(connection, commission.id)
+      }
+
+      await connection.commit()
+
+      await createAuditLog({
+        userId: req.user.id,
+        action: 'retention_eligible',
+        module: 'Commission Releases',
+        description: `Marked retention eligible for client unit ${clientUnitId}`,
+        ipAddress: getClientIp(req),
+      })
+
+      return res.status(200).json({
+        message: 'Retention marked eligible successfully',
+        updatedCount: result.affectedRows,
+      })
+    } catch (error) {
+      await connection.rollback()
+      throw error
+    } finally {
+      connection.release()
+    }
   }
 
   export const getCommissionSummary = async (req, res) => {

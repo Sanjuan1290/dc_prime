@@ -516,7 +516,12 @@ export const updateAccreditedSeller = async (req, res) => {
     })
   }
 
-  const finalSellerRole = validateSellerRole(seller_role)
+  // Accredited Sellers page now edits basic seller information only.
+  // Role, reports-under, and commission rates are managed from User Management.
+  // These fallbacks prevent basic edits from accidentally resetting hierarchy/rates.
+  const finalSellerRole = validateSellerRole(
+    isMissing(seller_role) ? existingSeller.seller_role : seller_role
+  )
 
   if (!finalSellerRole) {
     return res.status(400).json({
@@ -532,10 +537,17 @@ export const updateAccreditedSeller = async (req, res) => {
     })
   }
 
+  const finalParentSellerId = isMissing(parent_seller_id)
+    ? existingSeller.parent_seller_id
+    : parent_seller_id
+  const finalCustomReportsUnder = custom_reports_under === undefined
+    ? existingSeller.custom_reports_under
+    : custom_reports_under
+
   const parentValidation = await validateParentSeller({
     sellerId: id,
     sellerRole: finalSellerRole,
-    parentSellerId: parent_seller_id,
+    parentSellerId: finalParentSellerId,
   })
 
   if (parentValidation && !parentValidation.isValid) {
@@ -550,11 +562,21 @@ export const updateAccreditedSeller = async (req, res) => {
       ? null
       : normalizeRate(existingSeller.commission_rate)
 
-  const newRate = normalizeRate(commission_rate)
-  const finalCommissionPoolRate = normalizeRate(commission_pool_rate)
-  const finalPersonalCommissionRate = normalizeRate(personal_commission_rate)
-  const finalOverrideCommissionRate = normalizeRate(override_commission_rate)
-  const finalMaxDownlineRate = normalizeRate(max_downline_rate)
+  const newRate = commission_rate === undefined
+    ? oldRate
+    : normalizeRate(commission_rate)
+  const finalCommissionPoolRate = commission_pool_rate === undefined
+    ? normalizeRate(existingSeller.commission_pool_rate)
+    : normalizeRate(commission_pool_rate)
+  const finalPersonalCommissionRate = personal_commission_rate === undefined
+    ? normalizeRate(existingSeller.personal_commission_rate)
+    : normalizeRate(personal_commission_rate)
+  const finalOverrideCommissionRate = override_commission_rate === undefined
+    ? normalizeRate(existingSeller.override_commission_rate)
+    : normalizeRate(override_commission_rate)
+  const finalMaxDownlineRate = max_downline_rate === undefined
+    ? normalizeRate(existingSeller.max_downline_rate)
+    : normalizeRate(max_downline_rate)
 
   const rateValidation = validateCommissionPoolFields({
     sellerRole: finalSellerRole,
@@ -580,7 +602,6 @@ export const updateAccreditedSeller = async (req, res) => {
       `
       UPDATE accredited_sellers
       SET
-        user_id = ?,
         full_name = ?,
         email = ?,
         contact_no = ?,
@@ -595,17 +616,19 @@ export const updateAccreditedSeller = async (req, res) => {
         override_commission_rate = ?,
         max_downline_rate = ?,
         rate_set_by = ?,
-        rate_updated_at = NOW()
+        rate_updated_at = CASE
+          WHEN ? = 1 THEN NOW()
+          ELSE rate_updated_at
+        END
       WHERE id = ?
       `,
       [
-        null,
         full_name,
         nullableValue(email),
         nullableValue(contact_no),
         finalSellerRole,
-        nullableValue(parent_seller_id),
-        nullableValue(custom_reports_under),
+        nullableValue(finalParentSellerId),
+        nullableValue(finalCustomReportsUnder),
         finalStatus,
         nullableValue(accreditation_date),
         newRate,
@@ -614,6 +637,7 @@ export const updateAccreditedSeller = async (req, res) => {
         finalOverrideCommissionRate,
         finalMaxDownlineRate,
         req.user?.id || null,
+        rateChanged ? 1 : 0,
         id,
       ]
     )

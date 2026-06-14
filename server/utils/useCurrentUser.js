@@ -22,6 +22,7 @@ const useCurrentUser = async (req, res) => {
         email,
         role,
         status,
+        must_change_password,
         last_login,
         created_at,
         updated_at

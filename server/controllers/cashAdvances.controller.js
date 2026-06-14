@@ -1,6 +1,7 @@
 import { db } from '../db/connect.js'
 import { createAuditLog } from '../utils/createAuditLog.js'
 import { getClientIp } from '../utils/getClientIp.js'
+import { getVisibleSellerIdsForUser, isOfficeRole } from '../utils/sellerVisibility.js'
 
 const allowedCashAdvanceStatuses = [
   'pending',
@@ -151,6 +152,16 @@ export const getCashAdvances = async (req, res) => {
   const conditions = []
   const params = []
 
+  const visibleSellerIds = await getVisibleSellerIdsForUser(req.user)
+  if (visibleSellerIds !== null) {
+    if (visibleSellerIds.length === 0) {
+      conditions.push('1 = 0')
+    } else {
+      conditions.push(`ca.seller_id IN (${visibleSellerIds.map(() => '?').join(', ')})`)
+      params.push(...visibleSellerIds)
+    }
+  }
+
   if (!isMissing(search)) {
     const searchTerm = `%${search}%`
 
@@ -182,7 +193,7 @@ export const getCashAdvances = async (req, res) => {
     params.push(status)
   }
 
-  if (!isMissing(seller_id) && seller_id !== 'all') {
+  if (isOfficeRole(req.user.role) && !isMissing(seller_id) && seller_id !== 'all') {
     conditions.push('ca.seller_id = ?')
     params.push(seller_id)
   }

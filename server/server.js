@@ -23,6 +23,7 @@ import useCurrentUser from './utils/useCurrentUser.js'
 import cashAdvancesRouter from './routers/cashAdvances.router.js'
 import printFormsRouter from './routers/printForms.router.js'
 import usersManagementRouter from './routers/usersManagement.router.js'
+import sellerPortalRouter from './routers/sellerPortal.router.js'
 import { startPaymentReminderJob } from './jobs/paymentReminderJob.js'
 import { startDocumentReminderJob } from './jobs/documentReminderJob.js'
 
@@ -62,6 +63,7 @@ app.use('/api/v1', settingsRouter)
 app.use('/api/v1', cashAdvancesRouter)
 app.use('/api/v1', printFormsRouter)
 app.use('/api/v1', usersManagementRouter)
+app.use('/api/v1', sellerPortalRouter)
 
 app.use((req, res) => {
   res.status(404).json({
