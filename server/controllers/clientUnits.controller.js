@@ -6,6 +6,7 @@ import {
   createAutoCommissionForClientUnit,
   createHierarchyCommissionsForClientUnit,
   refreshCommissionEligibility,
+  recalculatePendingCommissionsForClientUnit,
 } from './commissions.controller.js'
 
 const allowedClientUnitStatuses = [
@@ -1365,41 +1366,12 @@ export const updateClientUnit = async (req, res) => {
         })
       }
 
-      await connection.query(
-        `
-        UPDATE commission_releases cr
-        INNER JOIN commissions cm ON cm.id = cr.commission_id
-        SET cr.status = 'cancelled'
-        WHERE cm.client_unit_id = ?
-          AND cr.status <> 'released'
-        `,
-        [id]
-      )
-
-      await connection.query(
-        `
-        UPDATE commissions
-        SET
-          status = 'cancelled',
-          notes = CONCAT(COALESCE(notes, ''), CASE WHEN COALESCE(notes, '') = '' THEN '' ELSE '\n' END, 'Cancelled before commission recalculation.')
-        WHERE client_unit_id = ?
-          AND status <> 'released'
-        `,
-        [id]
-      )
-
-      const listing = await getListingById(connection, existingClientUnit.listing_id)
-
-      regeneratedCommission = await createReservationCommissions({
+      regeneratedCommission = await recalculatePendingCommissionsForClientUnit({
         connection,
         clientUnitId: id,
-        listing,
         sellerId: finalSellerId,
-        mainRateOverride: main_commission_rate_override,
         saleType: finalSaleType,
-        cashKaliwaanAmount: 0,
-        cashKaliwaanDate: null,
-        cashKaliwaanNotes: null,
+        notes: 'Recalculated in place using current seller account rates.',
         actorRole: req.user.role,
       })
     }
@@ -1570,39 +1542,12 @@ export const changeClientUnitListing = async (req, res) => {
         })
       }
 
-      await connection.query(
-        `
-        UPDATE commission_releases cr
-        INNER JOIN commissions cm ON cm.id = cr.commission_id
-        SET cr.status = 'cancelled'
-        WHERE cm.client_unit_id = ?
-          AND cr.status <> 'released'
-        `,
-        [id]
-      )
-
-      await connection.query(
-        `
-        UPDATE commissions
-        SET
-          status = 'cancelled',
-          notes = CONCAT(COALESCE(notes, ''), CASE WHEN COALESCE(notes, '') = '' THEN '' ELSE '\n' END, 'Cancelled before unit-change commission recalculation.')
-        WHERE client_unit_id = ?
-          AND status <> 'released'
-        `,
-        [id]
-      )
-
-      regeneratedCommission = await createReservationCommissions({
+      regeneratedCommission = await recalculatePendingCommissionsForClientUnit({
         connection,
         clientUnitId: id,
-        listing: newListing,
         sellerId: existingClientUnit.seller_id,
-        mainRateOverride: null,
         saleType: existingClientUnit.sale_type || 'distributed',
-        cashKaliwaanAmount: 0,
-        cashKaliwaanDate: null,
-        cashKaliwaanNotes: null,
+        notes: 'Recalculated in place after unit change using current seller account rates.',
         actorRole: req.user.role,
       })
     }
@@ -1810,6 +1755,3 @@ export const deleteClientUnit = async (req, res) => {
     connection.release()
   }
 }
-
-
-

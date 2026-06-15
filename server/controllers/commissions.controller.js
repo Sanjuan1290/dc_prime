@@ -223,6 +223,7 @@
         cu.client_id,
         cu.listing_id,
         cu.seller_id,
+        cu.sale_type,
         cu.status AS client_unit_status,
         client.full_name AS client_name,
         listing.unit_id,
@@ -587,6 +588,542 @@
     return getReleasesByCommissionId(commissionId)
   }
 
+  const releaseMilestones = [
+    {
+      release_stage: '1st_release',
+      trigger_payment_percent: 20,
+      release_percent: 20,
+      cumulative_release_percent: 20,
+    },
+    {
+      release_stage: '2nd_release',
+      trigger_payment_percent: 40,
+      release_percent: 20,
+      cumulative_release_percent: 40,
+    },
+    {
+      release_stage: '3rd_release',
+      trigger_payment_percent: 60,
+      release_percent: 20,
+      cumulative_release_percent: 60,
+    },
+    {
+      release_stage: '4th_release',
+      trigger_payment_percent: 75,
+      release_percent: 15,
+      cumulative_release_percent: 75,
+    },
+    {
+      release_stage: 'retention',
+      trigger_payment_percent: null,
+      release_percent: 25,
+      cumulative_release_percent: 100,
+    },
+  ]
+
+  const syncReleaseMilestonesForCommission = async (
+    connectionOrDb,
+    commissionId,
+    grossCommission
+  ) => {
+    const gross = normalizeMoney(grossCommission)
+
+    const [existingRows] = await connectionOrDb.query(
+      `
+      SELECT id, release_stage, cash_advance_deduction, status
+      FROM commission_releases
+      WHERE commission_id = ?
+      `,
+      [commissionId]
+    )
+
+    const existingByStage = existingRows.reduce((map, row) => {
+      if (!map.has(row.release_stage)) {
+        map.set(row.release_stage, row)
+      }
+      return map
+    }, new Map())
+
+    for (const milestone of releaseMilestones) {
+      const grossReleaseAmount = normalizeMoney(
+        gross * (normalizeRate(milestone.release_percent) / 100)
+      )
+      const existing = existingByStage.get(milestone.release_stage)
+      const cashAdvanceDeduction = normalizeMoney(existing?.cash_advance_deduction || 0)
+      const netReleaseAmount = normalizeMoney(
+        Math.max(grossReleaseAmount - cashAdvanceDeduction, 0)
+      )
+
+      if (existing) {
+        await connectionOrDb.query(
+          `
+          UPDATE commission_releases
+          SET
+            trigger_payment_percent = ?,
+            release_percent = ?,
+            cumulative_release_percent = ?,
+            gross_release_amount = ?,
+            net_release_amount = ?,
+            status = CASE
+              WHEN status = 'released' THEN status
+              WHEN status = 'on_hold' THEN status
+              ELSE 'pending'
+            END
+          WHERE id = ?
+          `,
+          [
+            milestone.trigger_payment_percent,
+            milestone.release_percent,
+            milestone.cumulative_release_percent,
+            grossReleaseAmount,
+            netReleaseAmount,
+            existing.id,
+          ]
+        )
+      } else {
+        await connectionOrDb.query(
+          `
+          INSERT INTO commission_releases (
+            commission_id,
+            release_stage,
+            trigger_payment_percent,
+            release_percent,
+            cumulative_release_percent,
+            gross_release_amount,
+            cash_advance_deduction,
+            net_release_amount,
+            status
+          ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, 'pending')
+          `,
+          [
+            commissionId,
+            milestone.release_stage,
+            milestone.trigger_payment_percent,
+            milestone.release_percent,
+            milestone.cumulative_release_percent,
+            grossReleaseAmount,
+            grossReleaseAmount,
+          ]
+        )
+      }
+    }
+
+    await connectionOrDb.query(
+      `
+      UPDATE commission_releases
+      SET status = 'cancelled'
+      WHERE commission_id = ?
+        AND status <> 'released'
+        AND release_stage NOT IN (?, ?, ?, ?, ?)
+      `,
+      [
+        commissionId,
+        ...releaseMilestones.map((milestone) => milestone.release_stage),
+      ]
+    )
+
+    return getReleasesByCommissionId(commissionId)
+  }
+
+  const getExpectedCommissionRowsForClientUnit = async ({
+    connectionOrDb = db,
+    clientUnitId,
+    sellerId = null,
+    saleType = null,
+  }) => {
+    const clientUnit = await getClientUnitCommissionBase(connectionOrDb, clientUnitId)
+
+    if (!clientUnit) {
+      return {
+        clientUnit: null,
+        rows: [],
+        warnings: ['Client unit was not found'],
+      }
+    }
+
+    const finalSellerId = isMissing(sellerId) ? clientUnit.seller_id : sellerId
+    const rawSaleType = isMissing(saleType) ? clientUnit.sale_type : saleType
+    const finalSaleType = rawSaleType === 'direct_to_developer'
+      ? 'direct'
+      : rawSaleType === 'direct'
+        ? 'direct'
+        : 'distributed'
+
+    if (isMissing(finalSellerId)) {
+      return {
+        clientUnit,
+        rows: [],
+        warnings: ['Seller is not assigned'],
+      }
+    }
+
+    if (finalSaleType === 'direct') {
+      const seller = await getSeller(connectionOrDb, finalSellerId)
+      if (!seller) {
+        return {
+          clientUnit,
+          rows: [],
+          warnings: ['Seller was not found'],
+        }
+      }
+
+      const rate = getAssignedSaleRate(seller) ?? await getFinalRate({
+        connectionOrDb,
+        seller,
+        rateType: 'personal',
+      })
+
+      return {
+        clientUnit,
+        rows: [
+          {
+            seller,
+            rate: normalizeRate(rate),
+            sourceType: 'main',
+            commissionRole: seller.seller_role,
+            saleType: 'direct',
+            label: 'Direct main commission',
+          },
+        ],
+        warnings: [],
+      }
+    }
+
+    const preview = await buildHierarchyCommissionPreview({
+      connectionOrDb,
+      sellerId: finalSellerId,
+    })
+
+    return {
+      clientUnit,
+      rows: preview.rows.map((row) => ({
+        ...row,
+        saleType: 'distributed',
+      })),
+      warnings: preview.warnings || [],
+    }
+  }
+
+  const getCommissionRowKey = (row) => {
+    return [
+      Number(row.seller?.id || row.seller_id || 0),
+      row.sourceType || row.source_type,
+      row.commissionRole || row.commission_role,
+    ].join(':')
+  }
+
+  export const recalculatePendingCommissionsForClientUnit = async ({
+    connection,
+    clientUnitId,
+    sellerId = null,
+    saleType = null,
+    notes = null,
+    actorRole = null,
+  }) => {
+    const connectionOrDb = connection || db
+
+    const [releasedRows] = await connectionOrDb.query(
+      `
+      SELECT COUNT(cr.id) AS released_count
+      FROM commission_releases cr
+      INNER JOIN commissions cm ON cm.id = cr.commission_id
+      WHERE cm.client_unit_id = ?
+        AND cr.status = 'released'
+      `,
+      [clientUnitId]
+    )
+
+    if (Number(releasedRows[0]?.released_count || 0) > 0) {
+      const error = new Error('Cannot recalculate commissions after a commission release has been paid.')
+      error.statusCode = 400
+      throw error
+    }
+
+    const [deductionRows] = await connectionOrDb.query(
+      `
+      SELECT COUNT(cad.id) AS deduction_count
+      FROM cash_advance_deductions cad
+      INNER JOIN commission_releases cr ON cr.id = cad.commission_release_id
+      INNER JOIN commissions cm ON cm.id = cr.commission_id
+      WHERE cm.client_unit_id = ?
+      `,
+      [clientUnitId]
+    )
+
+    if (Number(deductionRows[0]?.deduction_count || 0) > 0) {
+      const error = new Error('Cannot recalculate commissions after a cash advance deduction has been applied.')
+      error.statusCode = 400
+      throw error
+    }
+
+    const expected = await getExpectedCommissionRowsForClientUnit({
+      connectionOrDb,
+      clientUnitId,
+      sellerId,
+      saleType,
+    })
+
+    if (!expected.clientUnit || expected.rows.length === 0) {
+      const error = new Error(expected.warnings?.[0] || 'No commission rows could be calculated.')
+      error.statusCode = 400
+      throw error
+    }
+
+    const commissionBase = normalizeMoney(expected.clientUnit.commission_base)
+
+    const [existingRows] = await connectionOrDb.query(
+      `
+      SELECT *
+      FROM commissions
+      WHERE client_unit_id = ?
+        AND status <> 'cancelled'
+        AND status <> 'cancelled'
+      ORDER BY
+        CASE source_type WHEN 'main' THEN 1 WHEN 'override' THEN 2 ELSE 99 END,
+        id ASC
+      FOR UPDATE
+      `,
+      [clientUnitId]
+    )
+
+    const existingByKey = existingRows.reduce((map, commission) => {
+      const key = getCommissionRowKey(commission)
+      if (!map.has(key)) {
+        map.set(key, commission)
+      }
+      return map
+    }, new Map())
+
+    const touchedCommissionIds = new Set()
+    const createdOrUpdated = []
+    let parentCommissionId = null
+
+    for (const row of expected.rows) {
+      const rate = normalizeRate(row.rate)
+      const grossCommission = calculateGrossCommission(commissionBase, rate)
+      const key = getCommissionRowKey(row)
+      const existing = row.sourceType === 'main'
+        ? existingRows.find((commission) => commission.source_type === 'main') || existingByKey.get(key)
+        : existingByKey.get(key)
+      const finalParentCommissionId = row.sourceType === 'override' ? parentCommissionId : null
+      const finalSaleType = row.saleType === 'direct' ? 'direct' : 'distributed'
+      const finalNotes = notes || row.label || 'Recalculated from current seller account rates.'
+
+      if (existing) {
+        await connectionOrDb.query(
+          `
+          UPDATE commissions
+          SET
+            seller_id = ?,
+            commission_role = ?,
+            rate = ?,
+            commission_base = ?,
+            gross_commission = ?,
+            amount = ?,
+            source_type = ?,
+            parent_commission_id = ?,
+            sale_type = ?,
+            override_notes = ?,
+            status = CASE
+              WHEN status = 'on_hold' THEN status
+              ELSE 'active'
+            END,
+            notes = ?
+          WHERE id = ?
+          `,
+          [
+            row.seller.id,
+            row.commissionRole,
+            rate,
+            commissionBase,
+            grossCommission,
+            grossCommission,
+            row.sourceType,
+            nullableValue(finalParentCommissionId),
+            finalSaleType,
+            row.sourceType === 'override' ? nullableValue(row.label) : null,
+            nullableValue(finalNotes),
+            existing.id,
+          ]
+        )
+
+        await syncReleaseMilestonesForCommission(
+          connectionOrDb,
+          existing.id,
+          grossCommission
+        )
+        touchedCommissionIds.add(Number(existing.id))
+        createdOrUpdated.push({
+          commissionId: existing.id,
+          seller_id: row.seller.id,
+          seller_name: row.seller.full_name,
+          commission_role: row.commissionRole,
+          source_type: row.sourceType,
+          rate,
+          gross_commission: grossCommission,
+          updated: true,
+        })
+
+        if (row.sourceType === 'main') {
+          parentCommissionId = existing.id
+        }
+      } else {
+        const [result] = await connectionOrDb.query(
+          `
+          INSERT INTO commissions (
+            client_unit_id,
+            seller_id,
+            commission_role,
+            rate,
+            commission_base,
+            gross_commission,
+            amount,
+            source_type,
+            parent_commission_id,
+            sale_type,
+            override_notes,
+            status,
+            notes
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
+          `,
+          [
+            clientUnitId,
+            row.seller.id,
+            row.commissionRole,
+            rate,
+            commissionBase,
+            grossCommission,
+            grossCommission,
+            row.sourceType,
+            nullableValue(finalParentCommissionId),
+            finalSaleType,
+            row.sourceType === 'override' ? nullableValue(row.label) : null,
+            nullableValue(finalNotes),
+          ]
+        )
+
+        await syncReleaseMilestonesForCommission(
+          connectionOrDb,
+          result.insertId,
+          grossCommission
+        )
+        touchedCommissionIds.add(Number(result.insertId))
+        createdOrUpdated.push({
+          commissionId: result.insertId,
+          seller_id: row.seller.id,
+          seller_name: row.seller.full_name,
+          commission_role: row.commissionRole,
+          source_type: row.sourceType,
+          rate,
+          gross_commission: grossCommission,
+          created: true,
+        })
+
+        if (row.sourceType === 'main') {
+          parentCommissionId = result.insertId
+        }
+      }
+    }
+
+    const staleCommissionIds = existingRows
+      .map((commission) => Number(commission.id))
+      .filter((commissionId) => !touchedCommissionIds.has(commissionId))
+
+    if (staleCommissionIds.length > 0) {
+      await connectionOrDb.query(
+        `
+        UPDATE commission_releases
+        SET status = 'cancelled'
+        WHERE status <> 'released'
+          AND commission_id IN (${staleCommissionIds.map(() => '?').join(', ')})
+        `,
+        staleCommissionIds
+      )
+
+      await connectionOrDb.query(
+        `
+        UPDATE commissions
+        SET
+          status = 'cancelled',
+          notes = CONCAT(COALESCE(notes, ''), CASE WHEN COALESCE(notes, '') = '' THEN '' ELSE '\n' END, 'Cancelled because it is no longer part of the current seller hierarchy.')
+        WHERE id IN (${staleCommissionIds.map(() => '?').join(', ')})
+        `,
+        staleCommissionIds
+      )
+    }
+
+    await refreshCommissionEligibility(clientUnitId, connectionOrDb, {
+      actorRole,
+    })
+
+    return createdOrUpdated
+  }
+
+  export const validateCommissionRatesBeforeRelease = async (
+    connectionOrDb,
+    clientUnitId
+  ) => {
+    const expected = await getExpectedCommissionRowsForClientUnit({
+      connectionOrDb,
+      clientUnitId,
+    })
+
+    if (!expected.clientUnit || expected.rows.length === 0) {
+      return {
+        isValid: false,
+        message: expected.warnings?.[0] || 'Unable to validate commission rates.',
+      }
+    }
+
+    const [currentRows] = await connectionOrDb.query(
+      `
+      SELECT *
+      FROM commissions
+      WHERE client_unit_id = ?
+        AND status <> 'cancelled'
+      `,
+      [clientUnitId]
+    )
+
+    const currentByKey = currentRows.reduce((map, commission) => {
+      map.set(getCommissionRowKey(commission), commission)
+      return map
+    }, new Map())
+
+    const mismatches = []
+
+    for (const row of expected.rows) {
+      const key = getCommissionRowKey(row)
+      const current = currentByKey.get(key)
+      const expectedRate = normalizeRate(row.rate)
+
+      if (!current) {
+        mismatches.push(`${row.seller.full_name} (${sellerDisplayRole(row.commissionRole)}) is missing`)
+        continue
+      }
+
+      if (normalizeRate(current.rate) !== expectedRate) {
+        mismatches.push(`${row.seller.full_name}: current row ${normalizeRate(current.rate)}%, expected ${expectedRate}%`)
+      }
+    }
+
+    if (currentRows.length !== expected.rows.length) {
+      mismatches.push('The active commission chain does not match the current seller hierarchy')
+    }
+
+    if (mismatches.length > 0) {
+      return {
+        isValid: false,
+        message: `Commission rates do not match the current seller hierarchy. Recalculate pending commissions before releasing. ${mismatches.join('; ')}`,
+      }
+    }
+
+    return {
+      isValid: true,
+      message: 'Commission rates match current seller hierarchy.',
+    }
+  }
+
   export const refreshCommissionEligibility = async (
     clientUnitId,
     connectionOrDb = db,
@@ -648,6 +1185,7 @@
       INNER JOIN commissions cm ON cm.id = cr.commission_id
       SET cr.status = 'pending'
       WHERE cm.client_unit_id = ?
+        AND cm.status <> 'cancelled'
         AND cr.status = 'eligible'
         AND cr.release_stage <> 'retention'
         AND cr.trigger_payment_percent IS NOT NULL
@@ -662,6 +1200,7 @@
       INNER JOIN commissions cm ON cm.id = cr.commission_id
       SET cr.status = 'eligible'
       WHERE cm.client_unit_id = ?
+        AND cm.status <> 'cancelled'
         AND cr.status = 'pending'
         AND cr.release_stage <> 'retention'
         AND cr.trigger_payment_percent IS NOT NULL
@@ -688,6 +1227,7 @@
         INNER JOIN commissions cm ON cm.id = cr.commission_id
         SET cr.status = 'eligible'
         WHERE cm.client_unit_id = ?
+          AND cm.status <> 'cancelled'
           AND cr.status = 'pending'
           AND cr.release_stage = 'retention'
         `,
@@ -702,6 +1242,7 @@
         INNER JOIN commissions cm ON cm.id = cr.commission_id
         SET cr.status = 'pending'
         WHERE cm.client_unit_id = ?
+          AND cm.status <> 'cancelled'
           AND cr.status = 'eligible'
           AND cr.release_stage = 'retention'
         `,
@@ -2173,6 +2714,18 @@ export const addMissingOverrideCommission = async (req, res) => {
         })
       }
 
+      const rateValidation = await validateCommissionRatesBeforeRelease(
+        connection,
+        release.client_unit_id
+      )
+
+      if (!rateValidation.isValid) {
+        await connection.rollback()
+        return res.status(400).json({
+          message: rateValidation.message,
+        })
+      }
+
       const [updateResult] = await connection.query(
         `
         UPDATE commission_releases
@@ -2694,6 +3247,3 @@ export const addMissingOverrideCommission = async (req, res) => {
       data: rows,
     })
   }
-
-
-

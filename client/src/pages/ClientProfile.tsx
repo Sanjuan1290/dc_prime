@@ -3193,14 +3193,14 @@ const ClientProfile = () => {
               </h3>
 
               <p className="mt-1 text-xs text-slate-600">
-                Recalculate only when seller/rates were corrected. This cancels old pending commission records and creates new ones using the current saved rates. Released commissions and cash-advance-linked commissions are locked.
+                Recalculate only when seller/rates were corrected. This updates the existing pending commission records in place using the current saved rates. Released commissions and cash-advance-linked commissions are locked.
               </p>
             </div>
           ) : null}
 
           {editUnitData.sale_type === "direct_to_developer" ? (
             <div className="mt-4 rounded-xl border border-emerald-100 bg-emerald-50 p-4 text-sm text-slate-600">
-              Direct-to-developer sales generate only the selected seller commission. No hierarchy override milestones will be created.
+              Direct sales generate only the selected seller commission. No hierarchy residual milestones will be created.
             </div>
           ) : null}
 
@@ -3821,6 +3821,3 @@ const MiniDetail = ({
 }
 
 export default ClientProfile
-
-
-

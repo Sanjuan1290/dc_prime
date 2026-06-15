@@ -864,10 +864,10 @@ const Commissions = () => {
 
     const searchTerm = search.toLowerCase().trim()
     const matchesSearch = !searchTerm || searchText.includes(searchTerm)
-    const matchesStatus =
-      statusFilter === "all" ||
-      main.status === statusFilter ||
-      overrides.some((override) => override.status === statusFilter)
+    const matchesStatus = statusFilter === "all"
+      ? main.status !== "cancelled"
+      : main.status === statusFilter ||
+        overrides.some((override) => override.status === statusFilter)
 
     const matchesSource =
       sourceFilter === "all" ||
@@ -890,7 +890,11 @@ const Commissions = () => {
     ...overrides,
   ])
 
-  const summary = filteredCommissions.reduce<CommissionSummary>(
+  const summaryCommissions = filteredCommissions.filter(
+    (commission) => statusFilter === "cancelled" || commission.status !== "cancelled"
+  )
+
+  const summary = summaryCommissions.reduce<CommissionSummary>(
     (totals, commission) => {
       totals.total_commissions = Number(totals.total_commissions) + 1
       totals.total_amount =
@@ -2365,7 +2369,3 @@ const ComputedBox = ({ label, value }: { label: string; value: string }) => {
 }
 
 export default Commissions
-
-
-
-
