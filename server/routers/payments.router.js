@@ -3,6 +3,7 @@ import {
   getPayments,
   getPayment,
   getPaymentsByClientUnit,
+  getPaymentSuggestions,
   createPayment,
   updatePayment,
   deletePayment,
@@ -17,5 +18,6 @@ router.post('/payments', auth, createPayment)
 router.patch('/payments/:id', auth, updatePayment)
 router.delete('/payments/:id', auth, deletePayment)
 router.get('/client-units/:clientUnitId/payments', auth, getPaymentsByClientUnit)
+router.get('/client-units/:clientUnitId/payment-suggestions', auth, getPaymentSuggestions)
 
 export default router

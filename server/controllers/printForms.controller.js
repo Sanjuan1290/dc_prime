@@ -152,7 +152,10 @@ const buildSchedule = ({ unit, payments }) => {
   const reservationFee = normalizeMoney(
     unit.reservation_fee_amount || unit.listing_reservation_fee
   )
-  const downpayment = normalizeMoney(unit.downpayment_amount)
+  const downpayment = normalizeMoney(
+    unit.downpayment_net_amount || unit.downpayment_amount
+  )
+  const downpaymentGives = Math.max(Number(unit.downpayment_gives || 3), 1)
   const deferredCash = normalizeMoney(unit.deferred_cash_amount)
   const terms = Number(unit.payment_terms_months || 0)
   const monthly = normalizeMoney(unit.monthly_amortization)
@@ -160,12 +163,13 @@ const buildSchedule = ({ unit, payments }) => {
   const firstDueDate = unit.due_date || unit.starting_date || unit.created_at
   const rows = []
 
-  const pushRow = (dueDate, description, dueAmount) => {
+  const pushRow = (dueDate, description, dueAmount, scheduleType = 'fixed') => {
     if (normalizeMoney(dueAmount) <= 0) return
 
     rows.push({
       due_date: formatDateOnly(dueDate),
       description,
+      schedule_type: scheduleType,
       due_amount: normalizeMoney(dueAmount),
       penalty: 0,
       date_paid: null,
@@ -175,21 +179,35 @@ const buildSchedule = ({ unit, payments }) => {
     })
   }
 
-  pushRow(startingDate, 'Reservation Fee', reservationFee)
+  pushRow(startingDate, 'Reservation Fee', reservationFee, 'reservation_fee')
 
   if (unit.mode_of_payment === 'cash') {
-    pushRow(firstDueDate, 'Deferred Cash', deferredCash || Math.max(totalAmountPayable - reservationFee, 0))
+    pushRow(
+      firstDueDate,
+      'Deferred Cash',
+      deferredCash || Math.max(totalAmountPayable - reservationFee, 0),
+      'cash'
+    )
   } else {
     if (downpayment > 0) {
-      const perDownpayment = normalizeMoney(downpayment / 3)
+      const perDownpayment = normalizeMoney(downpayment / downpaymentGives)
       const first = new Date(firstDueDate)
 
-      pushRow(first, '1st Downpayment', perDownpayment)
-      pushRow(addMonths(first, 1), '2nd Downpayment', perDownpayment)
-      pushRow(addMonths(first, 2), '3rd Downpayment', normalizeMoney(downpayment - perDownpayment * 2))
+      for (let index = 1; index <= downpaymentGives; index += 1) {
+        const dueDate = addMonths(first, index - 1)
+        const isLast = index === downpaymentGives
+        const amount = isLast
+          ? normalizeMoney(downpayment - perDownpayment * (downpaymentGives - 1))
+          : perDownpayment
+
+        pushRow(dueDate, `${ordinal(index)} Downpayment`, amount, 'downpayment')
+      }
     }
 
-    const monthlyStart = addMonths(new Date(firstDueDate), downpayment > 0 ? 3 : 0)
+    const monthlyStart = addMonths(
+      new Date(firstDueDate),
+      downpayment > 0 ? downpaymentGives : 0
+    )
     const monthlyCount = Math.max(terms, 0)
     let remainingMonthlyTotal = normalizeMoney(
       totalAmountPayable - reservationFee - downpayment - deferredCash
@@ -201,7 +219,7 @@ const buildSchedule = ({ unit, payments }) => {
         ? normalizeMoney(remainingMonthlyTotal)
         : monthly
 
-      pushRow(dueDate, `${ordinal(index)} Monthly Payment`, amount)
+      pushRow(dueDate, `${ordinal(index)} Monthly Payment`, amount, 'monthly')
       remainingMonthlyTotal = normalizeMoney(remainingMonthlyTotal - amount)
     }
   }
@@ -209,23 +227,49 @@ const buildSchedule = ({ unit, payments }) => {
   const verifiedPayments = [...payments]
   let cumulativePaid = 0
 
-  return rows.map((row) => {
+  const adjustFutureMonthlyRows = (currentIndex, runningBalance) => {
+    const futureRows = rows.slice(currentIndex + 1)
+    const fixedFutureAmount = futureRows
+      .filter((row) => row.schedule_type !== 'monthly')
+      .reduce((sum, row) => normalizeMoney(sum + normalizeMoney(row.due_amount)), 0)
+    const futureMonthlyRows = futureRows.filter(
+      (row) => row.schedule_type === 'monthly'
+    )
+
+    if (futureMonthlyRows.length === 0) return
+
+    const monthlyPool = normalizeMoney(Math.max(runningBalance - fixedFutureAmount, 0))
+    const monthlyBase = normalizeMoney(monthlyPool / futureMonthlyRows.length)
+    let remainingMonthlyPool = monthlyPool
+
+    futureMonthlyRows.forEach((row, index) => {
+      const amount = index === futureMonthlyRows.length - 1
+        ? normalizeMoney(remainingMonthlyPool)
+        : monthlyBase
+
+      row.due_amount = amount
+      remainingMonthlyPool = normalizeMoney(remainingMonthlyPool - amount)
+    })
+  }
+
+  rows.forEach((row, index) => {
     const payment = verifiedPayments.shift()
 
     if (payment) {
       cumulativePaid = normalizeMoney(cumulativePaid + toNumber(payment.amount))
+      row.date_paid = formatDateOnly(payment.payment_date)
+      row.amount_paid = normalizeMoney(payment.amount)
+      row.reference = payment.reference_id || payment.payment_method || payment.payment_type || `Payment #${payment.id}`
     }
 
-    return {
-      ...row,
-      date_paid: payment ? formatDateOnly(payment.payment_date) : null,
-      amount_paid: payment ? normalizeMoney(payment.amount) : null,
-      reference: payment
-        ? payment.reference_id || payment.payment_method || payment.payment_type || `Payment #${payment.id}`
-        : null,
-      running_balance: normalizeMoney(Math.max(totalAmountPayable - cumulativePaid, 0)),
+    row.running_balance = normalizeMoney(Math.max(totalAmountPayable - cumulativePaid, 0))
+
+    if (payment && normalizeMoney(payment.amount) > normalizeMoney(row.due_amount)) {
+      adjustFutureMonthlyRows(index, row.running_balance)
     }
   })
+
+  return rows.map(({ schedule_type, ...row }) => row)
 }
 
 export const getClientUnitPrintData = async (req, res) => {
@@ -308,4 +352,3 @@ export const logClientUnitFormPrint = async (req, res) => {
     },
   })
 }
-

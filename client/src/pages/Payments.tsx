@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   FiCreditCard,
@@ -76,6 +76,23 @@ type ClientUnit = {
   document_status: string
 }
 
+type PaymentSuggestions = {
+  suggestions: Record<string, number>
+  next_due?: {
+    payment_type: string
+    description: string
+    due_amount: number
+  } | null
+  terms?: {
+    downpayment_percent?: number
+    downpayment_gives?: number
+    downpayment_discount_rate?: number
+    downpayment_discount_amount?: number
+    downpayment_net_amount?: number
+    payment_terms_months?: number
+  }
+}
+
 type PaymentFormData = {
   client_unit_id: number | ""
   amount: string
@@ -149,6 +166,24 @@ const fetchClientUnits = async (): Promise<ClientUnit[]> => {
 
   const data = (await response.json()) as ClientUnitsResponse
   return data.clientUnits || data.data || []
+}
+
+const fetchPaymentSuggestions = async (
+  clientUnitId: number
+): Promise<PaymentSuggestions | null> => {
+  const response = await fetch(
+    `${API_URL}/client-units/${clientUnitId}/payment-suggestions`,
+    {
+      credentials: "include",
+    }
+  )
+
+  if (!response.ok) {
+    throw new Error(await getErrorMessage(response))
+  }
+
+  const data = await response.json()
+  return data.data || data.paymentSuggestions || null
 }
 
 const createPayment = async (paymentData: PaymentFormData) => {
@@ -286,6 +321,7 @@ const Payments = () => {
   const invalidateAfterPaymentChange = () => {
     queryClient.invalidateQueries({ queryKey: ["payments"] })
     queryClient.invalidateQueries({ queryKey: ["client-units"] })
+    queryClient.invalidateQueries({ queryKey: ["payment-suggestions"] })
     queryClient.invalidateQueries({ queryKey: ["commissions"] })
     queryClient.invalidateQueries({ queryKey: ["commission-summary"] })
     queryClient.invalidateQueries({ queryKey: ["commission-releases"] })
@@ -390,6 +426,52 @@ const Payments = () => {
   const selectedClientUnit = clientUnits.find(
     (unit) => Number(unit.id) === Number(formData.client_unit_id)
   )
+
+  const selectedClientUnitId =
+    formData.client_unit_id === "" ? null : Number(formData.client_unit_id)
+
+  const {
+    data: paymentSuggestions = null,
+    isFetching: isPaymentSuggestionsLoading,
+  } = useQuery<PaymentSuggestions | null>({
+    queryKey: ["payment-suggestions", selectedClientUnitId],
+    queryFn: () => fetchPaymentSuggestions(Number(selectedClientUnitId)),
+    enabled: Boolean(selectedClientUnitId),
+  })
+
+  useEffect(() => {
+    if (!isAddOpen || !paymentSuggestions || formData.payment_type === "other") {
+      return
+    }
+
+    const suggestedAmount = paymentSuggestions.suggestions?.[formData.payment_type]
+
+    if (!suggestedAmount || Number(suggestedAmount) <= 0) {
+      return
+    }
+
+    const nextAmount = Number(suggestedAmount).toFixed(2)
+
+    setFormData((current) => {
+      if (
+        current.client_unit_id !== formData.client_unit_id ||
+        current.payment_type !== formData.payment_type ||
+        current.amount === nextAmount
+      ) {
+        return current
+      }
+
+      return {
+        ...current,
+        amount: nextAmount,
+      }
+    })
+  }, [
+    formData.client_unit_id,
+    formData.payment_type,
+    isAddOpen,
+    paymentSuggestions,
+  ])
 
   const selectedEditClientUnit = clientUnits.find(
     (unit) => Number(unit.id) === Number(editFormData.client_unit_id)
@@ -671,6 +753,8 @@ const Payments = () => {
           setClientUnitSearch={setClientUnitSearch}
           clientUnits={filteredClientUnits}
           selectedClientUnit={selectedClientUnit}
+          paymentSuggestions={paymentSuggestions}
+          isSuggestionsLoading={isPaymentSuggestionsLoading}
           onClose={() => setIsAddOpen(false)}
           onSave={handleCreatePayment}
           isPending={createPaymentMutation.isPending}
@@ -720,6 +804,8 @@ type PaymentModalProps = {
   setClientUnitSearch: (value: string) => void
   clientUnits: ClientUnit[]
   selectedClientUnit?: ClientUnit
+  paymentSuggestions?: PaymentSuggestions | null
+  isSuggestionsLoading?: boolean
   onClose: () => void
   onSave: () => void
   isPending: boolean
@@ -734,11 +820,20 @@ const PaymentModal = ({
   setClientUnitSearch,
   clientUnits,
   selectedClientUnit,
+  paymentSuggestions = null,
+  isSuggestionsLoading = false,
   onClose,
   onSave,
   isPending,
   submitLabel,
 }: PaymentModalProps) => {
+  const suggestedAmount = formData.payment_type
+    ? paymentSuggestions?.suggestions?.[formData.payment_type]
+    : null
+  const nextDueLabel = paymentSuggestions?.next_due
+    ? `${paymentSuggestions.next_due.description}: ${formatMoney(paymentSuggestions.next_due.due_amount)}`
+    : null
+
   return (
     <Modal
       title={title}
@@ -788,6 +883,7 @@ const PaymentModal = ({
                       setFormData({
                         ...formData,
                         client_unit_id: unit.id,
+                        amount: "",
                       })
                       setClientUnitSearch(label)
                     }}
@@ -838,20 +934,60 @@ const PaymentModal = ({
         ) : null}
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <Input
-            label="Amount"
-            type="number"
-            min={0}
-            step="0.01"
-            value={formData.amount}
-            onChange={(e) =>
+          <Select
+            label="Payment Type"
+            value={formData.payment_type}
+            onChange={(e) => {
+              const nextType = e.target.value
+              const nextSuggestedAmount = paymentSuggestions?.suggestions?.[nextType]
+
               setFormData({
                 ...formData,
-                amount: e.target.value,
+                payment_type: nextType,
+                amount:
+                  nextType !== "other" && nextSuggestedAmount && Number(nextSuggestedAmount) > 0
+                    ? Number(nextSuggestedAmount).toFixed(2)
+                    : formData.amount,
               })
-            }
-            required
-          />
+            }}
+          >
+            {paymentTypes.map((type) => (
+              <option key={type} value={type}>
+                {formatText(type)}
+              </option>
+            ))}
+          </Select>
+
+          <div>
+            <Input
+              label="Amount"
+              type="number"
+              min={0}
+              step="0.01"
+              value={formData.amount}
+              onChange={(e) =>
+                setFormData({
+                  ...formData,
+                  amount: e.target.value,
+                })
+              }
+              required
+            />
+            {isSuggestionsLoading ? (
+              <p className="mt-1 text-xs text-slate-500">
+                Loading suggested amount...
+              </p>
+            ) : suggestedAmount && Number(suggestedAmount) > 0 ? (
+              <p className="mt-1 text-xs text-slate-500">
+                Suggested from terms: {formatMoney(suggestedAmount)}
+                {nextDueLabel ? ` • Next due: ${nextDueLabel}` : ""}
+              </p>
+            ) : (
+              <p className="mt-1 text-xs text-slate-500">
+                Choose a payment type first. Other payments are manual.
+              </p>
+            )}
+          </div>
 
           <Input
             label="Payment Date"
@@ -865,23 +1001,6 @@ const PaymentModal = ({
             }
             required
           />
-
-          <Select
-            label="Payment Type"
-            value={formData.payment_type}
-            onChange={(e) =>
-              setFormData({
-                ...formData,
-                payment_type: e.target.value,
-              })
-            }
-          >
-            {paymentTypes.map((type) => (
-              <option key={type} value={type}>
-                {formatText(type)}
-              </option>
-            ))}
-          </Select>
 
           <Select
             label="Payment Method"
@@ -957,4 +1076,3 @@ const MiniDetail = ({
 }
 
 export default Payments
-

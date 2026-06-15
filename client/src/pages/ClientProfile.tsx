@@ -326,8 +326,19 @@ type ReserveListingData = {
   due_date: string
   reservation_fee_amount: string
   downpayment_amount: string
+  downpayment_percent: string
+  downpayment_percent_option: string
+  downpayment_percent_custom: string
+  downpayment_gives: string
+  downpayment_gives_option: string
+  downpayment_gives_custom: string
+  downpayment_discount_rate: string
+  downpayment_discount_rate_option: string
+  downpayment_discount_rate_custom: string
   deferred_cash_amount: string
-  payment_terms_months: 36 | 60 | ""
+  payment_terms_months: number | ""
+  payment_terms_months_option: string
+  payment_terms_months_custom: string
   interest_rate: string
   monthly_amortization: string
   sale_type: "distributed" | "direct_to_developer"
@@ -372,8 +383,19 @@ const createDefaultReserveData = (): ReserveListingData => ({
   due_date: getLocalDate(),
   reservation_fee_amount: "",
   downpayment_amount: "0",
+  downpayment_percent: "30",
+  downpayment_percent_option: "30",
+  downpayment_percent_custom: "",
+  downpayment_gives: "3",
+  downpayment_gives_option: "3",
+  downpayment_gives_custom: "",
+  downpayment_discount_rate: "0",
+  downpayment_discount_rate_option: "0",
+  downpayment_discount_rate_custom: "",
   deferred_cash_amount: "0",
   payment_terms_months: 36,
+  payment_terms_months_option: "36",
+  payment_terms_months_custom: "",
   interest_rate: "0",
   monthly_amortization: "",
   sale_type: "distributed",
@@ -384,6 +406,16 @@ const createDefaultReserveData = (): ReserveListingData => ({
   cash_kaliwaan_date: "",
   cash_kaliwaan_notes: "",
 })
+
+const getSelectedNumber = (
+  optionValue: string | number | null | undefined,
+  customValue: string | number | null | undefined,
+  fallback = 0
+) => {
+  const value = String(optionValue ?? "") === "custom" ? customValue : optionValue
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : fallback
+}
 
 const defaultEditUnitData: EditUnitData = {
   seller_id: "",
@@ -691,13 +723,25 @@ const reserveListing = async ({
         reserveData.mode_of_payment === "installment"
           ? Number(reserveData.downpayment_amount || 0)
           : 0,
+      downpayment_percent:
+        reserveData.mode_of_payment === "installment"
+          ? getSelectedNumber(reserveData.downpayment_percent_option, reserveData.downpayment_percent_custom, 30)
+          : 0,
+      downpayment_gives:
+        reserveData.mode_of_payment === "installment"
+          ? getSelectedNumber(reserveData.downpayment_gives_option, reserveData.downpayment_gives_custom, 3)
+          : 0,
+      downpayment_discount_rate:
+        reserveData.mode_of_payment === "installment"
+          ? getSelectedNumber(reserveData.downpayment_discount_rate_option, reserveData.downpayment_discount_rate_custom, 0)
+          : 0,
       deferred_cash_amount:
         reserveData.mode_of_payment === "cash"
           ? Number(reserveData.deferred_cash_amount || 0)
           : 0,
       payment_terms_months:
         reserveData.mode_of_payment === "installment"
-          ? Number(reserveData.payment_terms_months)
+          ? getSelectedNumber(reserveData.payment_terms_months_option, reserveData.payment_terms_months_custom, 36)
           : null,
       interest_rate:
         reserveData.mode_of_payment === "installment"
@@ -1136,7 +1180,6 @@ const ClientProfile = () => {
     useState<EmploymentFormData>(() => emptyEmploymentData("principal"))
   const [coBuyerEmploymentData, setCoBuyerEmploymentData] =
     useState<EmploymentFormData>(() => emptyEmploymentData("co_buyer"))
-  const [isBuyerProfileEditing, setIsBuyerProfileEditing] = useState(false)
 
   const {
     data: clientProfile,
@@ -1258,8 +1301,15 @@ const ClientProfile = () => {
     mutationFn: saveBuyerProfile,
     onSuccess: () => {
       invalidateClientProfile()
-      setIsBuyerProfileEditing(false)
       setSuccessMessage("Buyer profile saved successfully")
+    },
+  })
+
+  const markBuyerProfileCompleteMutation = useMutation({
+    mutationFn: saveBuyerProfile,
+    onSuccess: () => {
+      invalidateClientProfile()
+      setSuccessMessage("Buyer profile marked complete")
     },
   })
 
@@ -1415,9 +1465,37 @@ const ClientProfile = () => {
   const reserveReservationFee = moneyInputValue(
     reserveData.reservation_fee_amount
   )
+  const reserveDownpaymentPercent =
+    reserveData.mode_of_payment === "installment"
+      ? getSelectedNumber(reserveData.downpayment_percent_option, reserveData.downpayment_percent_custom, 30)
+      : 0
+  const reserveDownpaymentTarget =
+    reserveData.mode_of_payment === "installment"
+      ? reservePurchasePrice * (reserveDownpaymentPercent / 100)
+      : 0
+  const reserveDownpaymentGross = Math.max(
+    reserveDownpaymentTarget - reserveReservationFee,
+    0
+  )
+  const reserveDownpaymentGives =
+    reserveData.mode_of_payment === "installment"
+      ? Math.max(getSelectedNumber(reserveData.downpayment_gives_option, reserveData.downpayment_gives_custom, 3), 1)
+      : 0
+  const reserveIsSpotDownpayment =
+    reserveData.mode_of_payment === "installment" && reserveDownpaymentGives === 1
+  const reserveDownpaymentDiscountRate = reserveIsSpotDownpayment
+    ? getSelectedNumber(reserveData.downpayment_discount_rate_option, reserveData.downpayment_discount_rate_custom, 0)
+    : 0
+  const reserveDownpaymentDiscountAmount = reserveIsSpotDownpayment
+    ? reserveDownpaymentGross * (reserveDownpaymentDiscountRate / 100)
+    : 0
   const reserveDownpayment =
     reserveData.mode_of_payment === "installment"
-      ? moneyInputValue(reserveData.downpayment_amount)
+      ? Math.max(reserveDownpaymentGross - reserveDownpaymentDiscountAmount, 0)
+      : 0
+  const reserveDownpaymentPerGive =
+    reserveData.mode_of_payment === "installment" && reserveDownpaymentGives > 0
+      ? reserveDownpayment / reserveDownpaymentGives
       : 0
   const reserveDeferredCash =
     reserveData.mode_of_payment === "cash"
@@ -1431,7 +1509,7 @@ const ClientProfile = () => {
   const reserveOfferBalance = Math.max(reserveBalanceRaw, 0)
   const reserveTermsMonths =
     reserveData.mode_of_payment === "installment"
-      ? Number(reserveData.payment_terms_months || 0)
+      ? getSelectedNumber(reserveData.payment_terms_months_option, reserveData.payment_terms_months_custom, 36)
       : 0
   const reserveInterestRate = moneyInputValue(reserveData.interest_rate)
   const reserveBalanceWithInterest =
@@ -1523,16 +1601,10 @@ const ClientProfile = () => {
   const activeCoBuyerData = coBuyerData[0] || emptyCoBuyerData()
   const showCoBuyerProfile = principalProfileData.buyer_type !== "single"
   const currentProfileStatus: ProfileStatus =
-    profileCompletion.isComplete ? "complete" : "incomplete"
-  const isSavingBuyerProfile = saveBuyerProfileMutation.isPending
-  const buyerProfileDisabled = !isBuyerProfileEditing
-  const missingProfileFieldSet = new Set(profileCompletion.missingFields || [])
-  const missingInputClass = (fields: string[]) => {
-    if (!isBuyerProfileEditing) return ""
-    return fields.some((field) => missingProfileFieldSet.has(field))
-      ? "border-red-300 bg-red-50 focus:border-red-500 focus:ring-red-100"
-      : ""
-  }
+    client?.profile_status === "complete" ? "complete" : "incomplete"
+  const isSavingBuyerProfile =
+    saveBuyerProfileMutation.isPending ||
+    markBuyerProfileCompleteMutation.isPending
 
   const getReserveValidationMessage = () => {
     if (!reserveData.listing_id || !selectedListing) {
@@ -1566,12 +1638,22 @@ const ClientProfile = () => {
     }
 
     if (reserveData.mode_of_payment === "installment") {
-      if (![36, 60].includes(Number(reserveData.payment_terms_months))) {
-        return "Payment terms must be 36 or 60 months"
+      const parsedTermsMonths = getSelectedNumber(reserveData.payment_terms_months_option, reserveData.payment_terms_months_custom, 36)
+
+      if (!Number.isInteger(parsedTermsMonths) || parsedTermsMonths < 1 || parsedTermsMonths > 120) {
+        return "Payment terms must be between 1 and 120 months"
       }
 
-      if (!isPresentMoneyInputValid(reserveData.downpayment_amount)) {
-        return "Downpayment must be a non-negative amount"
+      if (!Number.isFinite(reserveDownpaymentPercent) || reserveDownpaymentPercent < 0) {
+        return "Downpayment percentage must be a non-negative amount"
+      }
+
+      if (!Number.isInteger(reserveDownpaymentGives) || reserveDownpaymentGives < 1) {
+        return "Downpayment gives must be at least 1"
+      }
+
+      if (reserveIsSpotDownpayment && (!Number.isFinite(reserveDownpaymentDiscountRate) || reserveDownpaymentDiscountRate < 0)) {
+        return "Spot downpayment discount must be a non-negative percentage"
       }
 
       if (!isPresentMoneyInputValid(reserveData.interest_rate)) {
@@ -1673,6 +1755,18 @@ const ClientProfile = () => {
     })
   }
 
+  const handleMarkBuyerProfileComplete = () => {
+    if (!clientId) return
+
+    markBuyerProfileCompleteMutation.mutate({
+      clientId,
+      profileData: principalProfileData,
+      coBuyerData,
+      principalEmploymentData,
+      coBuyerEmploymentData,
+      markComplete: true,
+    })
+  }
 
   const handleUpdateUnit = () => {
     if (!editUnit) return
@@ -1793,6 +1887,16 @@ const ClientProfile = () => {
         />
       ) : null}
 
+      {markBuyerProfileCompleteMutation.error ? (
+        <Alert
+          variant="error"
+          title={
+            markBuyerProfileCompleteMutation.error instanceof Error
+              ? markBuyerProfileCompleteMutation.error.message
+              : "Failed to mark buyer profile complete"
+          }
+        />
+      ) : null}
 
       {updateUnitMutation.error ? (
         <Alert
@@ -1854,6 +1958,11 @@ const ClientProfile = () => {
           value={formatMoney(totals.totalBalance)}
           icon={<FiFileText />}
         />
+        <StatCard
+          title="Gross Commission"
+          value={formatMoney(totals.totalCommission)}
+          icon={<FiUser />}
+        />
       </div>
 
       <div className="mt-6 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -1875,6 +1984,14 @@ const ClientProfile = () => {
                 : "-"
             }
           />
+          <Detail
+            label="Seller Rate"
+            value={
+              client.default_seller_commission_rate
+                ? `${formatNumber(client.default_seller_commission_rate)}%`
+                : "-"
+            }
+          />
         </div>
       </div>
 
@@ -1889,31 +2006,22 @@ const ClientProfile = () => {
 
           <div className="flex flex-wrap items-center gap-2">
             <StatusBadge status={currentProfileStatus} />
-            {isBuyerProfileEditing ? (
-              <>
-                <Button
-                  disabled={isSavingBuyerProfile}
-                  onClick={() => {
-                    if (client) setPrincipalProfileData(clientToPrincipalProfileData(client))
-                    setCoBuyerData([coBuyerToFormData(coBuyers[0])])
-                    setIsBuyerProfileEditing(false)
-                  }}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  disabled={isSavingBuyerProfile}
-                  onClick={handleSaveBuyerProfile}
-                  variant="primary"
-                >
-                  {saveBuyerProfileMutation.isPending ? "Saving..." : "Save Changes"}
-                </Button>
-              </>
-            ) : (
-              <Button onClick={() => setIsBuyerProfileEditing(true)} variant="primary">
-                Edit Buyer Profile
-              </Button>
-            )}
+            <Button
+              disabled={isSavingBuyerProfile}
+              onClick={handleSaveBuyerProfile}
+              variant="secondary"
+            >
+              {saveBuyerProfileMutation.isPending ? "Saving..." : "Save Buyer Profile"}
+            </Button>
+            <Button
+              disabled={isSavingBuyerProfile}
+              onClick={handleMarkBuyerProfileComplete}
+              variant="primary"
+            >
+              {markBuyerProfileCompleteMutation.isPending
+                ? "Checking..."
+                : "Mark Profile Complete"}
+            </Button>
           </div>
         </div>
 
@@ -1922,28 +2030,15 @@ const ClientProfile = () => {
           <div className="mt-4">
             <Alert
               variant="warning"
-              title={`Profile incomplete. Missing: ${profileCompletion.missingFields.join(", ")}`}
+              title={`Missing: ${profileCompletion.missingFields.join(", ")}`}
             />
           </div>
         ) : null}
 
-        <div className="mt-5">
-          <h3 className="text-sm font-bold uppercase tracking-wide text-slate-500">
-            Individual Buyer/s Information
-          </h3>
-        </div>
-
-        <fieldset
-          disabled={buyerProfileDisabled}
-          className={[
-            "mt-5 space-y-5",
-            buyerProfileDisabled ? "opacity-90" : "",
-          ].join(" ")}
-        >
-          <div className="grid gap-5 xl:grid-cols-2">
-            <div className="rounded-xl border border-slate-200 p-4">
+        <div className="mt-5 space-y-5">
+          <div className="rounded-xl border border-slate-200 p-4">
             <h3 className="text-sm font-bold text-slate-900">
-              Principal Buyer Information
+              Principal Buyer
             </h3>
 
             <div className="mt-4 grid gap-4 md:grid-cols-3">
@@ -1966,7 +2061,6 @@ const ClientProfile = () => {
 
               <Input
                 label="Full Name"
-                className={missingInputClass(["Principal full name"])}
                 value={principalProfileData.full_name}
                 onChange={(e) =>
                   setPrincipalProfileData({
@@ -1978,7 +2072,6 @@ const ClientProfile = () => {
 
               <Input
                 label="Birth Date"
-                className={missingInputClass(["Birth date"])}
                 type="date"
                 value={principalProfileData.birth_date}
                 onChange={(e) =>
@@ -2007,7 +2100,6 @@ const ClientProfile = () => {
 
               <Input
                 label="Citizenship"
-                className={missingInputClass(["Citizenship"])}
                 value={principalProfileData.citizenship}
                 onChange={(e) =>
                   setPrincipalProfileData({
@@ -2019,7 +2111,6 @@ const ClientProfile = () => {
 
               <Select
                 label="Gender"
-                className={missingInputClass(["Gender"])}
                 value={principalProfileData.gender}
                 onChange={(e) =>
                   setPrincipalProfileData({
@@ -2038,7 +2129,6 @@ const ClientProfile = () => {
 
               <Select
                 label="Civil Status"
-                className={missingInputClass(["Civil status"])}
                 value={principalProfileData.civil_status}
                 onChange={(e) =>
                   setPrincipalProfileData({
@@ -2057,7 +2147,6 @@ const ClientProfile = () => {
 
               <Input
                 label="Mobile Number / Contact Number"
-                className={missingInputClass(["Contact number or email"])}
                 value={principalProfileData.contact_no}
                 onChange={(e) =>
                   setPrincipalProfileData({
@@ -2080,7 +2169,6 @@ const ClientProfile = () => {
 
               <Input
                 label="Email"
-                className={missingInputClass(["Contact number or email"])}
                 type="email"
                 value={principalProfileData.email}
                 onChange={(e) =>
@@ -2093,7 +2181,6 @@ const ClientProfile = () => {
 
               <Input
                 label="TIN"
-                className={missingInputClass(["TIN"])}
                 value={principalProfileData.tin}
                 onChange={(e) =>
                   setPrincipalProfileData({
@@ -2105,7 +2192,6 @@ const ClientProfile = () => {
 
               <Input
                 label="Present Address"
-                className={missingInputClass(["Present address"])}
                 value={principalProfileData.present_address}
                 onChange={(e) =>
                   setPrincipalProfileData({
@@ -2153,7 +2239,7 @@ const ClientProfile = () => {
           {showCoBuyerProfile ? (
             <div className="rounded-xl border border-slate-200 p-4">
               <h3 className="text-sm font-bold text-slate-900">
-                Spouse / Second Buyer Information
+                Spouse / Second Buyer
               </h3>
 
               <div className="mt-4 grid gap-4 md:grid-cols-3">
@@ -2175,7 +2261,6 @@ const ClientProfile = () => {
 
                 <Input
                   label="Full Name"
-                  className={missingInputClass(["Spouse / second buyer full name"])}
                   value={activeCoBuyerData.full_name}
                   onChange={(e) =>
                     setCoBuyerData([
@@ -2380,8 +2465,6 @@ const ClientProfile = () => {
             </div>
           ) : null}
 
-          </div>
-
           <div className="rounded-xl border border-slate-200 p-4">
             <h3 className="text-sm font-bold text-slate-900">
               Work / Business Information
@@ -2403,7 +2486,7 @@ const ClientProfile = () => {
               ) : null}
             </div>
           </div>
-        </fieldset>
+        </div>
       </div>
 
       <div className="mt-6">
@@ -2739,6 +2822,30 @@ const ClientProfile = () => {
                       paymentMode === "installment"
                         ? reserveData.downpayment_amount
                         : "0",
+                    downpayment_percent:
+                      paymentMode === "installment"
+                        ? reserveData.downpayment_percent || "30"
+                        : "0",
+                    downpayment_percent_option:
+                      paymentMode === "installment"
+                        ? reserveData.downpayment_percent_option || "30"
+                        : "0",
+                    downpayment_gives:
+                      paymentMode === "installment"
+                        ? reserveData.downpayment_gives || "3"
+                        : "0",
+                    downpayment_gives_option:
+                      paymentMode === "installment"
+                        ? reserveData.downpayment_gives_option || "3"
+                        : "0",
+                    downpayment_discount_rate:
+                      paymentMode === "installment"
+                        ? reserveData.downpayment_discount_rate || "0"
+                        : "0",
+                    downpayment_discount_rate_option:
+                      paymentMode === "installment"
+                        ? reserveData.downpayment_discount_rate_option || "0"
+                        : "0",
                     deferred_cash_amount:
                       paymentMode === "cash"
                         ? reserveData.deferred_cash_amount
@@ -2787,7 +2894,7 @@ const ClientProfile = () => {
                 }}
               >
                 <option value="distributed">Distributed</option>
-                <option value="direct_to_developer">Direct</option>
+                <option value="direct_to_developer">Direct to Developer</option>
               </Select>
             </div>
 
@@ -2859,37 +2966,167 @@ const ClientProfile = () => {
 
                 {reserveData.mode_of_payment === "installment" ? (
                   <>
-                    <Input
-                      label="Downpayment"
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      value={reserveData.downpayment_amount}
-                      onChange={(e) => {
-                        setReserveData({
-                          ...reserveData,
-                          downpayment_amount: e.target.value,
-                          monthly_amortization: "",
-                        })
-                        setReserveValidationMessage("")
-                      }}
-                    />
-
                     <Select
-                      label="Terms"
-                      value={reserveData.payment_terms_months}
+                      label="Downpayment Percentage"
+                      value={reserveData.downpayment_percent_option}
                       onChange={(e) => {
                         setReserveData({
                           ...reserveData,
-                          payment_terms_months: Number(e.target.value) as 36 | 60,
+                          downpayment_percent_option: e.target.value,
+                          downpayment_percent: e.target.value === "custom" ? reserveData.downpayment_percent_custom : e.target.value,
                           monthly_amortization: "",
                         })
                         setReserveValidationMessage("")
                       }}
                     >
+                      <option value="15">15%</option>
+                      <option value="30">30%</option>
+                      <option value="custom">Custom %</option>
+                    </Select>
+
+                    {reserveData.downpayment_percent_option === "custom" ? (
+                      <Input
+                        label="Custom Downpayment %"
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={reserveData.downpayment_percent_custom}
+                        onChange={(e) => {
+                          setReserveData({
+                            ...reserveData,
+                            downpayment_percent_custom: e.target.value,
+                            downpayment_percent: e.target.value,
+                            monthly_amortization: "",
+                          })
+                          setReserveValidationMessage("")
+                        }}
+                      />
+                    ) : null}
+
+                    <Select
+                      label="Downpayment Terms"
+                      value={reserveData.downpayment_gives_option}
+                      onChange={(e) => {
+                        const nextGives = e.target.value
+                        const nextActualGives = nextGives === "custom" ? reserveData.downpayment_gives_custom : nextGives
+                        setReserveData({
+                          ...reserveData,
+                          downpayment_gives_option: nextGives,
+                          downpayment_gives: nextActualGives,
+                          downpayment_discount_rate_option:
+                            nextGives === "1" ? reserveData.downpayment_discount_rate_option || "7.5" : "0",
+                          downpayment_discount_rate:
+                            nextGives === "1" ? reserveData.downpayment_discount_rate || "7.5" : "0",
+                          monthly_amortization: "",
+                        })
+                        setReserveValidationMessage("")
+                      }}
+                    >
+                      <option value="1">Spot Cash</option>
+                      <option value="2">2 Gives</option>
+                      <option value="3">3 Gives</option>
+                      <option value="custom">Custom Gives</option>
+                    </Select>
+
+                    {reserveData.downpayment_gives_option === "custom" ? (
+                      <Input
+                        label="Custom Gives"
+                        type="number"
+                        min={1}
+                        step="1"
+                        value={reserveData.downpayment_gives_custom}
+                        onChange={(e) => {
+                          setReserveData({
+                            ...reserveData,
+                            downpayment_gives_custom: e.target.value,
+                            downpayment_gives: e.target.value,
+                            monthly_amortization: "",
+                          })
+                          setReserveValidationMessage("")
+                        }}
+                      />
+                    ) : null}
+
+                    {reserveIsSpotDownpayment ? (
+                      <Select
+                        label="Spot DP Discount"
+                        value={reserveData.downpayment_discount_rate_option}
+                        onChange={(e) => {
+                          setReserveData({
+                            ...reserveData,
+                            downpayment_discount_rate_option: e.target.value,
+                            downpayment_discount_rate: e.target.value === "custom" ? reserveData.downpayment_discount_rate_custom : e.target.value,
+                            monthly_amortization: "",
+                          })
+                          setReserveValidationMessage("")
+                        }}
+                      >
+                        <option value="2.5">2.5%</option>
+                        <option value="5">5%</option>
+                        <option value="7.5">7.5%</option>
+                        <option value="10">10%</option>
+                        <option value="custom">Custom %</option>
+                      </Select>
+                    ) : null}
+
+                    {reserveIsSpotDownpayment && reserveData.downpayment_discount_rate_option === "custom" ? (
+                      <Input
+                        label="Custom DP Discount %"
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={reserveData.downpayment_discount_rate_custom}
+                        onChange={(e) => {
+                          setReserveData({
+                            ...reserveData,
+                            downpayment_discount_rate_custom: e.target.value,
+                            downpayment_discount_rate: e.target.value,
+                            monthly_amortization: "",
+                          })
+                          setReserveValidationMessage("")
+                        }}
+                      />
+                    ) : null}
+
+                    <Select
+                      label="Monthly Terms"
+                      value={reserveData.payment_terms_months_option}
+                      onChange={(e) => {
+                        setReserveData({
+                          ...reserveData,
+                          payment_terms_months_option: e.target.value,
+                          payment_terms_months: e.target.value === "custom" ? "" : Number(e.target.value),
+                          monthly_amortization: "",
+                        })
+                        setReserveValidationMessage("")
+                      }}
+                    >
+                      <option value={12}>12 months</option>
+                      <option value={18}>18 months</option>
+                      <option value={20}>20 months</option>
                       <option value={36}>36 months</option>
                       <option value={60}>60 months</option>
+                      <option value="custom">Custom months</option>
                     </Select>
+
+                    {reserveData.payment_terms_months_option === "custom" ? (
+                      <Input
+                        label="Custom Monthly Terms"
+                        type="number"
+                        min={1}
+                        step="1"
+                        value={reserveData.payment_terms_months_custom}
+                        onChange={(e) => {
+                          setReserveData({
+                            ...reserveData,
+                            payment_terms_months_custom: e.target.value,
+                            payment_terms_months: Number(e.target.value),
+                            monthly_amortization: "",
+                          })
+                          setReserveValidationMessage("")
+                        }}
+                      />
+                    ) : null}
 
                     <Input
                       label="Interest Rate (%)"
@@ -2930,6 +3167,38 @@ const ClientProfile = () => {
                   <MiniDetail
                     label="Offer Purchase Price"
                     value={formatMoney(reservePurchasePrice)}
+                  />
+                  <MiniDetail
+                    label="DP Gross"
+                    value={
+                      reserveData.mode_of_payment === "installment"
+                        ? formatMoney(reserveDownpaymentGross)
+                        : "-"
+                    }
+                  />
+                  <MiniDetail
+                    label="DP Discount"
+                    value={
+                      reserveIsSpotDownpayment
+                        ? formatMoney(reserveDownpaymentDiscountAmount)
+                        : "-"
+                    }
+                  />
+                  <MiniDetail
+                    label="Net DP Payable"
+                    value={
+                      reserveData.mode_of_payment === "installment"
+                        ? formatMoney(reserveDownpayment)
+                        : "-"
+                    }
+                  />
+                  <MiniDetail
+                    label="Per Give"
+                    value={
+                      reserveData.mode_of_payment === "installment"
+                        ? formatMoney(reserveDownpaymentPerGive)
+                        : "-"
+                    }
                   />
                   <MiniDetail
                     label="Offer Balance"
@@ -3012,7 +3281,7 @@ const ClientProfile = () => {
             {reserveData.sale_type === "direct_to_developer" ? (
               <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-4">
                 <h3 className="text-sm font-bold text-slate-900">
-                  Direct Commission
+                  Direct to Developer Commission
                 </h3>
                 <p className="mt-1 text-sm text-slate-600">
                   Only the selected agent/seller receives commission. Manager, broker, and BNM override releases will not be generated for this sale.
@@ -3168,7 +3437,7 @@ const ClientProfile = () => {
               }}
             >
               <option value="distributed">Distributed</option>
-              <option value="direct_to_developer">Direct</option>
+              <option value="direct_to_developer">Direct to Developer</option>
             </Select>
 
             <label className="flex items-center gap-2 rounded-xl border border-slate-200 p-3 text-sm text-slate-700">
@@ -3193,14 +3462,14 @@ const ClientProfile = () => {
               </h3>
 
               <p className="mt-1 text-xs text-slate-600">
-                Recalculate only when seller/rates were corrected. This updates the existing pending commission records in place using the current saved rates. Released commissions and cash-advance-linked commissions are locked.
+                Recalculate only when seller/rates were corrected. This cancels old pending commission records and creates new ones using the current saved rates. Released commissions and cash-advance-linked commissions are locked.
               </p>
             </div>
           ) : null}
 
           {editUnitData.sale_type === "direct_to_developer" ? (
             <div className="mt-4 rounded-xl border border-emerald-100 bg-emerald-50 p-4 text-sm text-slate-600">
-              Direct sales generate only the selected seller commission. No hierarchy residual milestones will be created.
+              Direct-to-developer sales generate only the selected seller commission. No hierarchy override milestones will be created.
             </div>
           ) : null}
 

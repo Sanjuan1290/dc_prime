@@ -6,7 +6,6 @@ import {
   createAutoCommissionForClientUnit,
   createHierarchyCommissionsForClientUnit,
   refreshCommissionEligibility,
-  recalculatePendingCommissionsForClientUnit,
 } from './commissions.controller.js'
 
 const allowedClientUnitStatuses = [
@@ -19,7 +18,7 @@ const allowedClientUnitStatuses = [
 
 const allowedSaleTypes = ['distributed', 'direct', 'direct_to_developer']
 const allowedModeOfPayments = ['cash', 'installment']
-const allowedPaymentTermsMonths = [36, 60]
+const allowedPaymentTermsMonths = [12, 18, 20, 36, 60]
 const defaultContractProcessingStatus = 'pending_profile'
 
 const isMissing = (value) => {
@@ -149,7 +148,7 @@ const validateClientUnitStatus = (status) => {
 
 const validateSaleType = (saleType) => {
   if (isMissing(saleType)) return 'distributed'
-  if (saleType === 'direct_to_developer') return 'direct'
+  if (saleType === 'direct') return 'direct_to_developer'
   if (!allowedSaleTypes.includes(saleType)) return 'distributed'
   return saleType
 }
@@ -195,6 +194,9 @@ const buildReservationTerms = ({
   paymentTermsMonths,
   interestRate,
   monthlyAmortization,
+  downpaymentPercent,
+  downpaymentGives,
+  downpaymentDiscountRate,
 }) => {
   if (isMissing(modeOfPayment) || !allowedModeOfPayments.includes(modeOfPayment)) {
     return {
@@ -234,16 +236,71 @@ const buildReservationTerms = ({
   const purchasePrice = getListingPurchasePrice(listing)
   const isInstallment = modeOfPayment === 'installment'
 
-  const downpaymentValidation = isInstallment
-    ? validateNonNegativeMoney(downpaymentAmount, 'Downpayment')
+  const downpaymentPercentValidation = isInstallment
+    ? validateNonNegativeRate(
+        isMissing(downpaymentPercent) ? 30 : downpaymentPercent,
+        'Downpayment percentage'
+      )
     : {
         isValid: true,
         value: 0,
       }
 
-  if (!downpaymentValidation.isValid) {
-    return downpaymentValidation
+  if (!downpaymentPercentValidation.isValid) {
+    return downpaymentPercentValidation
   }
+
+  const parsedDownpaymentGives = isInstallment
+    ? Number(isMissing(downpaymentGives) ? 3 : downpaymentGives)
+    : 0
+
+  if (isInstallment && (!Number.isInteger(parsedDownpaymentGives) || parsedDownpaymentGives < 1 || parsedDownpaymentGives > 60)) {
+    return {
+      isValid: false,
+      message: 'Downpayment gives must be between 1 and 60',
+    }
+  }
+
+  const downpaymentDiscountRateValidation = isInstallment
+    ? validateNonNegativeRate(
+        parsedDownpaymentGives === 1
+          ? isMissing(downpaymentDiscountRate)
+            ? 0
+            : downpaymentDiscountRate
+          : 0,
+        'Downpayment discount'
+      )
+    : {
+        isValid: true,
+        value: 0,
+      }
+
+  if (!downpaymentDiscountRateValidation.isValid) {
+    return downpaymentDiscountRateValidation
+  }
+
+  let computedDownpaymentGross = 0
+  let computedDownpaymentDiscountAmount = 0
+  let computedDownpaymentNet = 0
+
+  if (isInstallment) {
+    const targetDownpayment = normalizeMoney(purchasePrice * (downpaymentPercentValidation.value / 100))
+    computedDownpaymentGross = normalizeMoney(Math.max(targetDownpayment - reservationFeeValidation.value, 0))
+    computedDownpaymentDiscountAmount = parsedDownpaymentGives === 1
+      ? normalizeMoney(computedDownpaymentGross * (downpaymentDiscountRateValidation.value / 100))
+      : 0
+    computedDownpaymentNet = normalizeMoney(Math.max(computedDownpaymentGross - computedDownpaymentDiscountAmount, 0))
+  }
+
+  const downpaymentValidation = isInstallment
+    ? {
+        isValid: true,
+        value: computedDownpaymentNet,
+      }
+    : {
+        isValid: true,
+        value: 0,
+      }
 
   const deferredCashValidation =
     modeOfPayment === 'cash'
@@ -264,10 +321,10 @@ const buildReservationTerms = ({
   if (isInstallment) {
     const parsedTermsMonths = Number(paymentTermsMonths)
 
-    if (!allowedPaymentTermsMonths.includes(parsedTermsMonths)) {
+    if (!Number.isInteger(parsedTermsMonths) || parsedTermsMonths < 1 || parsedTermsMonths > 120) {
       return {
         isValid: false,
-        message: 'Payment terms must be 36 or 60 months',
+        message: 'Payment terms must be between 1 and 120 months',
       }
     }
 
@@ -330,6 +387,11 @@ const buildReservationTerms = ({
       offerPurchasePrice: purchasePrice,
       reservationFeeAmount: reservationFeeValidation.value,
       downpaymentAmount: downpaymentValidation.value,
+      downpaymentPercent: downpaymentPercentValidation.value,
+      downpaymentGives: parsedDownpaymentGives,
+      downpaymentDiscountRate: downpaymentDiscountRateValidation.value,
+      downpaymentDiscountAmount: computedDownpaymentDiscountAmount,
+      downpaymentNetAmount: computedDownpaymentNet,
       deferredCashAmount: deferredCashValidation.value,
       offerBalanceAmount,
       paymentTermsMonths: finalPaymentTermsMonths,
@@ -390,6 +452,11 @@ const clientUnitFields = `
   cu.offer_purchase_price,
   cu.reservation_fee_amount,
   cu.downpayment_amount,
+  cu.downpayment_percent,
+  cu.downpayment_gives,
+  cu.downpayment_discount_rate,
+  cu.downpayment_discount_amount,
+  cu.downpayment_net_amount,
   cu.deferred_cash_amount,
   cu.offer_balance_amount,
   cu.payment_terms_months,
@@ -603,11 +670,11 @@ const createReservationCommissions = async ({
       commissionRole: null,
       sourceType: 'main',
       parentCommissionId: null,
-      saleType: 'direct',
+      saleType: saleType === 'direct' ? 'direct_to_developer' : saleType,
       cashKaliwaanAmount,
       cashKaliwaanDate,
       cashKaliwaanNotes,
-      notes: `Direct commission from reservation of ${listing.unit_id}`, 
+      notes: `Direct-to-developer commission from reservation of ${listing.unit_id}`,
       actorRole,
     })
 
@@ -929,6 +996,9 @@ export const reserveListing = async (req, res) => {
     due_date,
     reservation_fee_amount,
     downpayment_amount = 0,
+    downpayment_percent = 30,
+    downpayment_gives = 3,
+    downpayment_discount_rate = 0,
     deferred_cash_amount = 0,
     payment_terms_months,
     interest_rate = 0,
@@ -1003,6 +1073,9 @@ export const reserveListing = async (req, res) => {
       dueDate: due_date,
       reservationFeeAmount: reservation_fee_amount,
       downpaymentAmount: downpayment_amount,
+      downpaymentPercent: downpayment_percent,
+      downpaymentGives: downpayment_gives,
+      downpaymentDiscountRate: downpayment_discount_rate,
       deferredCashAmount: deferred_cash_amount,
       paymentTermsMonths: payment_terms_months,
       interestRate: interest_rate,
@@ -1073,6 +1146,11 @@ export const reserveListing = async (req, res) => {
         offer_purchase_price,
         reservation_fee_amount,
         downpayment_amount,
+        downpayment_percent,
+        downpayment_gives,
+        downpayment_discount_rate,
+        downpayment_discount_amount,
+        downpayment_net_amount,
         deferred_cash_amount,
         offer_balance_amount,
         payment_terms_months,
@@ -1080,7 +1158,7 @@ export const reserveListing = async (req, res) => {
         monthly_amortization,
         contract_processing_status,
         sale_type
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         clientId,
@@ -1096,6 +1174,11 @@ export const reserveListing = async (req, res) => {
         terms.offerPurchasePrice,
         terms.reservationFeeAmount,
         terms.downpaymentAmount,
+        terms.downpaymentPercent,
+        terms.downpaymentGives,
+        terms.downpaymentDiscountRate,
+        terms.downpaymentDiscountAmount,
+        terms.downpaymentNetAmount,
         terms.deferredCashAmount,
         terms.offerBalanceAmount,
         terms.paymentTermsMonths,
@@ -1159,6 +1242,11 @@ export const reserveListing = async (req, res) => {
         offer_purchase_price: terms.offerPurchasePrice,
         reservation_fee_amount: terms.reservationFeeAmount,
         downpayment_amount: terms.downpaymentAmount,
+        downpayment_percent: terms.downpaymentPercent,
+        downpayment_gives: terms.downpaymentGives,
+        downpayment_discount_rate: terms.downpaymentDiscountRate,
+        downpayment_discount_amount: terms.downpaymentDiscountAmount,
+        downpayment_net_amount: terms.downpaymentNetAmount,
         deferred_cash_amount: terms.deferredCashAmount,
         offer_balance_amount: terms.offerBalanceAmount,
         payment_terms_months: terms.paymentTermsMonths,
@@ -1366,12 +1454,41 @@ export const updateClientUnit = async (req, res) => {
         })
       }
 
-      regeneratedCommission = await recalculatePendingCommissionsForClientUnit({
+      await connection.query(
+        `
+        UPDATE commission_releases cr
+        INNER JOIN commissions cm ON cm.id = cr.commission_id
+        SET cr.status = 'cancelled'
+        WHERE cm.client_unit_id = ?
+          AND cr.status <> 'released'
+        `,
+        [id]
+      )
+
+      await connection.query(
+        `
+        UPDATE commissions
+        SET
+          status = 'cancelled',
+          notes = CONCAT(COALESCE(notes, ''), CASE WHEN COALESCE(notes, '') = '' THEN '' ELSE '\n' END, 'Cancelled before commission recalculation.')
+        WHERE client_unit_id = ?
+          AND status <> 'released'
+        `,
+        [id]
+      )
+
+      const listing = await getListingById(connection, existingClientUnit.listing_id)
+
+      regeneratedCommission = await createReservationCommissions({
         connection,
         clientUnitId: id,
+        listing,
         sellerId: finalSellerId,
+        mainRateOverride: main_commission_rate_override,
         saleType: finalSaleType,
-        notes: 'Recalculated in place using current seller account rates.',
+        cashKaliwaanAmount: 0,
+        cashKaliwaanDate: null,
+        cashKaliwaanNotes: null,
         actorRole: req.user.role,
       })
     }
@@ -1542,12 +1659,39 @@ export const changeClientUnitListing = async (req, res) => {
         })
       }
 
-      regeneratedCommission = await recalculatePendingCommissionsForClientUnit({
+      await connection.query(
+        `
+        UPDATE commission_releases cr
+        INNER JOIN commissions cm ON cm.id = cr.commission_id
+        SET cr.status = 'cancelled'
+        WHERE cm.client_unit_id = ?
+          AND cr.status <> 'released'
+        `,
+        [id]
+      )
+
+      await connection.query(
+        `
+        UPDATE commissions
+        SET
+          status = 'cancelled',
+          notes = CONCAT(COALESCE(notes, ''), CASE WHEN COALESCE(notes, '') = '' THEN '' ELSE '\n' END, 'Cancelled before unit-change commission recalculation.')
+        WHERE client_unit_id = ?
+          AND status <> 'released'
+        `,
+        [id]
+      )
+
+      regeneratedCommission = await createReservationCommissions({
         connection,
         clientUnitId: id,
+        listing: newListing,
         sellerId: existingClientUnit.seller_id,
+        mainRateOverride: null,
         saleType: existingClientUnit.sale_type || 'distributed',
-        notes: 'Recalculated in place after unit change using current seller account rates.',
+        cashKaliwaanAmount: 0,
+        cashKaliwaanDate: null,
+        cashKaliwaanNotes: null,
         actorRole: req.user.role,
       })
     }

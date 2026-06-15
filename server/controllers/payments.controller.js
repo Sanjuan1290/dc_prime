@@ -33,6 +33,133 @@ const validatePaymentStatus = (status) => {
   return status
 }
 
+
+const roundAmount = (value) => normalizeMoney(value)
+
+const getClientUnitPaymentPlan = async (connectionOrDb, clientUnitId) => {
+  const [rows] = await connectionOrDb.query(
+    `
+    SELECT
+      cu.*,
+      c.full_name AS client_name,
+      l.unit_id,
+      p.name AS project_name,
+      l.total_contract_price,
+      l.legal_misc_fee,
+      l.reservation_fee AS listing_reservation_fee
+    FROM client_units cu
+    INNER JOIN clients c ON c.id = cu.client_id
+    INNER JOIN listings l ON l.id = cu.listing_id
+    INNER JOIN projects p ON p.id = l.project_id
+    WHERE cu.id = ?
+    LIMIT 1
+    `,
+    [clientUnitId]
+  )
+
+  return rows[0] || null
+}
+
+const getVerifiedPaymentSummary = async (connectionOrDb, clientUnitId) => {
+  const [rows] = await connectionOrDb.query(
+    `
+    SELECT
+      COALESCE(SUM(amount), 0) AS paid_amount,
+      COALESCE(SUM(CASE WHEN payment_type IN ('reservation_fee', 'reservation') THEN amount ELSE 0 END), 0) AS reservation_paid,
+      COALESCE(SUM(CASE WHEN payment_type = 'downpayment' THEN amount ELSE 0 END), 0) AS downpayment_paid,
+      COALESCE(SUM(CASE WHEN payment_type = 'monthly' THEN amount ELSE 0 END), 0) AS monthly_paid,
+      COALESCE(SUM(CASE WHEN payment_type = 'legal_misc' THEN amount ELSE 0 END), 0) AS legal_misc_paid,
+      COALESCE(SUM(CASE WHEN payment_type = 'full_payment' THEN amount ELSE 0 END), 0) AS full_payment_paid,
+      COALESCE(SUM(CASE WHEN payment_type = 'downpayment' THEN 1 ELSE 0 END), 0) AS downpayment_payment_count,
+      COALESCE(SUM(CASE WHEN payment_type = 'monthly' THEN 1 ELSE 0 END), 0) AS monthly_payment_count
+    FROM payments
+    WHERE client_unit_id = ?
+      AND status = 'verified'
+    `,
+    [clientUnitId]
+  )
+
+  return rows[0] || {}
+}
+
+const buildPaymentSuggestions = async (connectionOrDb, clientUnitId) => {
+  const unit = await getClientUnitPaymentPlan(connectionOrDb, clientUnitId)
+
+  if (!unit) return null
+
+  const summary = await getVerifiedPaymentSummary(connectionOrDb, clientUnitId)
+  const totalContractPrice = roundAmount(unit.offer_purchase_price || unit.total_contract_price)
+  const paidAmount = roundAmount(summary.paid_amount)
+  const balance = roundAmount(Math.max(totalContractPrice - paidAmount, 0))
+  const reservationFee = roundAmount(unit.reservation_fee_amount || unit.listing_reservation_fee)
+  const downpaymentNet = roundAmount(unit.downpayment_net_amount || unit.downpayment_amount)
+  const downpaymentGives = Math.max(Number(unit.downpayment_gives || 3), 1)
+  const downpaymentPaid = roundAmount(summary.downpayment_paid)
+  const downpaymentRemaining = roundAmount(Math.max(downpaymentNet - downpaymentPaid, 0))
+  const downpaymentPaymentsMade = Number(summary.downpayment_payment_count || 0)
+  const remainingDownpaymentGives = Math.max(downpaymentGives - downpaymentPaymentsMade, 1)
+  const paymentTermsMonths = Math.max(Number(unit.payment_terms_months || 0), 0)
+  const monthlyPaymentsMade = Number(summary.monthly_payment_count || 0)
+  const remainingMonthlyMonths = Math.max(paymentTermsMonths - monthlyPaymentsMade, 1)
+
+  const reservationSuggestion = roundAmount(Math.max(reservationFee - roundAmount(summary.reservation_paid), 0))
+  const downpaymentSuggestion = downpaymentRemaining > 0
+    ? roundAmount(downpaymentRemaining / remainingDownpaymentGives)
+    : 0
+  const monthlySuggestion = unit.mode_of_payment === 'installment'
+    ? roundAmount(balance / remainingMonthlyMonths)
+    : 0
+  const legalMiscSuggestion = 0
+  const fullPaymentSuggestion = balance
+
+  const suggestions = {
+    reservation_fee: reservationSuggestion,
+    downpayment: downpaymentSuggestion,
+    monthly: monthlySuggestion,
+    legal_misc: legalMiscSuggestion,
+    full_payment: fullPaymentSuggestion,
+    other: 0,
+  }
+
+  const nextDue = downpaymentSuggestion > 0
+    ? {
+        payment_type: 'downpayment',
+        description: `${downpaymentPaymentsMade + 1}${downpaymentPaymentsMade === 0 ? 'st' : downpaymentPaymentsMade === 1 ? 'nd' : downpaymentPaymentsMade === 2 ? 'rd' : 'th'} Downpayment`,
+        due_amount: downpaymentSuggestion,
+      }
+    : monthlySuggestion > 0
+      ? {
+          payment_type: 'monthly',
+          description: `${monthlyPaymentsMade + 1} Monthly Payment`,
+          due_amount: monthlySuggestion,
+        }
+      : {
+          payment_type: 'full_payment',
+          description: 'Full Payment',
+          due_amount: fullPaymentSuggestion,
+        }
+
+  return {
+    client_unit_id: Number(clientUnitId),
+    client_name: unit.client_name,
+    unit_id: unit.unit_id,
+    project_name: unit.project_name,
+    total_contract_price: totalContractPrice,
+    paid_amount: paidAmount,
+    balance,
+    terms: {
+      downpayment_percent: Number(unit.downpayment_percent || 0),
+      downpayment_gives: downpaymentGives,
+      downpayment_discount_rate: Number(unit.downpayment_discount_rate || 0),
+      downpayment_discount_amount: roundAmount(unit.downpayment_discount_amount || 0),
+      downpayment_net_amount: downpaymentNet,
+      payment_terms_months: paymentTermsMonths,
+    },
+    suggestions,
+    next_due: nextDue,
+  }
+}
+
 const paymentFields = `
   py.id,
   py.client_unit_id,
@@ -129,7 +256,7 @@ const recomputeClientUnitBalance = async (
     `
     SELECT
       COALESCE(SUM(amount), 0) AS paid_amount,
-      COALESCE(SUM(CASE WHEN payment_type = 'reservation' THEN amount ELSE 0 END), 0) AS reservation_paid,
+      COALESCE(SUM(CASE WHEN payment_type IN ('reservation_fee', 'reservation') THEN amount ELSE 0 END), 0) AS reservation_paid,
       COALESCE(SUM(CASE WHEN payment_type IN ('downpayment', 'monthly', 'legal_misc', 'full_payment', 'other') THEN amount ELSE 0 END), 0) AS active_payment_paid
     FROM payments
     WHERE client_unit_id = ?
@@ -308,6 +435,32 @@ export const getPaymentsByClientUnit = async (req, res) => {
     message: 'Client unit payments fetched successfully',
     payments,
     data: payments,
+  })
+}
+
+export const getPaymentSuggestions = async (req, res) => {
+  const { clientUnitId } = req.params
+
+  if (isMissing(clientUnitId)) {
+    return res.status(400).json({
+      message: 'Client unit is required',
+    })
+  }
+
+  const suggestions = await buildPaymentSuggestions(db, clientUnitId)
+
+  if (!suggestions) {
+    return res.status(404).json({
+      message: 'Client unit not found',
+    })
+  }
+
+  res.status(200).json({
+    message: 'Payment suggestions fetched successfully',
+    paymentSuggestions: suggestions,
+    suggestions: suggestions.suggestions,
+    next_due: suggestions.next_due,
+    data: suggestions,
   })
 }
 
@@ -673,4 +826,3 @@ export const deletePayment = async (req, res) => {
     connection.release()
   }
 }
-
