@@ -43,7 +43,7 @@ const fetchPrintData = async (clientUnitId) => {
       cu.*,
       c.full_name AS client_name,
       c.spouse_co_owner_name,
-      c.buyer_type,
+      COALESCE(cu.buyer_type, c.buyer_type) AS buyer_type,
       c.birth_date,
       c.place_of_birth,
       c.citizenship,
@@ -101,10 +101,19 @@ const fetchPrintData = async (clientUnitId) => {
     `
     SELECT *
     FROM client_buyers
-    WHERE client_id = ?
-    ORDER BY id ASC
+    WHERE client_unit_id = ?
+       OR (
+        client_id = ?
+        AND client_unit_id IS NULL
+        AND NOT EXISTS (
+          SELECT 1
+          FROM client_buyers scoped_buyers
+          WHERE scoped_buyers.client_unit_id = ?
+        )
+      )
+    ORDER BY client_unit_id DESC, id ASC
     `,
-    [unit.client_id]
+    [clientUnitId, unit.client_id, clientUnitId]
   )
 
   const [employmentDetails] = await db.query(

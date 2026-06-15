@@ -272,6 +272,7 @@ const getCoBuyersByClientId = async (clientId, connectionOrDb = db) => {
       updated_at
     FROM client_buyers
     WHERE client_id = ?
+      AND client_unit_id IS NULL
     ORDER BY id ASC
     `,
     [clientId]
@@ -1070,7 +1071,10 @@ export const replaceClientCoBuyers = async (req, res) => {
   try {
     await connection.beginTransaction()
 
-    await connection.query(`DELETE FROM client_buyers WHERE client_id = ?`, [id])
+    await connection.query(
+      `DELETE FROM client_buyers WHERE client_id = ? AND client_unit_id IS NULL`,
+      [id]
+    )
 
     if (normalizedRows.length > 0) {
       const values = normalizedRows.map((row) => [
@@ -1301,6 +1305,3 @@ export const deleteClient = async (req, res) => {
     message: 'Client deleted successfully',
   })
 }
-
-
-

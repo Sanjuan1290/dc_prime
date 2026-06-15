@@ -189,6 +189,23 @@ type ClientUnit = {
   balance: number | string
   payment_percentage?: number | string
   mode_of_payment?: string | null
+  buyer_type?: BuyerType | string | null
+  co_buyer_id?: number | string | null
+  co_buyer_role?: BuyerRole | string | null
+  co_buyer_name?: string | null
+  co_buyer_birth_date?: string | null
+  co_buyer_place_of_birth?: string | null
+  co_buyer_citizenship?: string | null
+  co_buyer_gender?: Gender | string | null
+  co_buyer_civil_status?: CivilStatus | string | null
+  co_buyer_present_address?: string | null
+  co_buyer_present_zip_code?: string | null
+  co_buyer_permanent_address?: string | null
+  co_buyer_permanent_zip_code?: string | null
+  co_buyer_mobile_no?: string | null
+  co_buyer_residence_phone_no?: string | null
+  co_buyer_email?: string | null
+  co_buyer_tin?: string | null
   due_day: number | null
   starting_date?: string | null
   due_date?: string | null
@@ -322,6 +339,8 @@ type ReserveListingData = {
   seller_id: number | ""
   status: string
   mode_of_payment: "cash" | "installment"
+  buyer_type: BuyerType
+  co_buyer: CoBuyerFormData
   starting_date: string
   due_date: string
   reservation_fee_amount: string
@@ -355,6 +374,8 @@ type EditUnitData = {
   due_date: string
   status: string
   mode_of_payment: "cash" | "installment"
+  buyer_type: BuyerType
+  co_buyer: CoBuyerFormData
   regenerate_commission: boolean
   sale_type: "distributed" | "direct_to_developer"
   override_seller_id: string
@@ -374,11 +395,32 @@ type CancelUnitData = {
   reason: string
 }
 
+
+const createBlankCoBuyerData = (): CoBuyerFormData => ({
+  buyer_role: "spouse",
+  full_name: "",
+  birth_date: "",
+  place_of_birth: "",
+  citizenship: "",
+  gender: "",
+  civil_status: "",
+  present_address: "",
+  present_zip_code: "",
+  permanent_address: "",
+  permanent_zip_code: "",
+  mobile_no: "",
+  residence_phone_no: "",
+  email: "",
+  tin: "",
+})
+
 const createDefaultReserveData = (): ReserveListingData => ({
   listing_id: "",
   seller_id: "",
   status: "reserved",
   mode_of_payment: "installment",
+  buyer_type: "single",
+  co_buyer: createBlankCoBuyerData(),
   starting_date: getLocalDate(),
   due_date: getLocalDate(),
   reservation_fee_amount: "",
@@ -422,6 +464,8 @@ const defaultEditUnitData: EditUnitData = {
   due_date: "",
   status: "reserved",
   mode_of_payment: "installment",
+  buyer_type: "single",
+  co_buyer: createBlankCoBuyerData(),
   regenerate_commission: false,
   sale_type: "distributed",
   override_seller_id: "",
@@ -459,23 +503,7 @@ const emptyPrincipalProfileData = (): PrincipalProfileData => ({
   tin: "",
 })
 
-const emptyCoBuyerData = (): CoBuyerFormData => ({
-  buyer_role: "spouse",
-  full_name: "",
-  birth_date: "",
-  place_of_birth: "",
-  citizenship: "",
-  gender: "",
-  civil_status: "",
-  present_address: "",
-  present_zip_code: "",
-  permanent_address: "",
-  permanent_zip_code: "",
-  mobile_no: "",
-  residence_phone_no: "",
-  email: "",
-  tin: "",
-})
+const emptyCoBuyerData = (): CoBuyerFormData => createBlankCoBuyerData()
 
 const emptyEmploymentData = (
   personType: PersonType,
@@ -585,6 +613,40 @@ const coBuyerToFormData = (buyer: CoBuyer | undefined): CoBuyerFormData => {
     residence_phone_no: buyer.residence_phone_no || "",
     email: buyer.email || "",
     tin: buyer.tin || "",
+  }
+}
+
+const clientUnitToCoBuyerFormData = (unit: ClientUnit | null): CoBuyerFormData => {
+  if (!unit) return emptyCoBuyerData()
+
+  return {
+    buyer_role: unit.co_buyer_role === "second_buyer" ? "second_buyer" : "spouse",
+    full_name: unit.co_buyer_name || "",
+    birth_date: unit.co_buyer_birth_date ? String(unit.co_buyer_birth_date).slice(0, 10) : "",
+    place_of_birth: unit.co_buyer_place_of_birth || "",
+    citizenship: unit.co_buyer_citizenship || "",
+    gender:
+      unit.co_buyer_gender === "male" ||
+      unit.co_buyer_gender === "female" ||
+      unit.co_buyer_gender === "other"
+        ? unit.co_buyer_gender
+        : "",
+    civil_status:
+      unit.co_buyer_civil_status === "single" ||
+      unit.co_buyer_civil_status === "married" ||
+      unit.co_buyer_civil_status === "separated" ||
+      unit.co_buyer_civil_status === "annulled_divorced" ||
+      unit.co_buyer_civil_status === "widower"
+        ? unit.co_buyer_civil_status
+        : "",
+    present_address: unit.co_buyer_present_address || "",
+    present_zip_code: unit.co_buyer_present_zip_code || "",
+    permanent_address: unit.co_buyer_permanent_address || "",
+    permanent_zip_code: unit.co_buyer_permanent_zip_code || "",
+    mobile_no: unit.co_buyer_mobile_no || "",
+    residence_phone_no: unit.co_buyer_residence_phone_no || "",
+    email: unit.co_buyer_email || "",
+    tin: unit.co_buyer_tin || "",
   }
 }
 
@@ -716,6 +778,8 @@ const reserveListing = async ({
       seller_id: reserveData.seller_id || null,
       status: reserveData.status,
       mode_of_payment: reserveData.mode_of_payment,
+      buyer_type: reserveData.buyer_type,
+      co_buyer: reserveData.buyer_type === "single" ? null : reserveData.co_buyer,
       starting_date: reserveData.starting_date,
       due_date: reserveData.due_date,
       reservation_fee_amount: Number(reserveData.reservation_fee_amount || 0),
@@ -906,6 +970,8 @@ const updateClientUnit = async ({
       due_date: unitData.due_date || null,
       status: unitData.status,
       mode_of_payment: unitData.mode_of_payment,
+      buyer_type: unitData.buyer_type,
+      co_buyer: unitData.buyer_type === "single" ? null : unitData.co_buyer,
       regenerate_commission: unitData.regenerate_commission,
       sale_type: unitData.sale_type,
     }),
@@ -1599,7 +1665,7 @@ const ClientProfile = () => {
   }, [clientUnits])
 
   const activeCoBuyerData = coBuyerData[0] || emptyCoBuyerData()
-  const showCoBuyerProfile = principalProfileData.buyer_type !== "single"
+  const showCoBuyerProfile = false
   const currentProfileStatus: ProfileStatus =
     client?.profile_status === "complete" ? "complete" : "incomplete"
   const isSavingBuyerProfile =
@@ -1691,6 +1757,8 @@ const ClientProfile = () => {
       status: unit.status || "reserved",
       mode_of_payment:
         unit.mode_of_payment === "cash" ? "cash" : "installment",
+      buyer_type: normalizeBuyerType(unit.buyer_type),
+      co_buyer: clientUnitToCoBuyerFormData(unit),
       regenerate_commission: false,
       sale_type: unit.sale_type === "direct_to_developer" || unit.sale_type === "direct" ? "direct_to_developer" : "distributed",
       override_seller_id: "",
@@ -1748,10 +1816,10 @@ const ClientProfile = () => {
 
     saveBuyerProfileMutation.mutate({
       clientId,
-      profileData: principalProfileData,
-      coBuyerData,
+      profileData: { ...principalProfileData, buyer_type: "single" },
+      coBuyerData: [],
       principalEmploymentData,
-      coBuyerEmploymentData,
+      coBuyerEmploymentData: emptyEmploymentData("co_buyer"),
     })
   }
 
@@ -1760,10 +1828,10 @@ const ClientProfile = () => {
 
     markBuyerProfileCompleteMutation.mutate({
       clientId,
-      profileData: principalProfileData,
-      coBuyerData,
+      profileData: { ...principalProfileData, buyer_type: "single" },
+      coBuyerData: [],
       principalEmploymentData,
-      coBuyerEmploymentData,
+      coBuyerEmploymentData: emptyEmploymentData("co_buyer"),
       markComplete: true,
     })
   }
@@ -1970,7 +2038,6 @@ const ClientProfile = () => {
 
         <div className="mt-4 grid gap-4 md:grid-cols-3">
           <Detail label="Buyer Name" value={client.full_name} />
-          <Detail label="Spouse / Co-owner" value={client.spouse_co_owner_name} />
           <Detail label="Email" value={client.email} />
           <Detail label="Contact No." value={client.contact_no} />
           <Detail label="Address" value={client.address} />
@@ -1981,14 +2048,6 @@ const ClientProfile = () => {
             value={
               client.default_seller_role
                 ? formatText(client.default_seller_role)
-                : "-"
-            }
-          />
-          <Detail
-            label="Seller Rate"
-            value={
-              client.default_seller_commission_rate
-                ? `${formatNumber(client.default_seller_commission_rate)}%`
                 : "-"
             }
           />
@@ -2042,23 +2101,6 @@ const ClientProfile = () => {
             </h3>
 
             <div className="mt-4 grid gap-4 md:grid-cols-3">
-              <Select
-                label="Buyer Type"
-                value={principalProfileData.buyer_type}
-                onChange={(e) =>
-                  setPrincipalProfileData({
-                    ...principalProfileData,
-                    buyer_type: e.target.value as BuyerType,
-                  })
-                }
-              >
-                {buyerTypeOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </Select>
-
               <Input
                 label="Full Name"
                 value={principalProfileData.full_name}
@@ -2519,6 +2561,7 @@ const ClientProfile = () => {
                   <th className="px-4 py-3 text-left">Payment %</th>
                   <th className="px-4 py-3 text-left">Seller</th>
                   <th className="px-4 py-3 text-left">Sale Type</th>
+                  <th className="px-4 py-3 text-left">Buyer Type</th>
                   <th className="px-4 py-3 text-left">Starting Date</th>
                   <th className="px-4 py-3 text-left">First Due Date</th>
                   <th className="px-4 py-3 text-left">Terms</th>
@@ -2573,6 +2616,13 @@ const ClientProfile = () => {
 
                     <td className="px-4 py-3 text-slate-600">
                       {formatText(unit.sale_type || "distributed")}
+                    </td>
+
+                    <td className="px-4 py-3 text-slate-600">
+                      <p>{formatText(unit.buyer_type || "single")}</p>
+                      {unit.buyer_type !== "single" && unit.co_buyer_name ? (
+                        <p className="text-xs text-slate-500">{unit.co_buyer_name}</p>
+                      ) : null}
                     </td>
 
                     <td className="px-4 py-3 text-slate-600">
@@ -2789,6 +2839,31 @@ const ClientProfile = () => {
                 />
               </div>
             ) : null}
+
+            <UnitBuyerFields
+              buyerType={reserveData.buyer_type}
+              coBuyer={reserveData.co_buyer}
+              onBuyerTypeChange={(buyerType) => {
+                setReserveData({
+                  ...reserveData,
+                  buyer_type: buyerType,
+                  co_buyer:
+                    buyerType === "single"
+                      ? createBlankCoBuyerData()
+                      : {
+                          ...reserveData.co_buyer,
+                          buyer_role: buyerType === "spouses" ? "spouse" : "second_buyer",
+                        },
+                })
+                setReserveValidationMessage("")
+              }}
+              onCoBuyerChange={(coBuyer) =>
+                setReserveData({
+                  ...reserveData,
+                  co_buyer: coBuyer,
+                })
+              }
+            />
 
             <div className="grid gap-4 md:grid-cols-2">
               <Select
@@ -3440,6 +3515,32 @@ const ClientProfile = () => {
               <option value="direct_to_developer">Direct to Developer</option>
             </Select>
 
+            <div className="md:col-span-2">
+              <UnitBuyerFields
+                buyerType={editUnitData.buyer_type}
+                coBuyer={editUnitData.co_buyer}
+                onBuyerTypeChange={(buyerType) =>
+                  setEditUnitData({
+                    ...editUnitData,
+                    buyer_type: buyerType,
+                    co_buyer:
+                      buyerType === "single"
+                        ? createBlankCoBuyerData()
+                        : {
+                            ...editUnitData.co_buyer,
+                            buyer_role: buyerType === "spouses" ? "spouse" : "second_buyer",
+                          },
+                  })
+                }
+                onCoBuyerChange={(coBuyer) =>
+                  setEditUnitData({
+                    ...editUnitData,
+                    co_buyer: coBuyer,
+                  })
+                }
+              />
+            </div>
+
             <label className="flex items-center gap-2 rounded-xl border border-slate-200 p-3 text-sm text-slate-700">
               <input
                 type="checkbox"
@@ -3931,6 +4032,240 @@ const ClientProfile = () => {
           ) : null}
         </Modal>
       ) : null}
+    </div>
+  )
+}
+
+
+const UnitBuyerFields = ({
+  buyerType,
+  coBuyer,
+  onBuyerTypeChange,
+  onCoBuyerChange,
+}: {
+  buyerType: BuyerType
+  coBuyer: CoBuyerFormData
+  onBuyerTypeChange: (buyerType: BuyerType) => void
+  onCoBuyerChange: (coBuyer: CoBuyerFormData) => void
+}) => {
+  const showCoBuyer = buyerType !== "single"
+  const sectionTitle = buyerType === "spouses" ? "Spouse Details" : "Second Buyer Details"
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <h3 className="text-sm font-bold text-slate-900">Buyer Type</h3>
+
+      <div className="mt-4 grid gap-4 md:grid-cols-3">
+        <Select
+          label="Buyer Type"
+          value={buyerType}
+          onChange={(e) => onBuyerTypeChange(e.target.value as BuyerType)}
+        >
+          {buyerTypeOptions.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </Select>
+      </div>
+
+      {showCoBuyer ? (
+        <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
+          <h4 className="text-sm font-bold text-slate-900">{sectionTitle}</h4>
+
+          <div className="mt-4 grid gap-4 md:grid-cols-3">
+            <Select
+              label="Buyer Role"
+              value={coBuyer.buyer_role}
+              onChange={(e) =>
+                onCoBuyerChange({
+                  ...coBuyer,
+                  buyer_role: e.target.value as BuyerRole,
+                })
+              }
+            >
+              <option value="spouse">Spouse</option>
+              <option value="second_buyer">Second Buyer</option>
+            </Select>
+
+            <Input
+              label="Full Name"
+              value={coBuyer.full_name}
+              onChange={(e) =>
+                onCoBuyerChange({
+                  ...coBuyer,
+                  full_name: e.target.value,
+                })
+              }
+            />
+
+            <Input
+              label="Birth Date"
+              type="date"
+              value={coBuyer.birth_date}
+              onChange={(e) =>
+                onCoBuyerChange({
+                  ...coBuyer,
+                  birth_date: e.target.value,
+                })
+              }
+            />
+
+            <MiniDetail label="Computed Age" value={calculateAge(coBuyer.birth_date)} />
+
+            <Input
+              label="Place of Birth"
+              value={coBuyer.place_of_birth}
+              onChange={(e) =>
+                onCoBuyerChange({
+                  ...coBuyer,
+                  place_of_birth: e.target.value,
+                })
+              }
+            />
+
+            <Input
+              label="Citizenship"
+              value={coBuyer.citizenship}
+              onChange={(e) =>
+                onCoBuyerChange({
+                  ...coBuyer,
+                  citizenship: e.target.value,
+                })
+              }
+            />
+
+            <Select
+              label="Gender"
+              value={coBuyer.gender}
+              onChange={(e) =>
+                onCoBuyerChange({
+                  ...coBuyer,
+                  gender: e.target.value as Gender | "",
+                })
+              }
+            >
+              <option value="">Select gender</option>
+              {genderOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </Select>
+
+            <Select
+              label="Civil Status"
+              value={coBuyer.civil_status}
+              onChange={(e) =>
+                onCoBuyerChange({
+                  ...coBuyer,
+                  civil_status: e.target.value as CivilStatus | "",
+                })
+              }
+            >
+              <option value="">Select civil status</option>
+              {civilStatusOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </Select>
+
+            <Input
+              label="Mobile Number"
+              value={coBuyer.mobile_no}
+              onChange={(e) =>
+                onCoBuyerChange({
+                  ...coBuyer,
+                  mobile_no: e.target.value,
+                })
+              }
+            />
+
+            <Input
+              label="Residence Phone Number"
+              value={coBuyer.residence_phone_no}
+              onChange={(e) =>
+                onCoBuyerChange({
+                  ...coBuyer,
+                  residence_phone_no: e.target.value,
+                })
+              }
+            />
+
+            <Input
+              label="Email"
+              type="email"
+              value={coBuyer.email}
+              onChange={(e) =>
+                onCoBuyerChange({
+                  ...coBuyer,
+                  email: e.target.value,
+                })
+              }
+            />
+
+            <Input
+              label="TIN"
+              value={coBuyer.tin}
+              onChange={(e) =>
+                onCoBuyerChange({
+                  ...coBuyer,
+                  tin: e.target.value,
+                })
+              }
+            />
+
+            <Input
+              label="Present Address"
+              value={coBuyer.present_address}
+              onChange={(e) =>
+                onCoBuyerChange({
+                  ...coBuyer,
+                  present_address: e.target.value,
+                })
+              }
+            />
+
+            <Input
+              label="Present ZIP Code"
+              value={coBuyer.present_zip_code}
+              onChange={(e) =>
+                onCoBuyerChange({
+                  ...coBuyer,
+                  present_zip_code: e.target.value,
+                })
+              }
+            />
+
+            <Input
+              label="Permanent Address"
+              value={coBuyer.permanent_address}
+              onChange={(e) =>
+                onCoBuyerChange({
+                  ...coBuyer,
+                  permanent_address: e.target.value,
+                })
+              }
+            />
+
+            <Input
+              label="Permanent ZIP Code"
+              value={coBuyer.permanent_zip_code}
+              onChange={(e) =>
+                onCoBuyerChange({
+                  ...coBuyer,
+                  permanent_zip_code: e.target.value,
+                })
+              }
+            />
+          </div>
+        </div>
+      ) : (
+        <p className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500">
+          Single buyer selected. No spouse or second buyer details needed for this unit.
+        </p>
+      )}
     </div>
   )
 }

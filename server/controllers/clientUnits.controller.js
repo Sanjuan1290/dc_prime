@@ -18,6 +18,10 @@ const allowedClientUnitStatuses = [
 
 const allowedSaleTypes = ['distributed', 'direct', 'direct_to_developer']
 const allowedModeOfPayments = ['cash', 'installment']
+const allowedBuyerTypes = ['single', 'spouses', 'and_account']
+const allowedBuyerRoles = ['spouse', 'second_buyer']
+const allowedGenders = ['male', 'female', 'other']
+const allowedCivilStatuses = ['single', 'married', 'separated', 'annulled_divorced', 'widower']
 const allowedPaymentTermsMonths = [12, 18, 20, 36, 60]
 const defaultContractProcessingStatus = 'pending_profile'
 
@@ -157,6 +161,101 @@ const validateModeOfPayment = (modeOfPayment) => {
   if (isMissing(modeOfPayment)) return 'installment'
   if (!allowedModeOfPayments.includes(modeOfPayment)) return 'installment'
   return modeOfPayment
+}
+
+const validateBuyerType = (buyerType) => {
+  if (isMissing(buyerType)) return 'single'
+  return allowedBuyerTypes.includes(buyerType) ? buyerType : 'single'
+}
+
+const nullableEnum = (value, allowedValues) => {
+  if (isMissing(value)) return null
+  return allowedValues.includes(value) ? value : null
+}
+
+const normalizeCoBuyerPayload = (coBuyer = {}, buyerType = 'single') => {
+  if (buyerType === 'single') return null
+
+  return {
+    buyer_role: nullableEnum(coBuyer.buyer_role, allowedBuyerRoles) ||
+      (buyerType === 'spouses' ? 'spouse' : 'second_buyer'),
+    full_name: nullableValue(coBuyer.full_name),
+    birth_date: parseDateOnly(coBuyer.birth_date),
+    place_of_birth: nullableValue(coBuyer.place_of_birth),
+    citizenship: nullableValue(coBuyer.citizenship),
+    gender: nullableEnum(coBuyer.gender, allowedGenders),
+    civil_status: nullableEnum(coBuyer.civil_status, allowedCivilStatuses),
+    present_address: nullableValue(coBuyer.present_address),
+    present_zip_code: nullableValue(coBuyer.present_zip_code),
+    permanent_address: nullableValue(coBuyer.permanent_address),
+    permanent_zip_code: nullableValue(coBuyer.permanent_zip_code),
+    mobile_no: nullableValue(coBuyer.mobile_no),
+    residence_phone_no: nullableValue(coBuyer.residence_phone_no),
+    email: nullableValue(coBuyer.email),
+    tin: nullableValue(coBuyer.tin),
+  }
+}
+
+const replaceClientUnitCoBuyer = async ({
+  connection,
+  clientId,
+  clientUnitId,
+  buyerType,
+  coBuyer,
+}) => {
+  await connection.query(
+    `DELETE FROM client_buyers WHERE client_id = ? AND client_unit_id = ?`,
+    [clientId, clientUnitId]
+  )
+
+  if (buyerType === 'single') return null
+
+  const normalizedCoBuyer = normalizeCoBuyerPayload(coBuyer, buyerType)
+
+  const [result] = await connection.query(
+    `
+    INSERT INTO client_buyers (
+      client_id,
+      client_unit_id,
+      buyer_role,
+      full_name,
+      birth_date,
+      place_of_birth,
+      citizenship,
+      gender,
+      civil_status,
+      present_address,
+      present_zip_code,
+      permanent_address,
+      permanent_zip_code,
+      mobile_no,
+      residence_phone_no,
+      email,
+      tin
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+    [
+      clientId,
+      clientUnitId,
+      normalizedCoBuyer.buyer_role,
+      normalizedCoBuyer.full_name,
+      normalizedCoBuyer.birth_date,
+      normalizedCoBuyer.place_of_birth,
+      normalizedCoBuyer.citizenship,
+      normalizedCoBuyer.gender,
+      normalizedCoBuyer.civil_status,
+      normalizedCoBuyer.present_address,
+      normalizedCoBuyer.present_zip_code,
+      normalizedCoBuyer.permanent_address,
+      normalizedCoBuyer.permanent_zip_code,
+      normalizedCoBuyer.mobile_no,
+      normalizedCoBuyer.residence_phone_no,
+      normalizedCoBuyer.email,
+      normalizedCoBuyer.tin,
+    ]
+  )
+
+  return result.insertId
 }
 
 const getListingPurchasePrice = (listing) => {
@@ -427,6 +526,23 @@ const clientUnitFields = `
     ELSE 0
   END AS payment_percentage,
   cu.mode_of_payment,
+  cu.buyer_type,
+  unit_co_buyer.id AS co_buyer_id,
+  unit_co_buyer.buyer_role AS co_buyer_role,
+  unit_co_buyer.full_name AS co_buyer_name,
+  DATE_FORMAT(unit_co_buyer.birth_date, '%Y-%m-%d') AS co_buyer_birth_date,
+  unit_co_buyer.place_of_birth AS co_buyer_place_of_birth,
+  unit_co_buyer.citizenship AS co_buyer_citizenship,
+  unit_co_buyer.gender AS co_buyer_gender,
+  unit_co_buyer.civil_status AS co_buyer_civil_status,
+  unit_co_buyer.present_address AS co_buyer_present_address,
+  unit_co_buyer.present_zip_code AS co_buyer_present_zip_code,
+  unit_co_buyer.permanent_address AS co_buyer_permanent_address,
+  unit_co_buyer.permanent_zip_code AS co_buyer_permanent_zip_code,
+  unit_co_buyer.mobile_no AS co_buyer_mobile_no,
+  unit_co_buyer.residence_phone_no AS co_buyer_residence_phone_no,
+  unit_co_buyer.email AS co_buyer_email,
+  unit_co_buyer.tin AS co_buyer_tin,
   cu.due_day,
   CASE
     WHEN cu.due_day IS NULL THEN NULL
@@ -499,6 +615,8 @@ const clientUnitJoins = `
   LEFT JOIN users u ON u.id = cu.assigned_user_id
   LEFT JOIN accredited_sellers seller ON seller.id = cu.seller_id
   LEFT JOIN accredited_sellers parent_seller ON parent_seller.id = seller.parent_seller_id
+  LEFT JOIN client_buyers unit_co_buyer
+    ON unit_co_buyer.client_unit_id = cu.id
   LEFT JOIN (
     SELECT
       client_unit_id,
@@ -992,6 +1110,8 @@ export const reserveListing = async (req, res) => {
     seller_id,
     status = 'reserved',
     mode_of_payment,
+    buyer_type = 'single',
+    co_buyer = null,
     starting_date,
     due_date,
     reservation_fee_amount,
@@ -1035,6 +1155,7 @@ export const reserveListing = async (req, res) => {
 
   const finalSaleType = validateSaleType(sale_type)
   const finalModeOfPayment = mode_of_payment
+  const finalBuyerType = validateBuyerType(buyer_type)
 
   const connection = await db.getConnection()
 
@@ -1139,6 +1260,7 @@ export const reserveListing = async (req, res) => {
         seller_id,
         status,
         mode_of_payment,
+        buyer_type,
         balance,
         due_day,
         starting_date,
@@ -1158,7 +1280,7 @@ export const reserveListing = async (req, res) => {
         monthly_amortization,
         contract_processing_status,
         sale_type
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         clientId,
@@ -1167,6 +1289,7 @@ export const reserveListing = async (req, res) => {
         finalSellerId,
         status,
         finalModeOfPayment,
+        finalBuyerType,
         terms.offerBalanceAmount,
         terms.dueDay,
         terms.startingDate,
@@ -1190,6 +1313,14 @@ export const reserveListing = async (req, res) => {
     )
 
     const clientUnitId = result.insertId
+
+    await replaceClientUnitCoBuyer({
+      connection,
+      clientId,
+      clientUnitId,
+      buyerType: finalBuyerType,
+      coBuyer: co_buyer,
+    })
 
     const nextListingStatus = listingStatusFromClientUnitStatus(status)
 
@@ -1254,6 +1385,7 @@ export const reserveListing = async (req, res) => {
         monthly_amortization: terms.monthlyAmortization,
         contract_processing_status: terms.contractProcessingStatus,
         sale_type: finalSaleType,
+        buyer_type: finalBuyerType,
       },
     })
   } catch (err) {
@@ -1274,6 +1406,8 @@ export const updateClientUnit = async (req, res) => {
     due_date,
     status,
     mode_of_payment,
+    buyer_type,
+    co_buyer = null,
     regenerate_commission = false,
     main_commission_rate_override,
     sale_type,
@@ -1328,6 +1462,12 @@ export const updateClientUnit = async (req, res) => {
     isMissing(sale_type)
       ? existingClientUnit.sale_type
       : sale_type
+  )
+
+  const finalBuyerType = validateBuyerType(
+    isMissing(buyer_type)
+      ? existingClientUnit.buyer_type
+      : buyer_type
   )
 
   const connection = await db.getConnection()
@@ -1393,7 +1533,8 @@ export const updateClientUnit = async (req, res) => {
         due_day = ?,
         due_date = ?,
         status = ?,
-        mode_of_payment = ?
+        mode_of_payment = ?,
+        buyer_type = ?
       WHERE id = ?
       `,
       [
@@ -1403,9 +1544,18 @@ export const updateClientUnit = async (req, res) => {
         nullableValue(nextDueDate),
         finalStatus,
         finalModeOfPayment,
+        finalBuyerType,
         id,
       ]
     )
+
+    await replaceClientUnitCoBuyer({
+      connection,
+      clientId: existingClientUnit.client_id,
+      clientUnitId: id,
+      buyerType: finalBuyerType,
+      coBuyer: co_buyer,
+    })
 
     const nextListingStatus = listingStatusFromClientUnitStatus(finalStatus)
 

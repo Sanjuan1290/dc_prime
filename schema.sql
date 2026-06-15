@@ -226,6 +226,7 @@ DROP TABLE IF EXISTS `client_buyers`;
 CREATE TABLE `client_buyers` (
   `id` int NOT NULL AUTO_INCREMENT,
   `client_id` int NOT NULL,
+  `client_unit_id` int DEFAULT NULL,
   `buyer_role` enum('spouse','second_buyer') NOT NULL DEFAULT 'spouse',
   `full_name` varchar(255) DEFAULT NULL,
   `birth_date` date DEFAULT NULL,
@@ -245,7 +246,9 @@ CREATE TABLE `client_buyers` (
   `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `idx_client_buyers_client_id` (`client_id`),
-  CONSTRAINT `fk_client_buyers_client` FOREIGN KEY (`client_id`) REFERENCES `clients` (`id`) ON DELETE CASCADE
+  KEY `idx_client_buyers_client_unit_id` (`client_unit_id`),
+  CONSTRAINT `fk_client_buyers_client` FOREIGN KEY (`client_id`) REFERENCES `clients` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_client_buyers_client_unit` FOREIGN KEY (`client_unit_id`) REFERENCES `client_units` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB AUTO_INCREMENT=6 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -255,7 +258,7 @@ CREATE TABLE `client_buyers` (
 
 LOCK TABLES `client_buyers` WRITE;
 /*!40000 ALTER TABLE `client_buyers` DISABLE KEYS */;
-INSERT INTO `client_buyers` VALUES (5,1,'spouse','san juan','2002-03-03','imus','Filipino','male','single','GEN TRI','4107','Paliparan','4114','09054563453','0987654654','nick@gmail.com','6784-5435-7654-00000','2026-06-15 03:27:28','2026-06-15 03:27:28');
+INSERT INTO `client_buyers` VALUES (5,1,NULL,'spouse','san juan','2002-03-03','imus','Filipino','male','single','GEN TRI','4107','Paliparan','4114','09054563453','0987654654','nick@gmail.com','6784-5435-7654-00000','2026-06-15 03:27:28','2026-06-15 03:27:28');
 /*!40000 ALTER TABLE `client_buyers` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -398,6 +401,7 @@ CREATE TABLE `client_units` (
   `seller_id` int DEFAULT NULL,
   `status` enum('reserved','active','cancelled','fully_paid','closed') NOT NULL DEFAULT 'reserved',
   `mode_of_payment` enum('cash','installment') NOT NULL DEFAULT 'installment',
+  `buyer_type` enum('single','spouses','and_account') NOT NULL DEFAULT 'single',
   `balance` decimal(15,2) NOT NULL DEFAULT '0.00',
   `due_day` tinyint DEFAULT NULL,
   `starting_date` date DEFAULT NULL,
@@ -448,7 +452,7 @@ CREATE TABLE `client_units` (
 
 LOCK TABLES `client_units` WRITE;
 /*!40000 ALTER TABLE `client_units` DISABLE KEYS */;
-INSERT INTO `client_units` VALUES (1,1,7,2,4,'active','installment',651500.00,18,'2026-06-14','2026-06-18',1039500.00,50000.00,0.00,30.00,3,0.00,0.00,0.00,0.00,989500.00,36,6.00,29135.28,'pending_profile',NULL,NULL,NULL,NULL,NULL,'2026-06-14 08:17:42','2026-06-15 04:53:33','distributed'),(2,1,6,1,4,'fully_paid','cash',0.00,15,'2026-06-15','2026-06-15',858000.00,50000.00,0.00,0.00,0,0.00,0.00,0.00,0.00,808000.00,NULL,0.00,NULL,'pending_profile',NULL,NULL,NULL,NULL,NULL,'2026-06-15 06:00:11','2026-06-15 06:00:58','distributed');
+INSERT INTO `client_units` VALUES (1,1,7,2,4,'active','installment','spouses',651500.00,18,'2026-06-14','2026-06-18',1039500.00,50000.00,0.00,30.00,3,0.00,0.00,0.00,0.00,989500.00,36,6.00,29135.28,'pending_profile',NULL,NULL,NULL,NULL,NULL,'2026-06-14 08:17:42','2026-06-15 06:23:12','distributed'),(2,1,6,1,4,'fully_paid','cash','spouses',0.00,15,'2026-06-15','2026-06-15',858000.00,50000.00,0.00,0.00,0,0.00,0.00,0.00,0.00,808000.00,NULL,0.00,NULL,'pending_profile',NULL,NULL,NULL,NULL,NULL,'2026-06-15 06:00:11','2026-06-15 06:23:12','distributed');
 /*!40000 ALTER TABLE `client_units` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -563,7 +567,7 @@ CREATE TABLE `commission_role_defaults` (
   KEY `idx_commission_role_defaults_role` (`role`),
   KEY `idx_commission_role_defaults_updated_by` (`updated_by`),
   CONSTRAINT `fk_commission_role_defaults_updated_by` FOREIGN KEY (`updated_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
-) ENGINE=InnoDB AUTO_INCREMENT=61 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=63 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -1043,4 +1047,4 @@ UNLOCK TABLES;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2026-06-15 14:10:34
+-- Dump completed on 2026-06-15 14:26:33
