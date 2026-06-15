@@ -1136,6 +1136,7 @@ const ClientProfile = () => {
     useState<EmploymentFormData>(() => emptyEmploymentData("principal"))
   const [coBuyerEmploymentData, setCoBuyerEmploymentData] =
     useState<EmploymentFormData>(() => emptyEmploymentData("co_buyer"))
+  const [isBuyerProfileEditing, setIsBuyerProfileEditing] = useState(false)
 
   const {
     data: clientProfile,
@@ -1257,15 +1258,8 @@ const ClientProfile = () => {
     mutationFn: saveBuyerProfile,
     onSuccess: () => {
       invalidateClientProfile()
+      setIsBuyerProfileEditing(false)
       setSuccessMessage("Buyer profile saved successfully")
-    },
-  })
-
-  const markBuyerProfileCompleteMutation = useMutation({
-    mutationFn: saveBuyerProfile,
-    onSuccess: () => {
-      invalidateClientProfile()
-      setSuccessMessage("Buyer profile marked complete")
     },
   })
 
@@ -1529,10 +1523,16 @@ const ClientProfile = () => {
   const activeCoBuyerData = coBuyerData[0] || emptyCoBuyerData()
   const showCoBuyerProfile = principalProfileData.buyer_type !== "single"
   const currentProfileStatus: ProfileStatus =
-    client?.profile_status === "complete" ? "complete" : "incomplete"
-  const isSavingBuyerProfile =
-    saveBuyerProfileMutation.isPending ||
-    markBuyerProfileCompleteMutation.isPending
+    profileCompletion.isComplete ? "complete" : "incomplete"
+  const isSavingBuyerProfile = saveBuyerProfileMutation.isPending
+  const buyerProfileDisabled = !isBuyerProfileEditing
+  const missingProfileFieldSet = new Set(profileCompletion.missingFields || [])
+  const missingInputClass = (fields: string[]) => {
+    if (!isBuyerProfileEditing) return ""
+    return fields.some((field) => missingProfileFieldSet.has(field))
+      ? "border-red-300 bg-red-50 focus:border-red-500 focus:ring-red-100"
+      : ""
+  }
 
   const getReserveValidationMessage = () => {
     if (!reserveData.listing_id || !selectedListing) {
@@ -1673,18 +1673,6 @@ const ClientProfile = () => {
     })
   }
 
-  const handleMarkBuyerProfileComplete = () => {
-    if (!clientId) return
-
-    markBuyerProfileCompleteMutation.mutate({
-      clientId,
-      profileData: principalProfileData,
-      coBuyerData,
-      principalEmploymentData,
-      coBuyerEmploymentData,
-      markComplete: true,
-    })
-  }
 
   const handleUpdateUnit = () => {
     if (!editUnit) return
@@ -1805,16 +1793,6 @@ const ClientProfile = () => {
         />
       ) : null}
 
-      {markBuyerProfileCompleteMutation.error ? (
-        <Alert
-          variant="error"
-          title={
-            markBuyerProfileCompleteMutation.error instanceof Error
-              ? markBuyerProfileCompleteMutation.error.message
-              : "Failed to mark buyer profile complete"
-          }
-        />
-      ) : null}
 
       {updateUnitMutation.error ? (
         <Alert
@@ -1876,11 +1854,6 @@ const ClientProfile = () => {
           value={formatMoney(totals.totalBalance)}
           icon={<FiFileText />}
         />
-        <StatCard
-          title="Gross Commission"
-          value={formatMoney(totals.totalCommission)}
-          icon={<FiUser />}
-        />
       </div>
 
       <div className="mt-6 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -1902,14 +1875,6 @@ const ClientProfile = () => {
                 : "-"
             }
           />
-          <Detail
-            label="Seller Rate"
-            value={
-              client.default_seller_commission_rate
-                ? `${formatNumber(client.default_seller_commission_rate)}%`
-                : "-"
-            }
-          />
         </div>
       </div>
 
@@ -1924,22 +1889,31 @@ const ClientProfile = () => {
 
           <div className="flex flex-wrap items-center gap-2">
             <StatusBadge status={currentProfileStatus} />
-            <Button
-              disabled={isSavingBuyerProfile}
-              onClick={handleSaveBuyerProfile}
-              variant="secondary"
-            >
-              {saveBuyerProfileMutation.isPending ? "Saving..." : "Save Buyer Profile"}
-            </Button>
-            <Button
-              disabled={isSavingBuyerProfile}
-              onClick={handleMarkBuyerProfileComplete}
-              variant="primary"
-            >
-              {markBuyerProfileCompleteMutation.isPending
-                ? "Checking..."
-                : "Mark Profile Complete"}
-            </Button>
+            {isBuyerProfileEditing ? (
+              <>
+                <Button
+                  disabled={isSavingBuyerProfile}
+                  onClick={() => {
+                    if (client) setPrincipalProfileData(clientToPrincipalProfileData(client))
+                    setCoBuyerData([coBuyerToFormData(coBuyers[0])])
+                    setIsBuyerProfileEditing(false)
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  disabled={isSavingBuyerProfile}
+                  onClick={handleSaveBuyerProfile}
+                  variant="primary"
+                >
+                  {saveBuyerProfileMutation.isPending ? "Saving..." : "Save Changes"}
+                </Button>
+              </>
+            ) : (
+              <Button onClick={() => setIsBuyerProfileEditing(true)} variant="primary">
+                Edit Buyer Profile
+              </Button>
+            )}
           </div>
         </div>
 
@@ -1948,15 +1922,28 @@ const ClientProfile = () => {
           <div className="mt-4">
             <Alert
               variant="warning"
-              title={`Missing: ${profileCompletion.missingFields.join(", ")}`}
+              title={`Profile incomplete. Missing: ${profileCompletion.missingFields.join(", ")}`}
             />
           </div>
         ) : null}
 
-        <div className="mt-5 space-y-5">
-          <div className="rounded-xl border border-slate-200 p-4">
+        <div className="mt-5">
+          <h3 className="text-sm font-bold uppercase tracking-wide text-slate-500">
+            Individual Buyer/s Information
+          </h3>
+        </div>
+
+        <fieldset
+          disabled={buyerProfileDisabled}
+          className={[
+            "mt-5 space-y-5",
+            buyerProfileDisabled ? "opacity-90" : "",
+          ].join(" ")}
+        >
+          <div className="grid gap-5 xl:grid-cols-2">
+            <div className="rounded-xl border border-slate-200 p-4">
             <h3 className="text-sm font-bold text-slate-900">
-              Principal Buyer
+              Principal Buyer Information
             </h3>
 
             <div className="mt-4 grid gap-4 md:grid-cols-3">
@@ -1979,6 +1966,7 @@ const ClientProfile = () => {
 
               <Input
                 label="Full Name"
+                className={missingInputClass(["Principal full name"])}
                 value={principalProfileData.full_name}
                 onChange={(e) =>
                   setPrincipalProfileData({
@@ -1990,6 +1978,7 @@ const ClientProfile = () => {
 
               <Input
                 label="Birth Date"
+                className={missingInputClass(["Birth date"])}
                 type="date"
                 value={principalProfileData.birth_date}
                 onChange={(e) =>
@@ -2018,6 +2007,7 @@ const ClientProfile = () => {
 
               <Input
                 label="Citizenship"
+                className={missingInputClass(["Citizenship"])}
                 value={principalProfileData.citizenship}
                 onChange={(e) =>
                   setPrincipalProfileData({
@@ -2029,6 +2019,7 @@ const ClientProfile = () => {
 
               <Select
                 label="Gender"
+                className={missingInputClass(["Gender"])}
                 value={principalProfileData.gender}
                 onChange={(e) =>
                   setPrincipalProfileData({
@@ -2047,6 +2038,7 @@ const ClientProfile = () => {
 
               <Select
                 label="Civil Status"
+                className={missingInputClass(["Civil status"])}
                 value={principalProfileData.civil_status}
                 onChange={(e) =>
                   setPrincipalProfileData({
@@ -2065,6 +2057,7 @@ const ClientProfile = () => {
 
               <Input
                 label="Mobile Number / Contact Number"
+                className={missingInputClass(["Contact number or email"])}
                 value={principalProfileData.contact_no}
                 onChange={(e) =>
                   setPrincipalProfileData({
@@ -2087,6 +2080,7 @@ const ClientProfile = () => {
 
               <Input
                 label="Email"
+                className={missingInputClass(["Contact number or email"])}
                 type="email"
                 value={principalProfileData.email}
                 onChange={(e) =>
@@ -2099,6 +2093,7 @@ const ClientProfile = () => {
 
               <Input
                 label="TIN"
+                className={missingInputClass(["TIN"])}
                 value={principalProfileData.tin}
                 onChange={(e) =>
                   setPrincipalProfileData({
@@ -2110,6 +2105,7 @@ const ClientProfile = () => {
 
               <Input
                 label="Present Address"
+                className={missingInputClass(["Present address"])}
                 value={principalProfileData.present_address}
                 onChange={(e) =>
                   setPrincipalProfileData({
@@ -2157,7 +2153,7 @@ const ClientProfile = () => {
           {showCoBuyerProfile ? (
             <div className="rounded-xl border border-slate-200 p-4">
               <h3 className="text-sm font-bold text-slate-900">
-                Spouse / Second Buyer
+                Spouse / Second Buyer Information
               </h3>
 
               <div className="mt-4 grid gap-4 md:grid-cols-3">
@@ -2179,6 +2175,7 @@ const ClientProfile = () => {
 
                 <Input
                   label="Full Name"
+                  className={missingInputClass(["Spouse / second buyer full name"])}
                   value={activeCoBuyerData.full_name}
                   onChange={(e) =>
                     setCoBuyerData([
@@ -2383,6 +2380,8 @@ const ClientProfile = () => {
             </div>
           ) : null}
 
+          </div>
+
           <div className="rounded-xl border border-slate-200 p-4">
             <h3 className="text-sm font-bold text-slate-900">
               Work / Business Information
@@ -2404,7 +2403,7 @@ const ClientProfile = () => {
               ) : null}
             </div>
           </div>
-        </div>
+        </fieldset>
       </div>
 
       <div className="mt-6">
@@ -2788,7 +2787,7 @@ const ClientProfile = () => {
                 }}
               >
                 <option value="distributed">Distributed</option>
-                <option value="direct_to_developer">Direct to Developer</option>
+                <option value="direct_to_developer">Direct</option>
               </Select>
             </div>
 
@@ -3013,7 +3012,7 @@ const ClientProfile = () => {
             {reserveData.sale_type === "direct_to_developer" ? (
               <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-4">
                 <h3 className="text-sm font-bold text-slate-900">
-                  Direct to Developer Commission
+                  Direct Commission
                 </h3>
                 <p className="mt-1 text-sm text-slate-600">
                   Only the selected agent/seller receives commission. Manager, broker, and BNM override releases will not be generated for this sale.
@@ -3169,7 +3168,7 @@ const ClientProfile = () => {
               }}
             >
               <option value="distributed">Distributed</option>
-              <option value="direct_to_developer">Direct to Developer</option>
+              <option value="direct_to_developer">Direct</option>
             </Select>
 
             <label className="flex items-center gap-2 rounded-xl border border-slate-200 p-3 text-sm text-slate-700">
@@ -3822,3 +3821,6 @@ const MiniDetail = ({
 }
 
 export default ClientProfile
+
+
+

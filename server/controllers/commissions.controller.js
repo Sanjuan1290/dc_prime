@@ -1381,7 +1381,11 @@
 
     const releasedCount = Number(releaseRows[0]?.released_count || 0)
 
-    if (releasedCount > 0 && (!isMissing(rate) || !isMissing(seller_id))) {
+    const sellerChanged =
+      !isMissing(seller_id) &&
+      Number(seller_id) !== Number(existingCommission.seller_id)
+
+    if (releasedCount > 0 && (!isMissing(rate) || sellerChanged)) {
       return res.status(400).json({
         message: 'Cannot change seller or rate after a release has been paid',
       })
@@ -1399,14 +1403,23 @@
       }
 
       finalSellerId = seller_id
-      finalCommissionRole = isMissing(commission_role)
-        ? seller.seller_role
-        : commission_role
+      finalCommissionRole = seller.seller_role || finalCommissionRole
+
+      if (releasedCount === 0 || sellerChanged) {
+        finalRate = await getFinalRate({
+          connectionOrDb: db,
+          seller,
+          rate: isMissing(rate) ? null : rate,
+          rateType: sale_type === 'direct' || sale_type === 'direct_to_developer'
+            ? 'direct_to_developer'
+            : 'personal',
+        })
+      }
     } else if (!isMissing(commission_role)) {
       finalCommissionRole = commission_role
     }
 
-    if (!isMissing(rate)) {
+    if (isMissing(seller_id) && !isMissing(rate)) {
       finalRate = normalizeRate(rate)
     }
 
@@ -1414,9 +1427,13 @@
       source_type === 'override' ? 'override' : existingCommission.source_type || 'main'
 
     const finalSaleType =
-      sale_type === 'direct' ? 'direct' : sale_type === 'distributed'
+      sale_type === 'distributed'
         ? 'distributed'
-        : existingCommission.sale_type || 'distributed'
+        : sale_type === 'direct' || sale_type === 'direct_to_developer'
+          ? 'direct'
+          : existingCommission.sale_type === 'distributed'
+            ? 'distributed'
+            : 'direct'
 
     const shouldSyncOverride =
       finalSourceType === 'main' && finalSaleType === 'distributed'
@@ -1426,12 +1443,6 @@
 
     const hasOverrideSeller = !isMissing(override_seller_id)
     const hasOverrideRate = !isMissing(override_rate)
-
-    if (shouldSyncOverride && hasOverrideSeller && !hasOverrideRate) {
-      return res.status(400).json({
-        message: 'Override rate is required when override seller is selected',
-      })
-    }
 
     if (shouldSyncOverride && !hasOverrideSeller && hasOverrideRate) {
       return res.status(400).json({
@@ -1484,10 +1495,8 @@
         Number(override_seller_id) !==
           Number(existingOverrideCommission.seller_id)
 
-      const overrideRateChanged =
-        hasOverrideRate &&
-        normalizeRate(override_rate) !==
-          normalizeRate(existingOverrideCommission.rate)
+      const overrideRateChanged = hasOverrideRate &&
+        normalizeRate(override_rate) !== normalizeRate(existingOverrideCommission.rate)
 
       if (
         overrideReleasedCount > 0 &&
@@ -1554,7 +1563,7 @@
       ]
     )
 
-    if (releasedCount === 0 && !isMissing(rate)) {
+    if (releasedCount === 0 && (sellerChanged || !isMissing(rate))) {
       await db.query(
         `
         DELETE cr
@@ -1600,7 +1609,12 @@
         return res.status(404).json({ message: 'Override seller not found' })
       }
 
-      const finalOverrideRate = normalizeRate(override_rate)
+      const finalOverrideRate = await getFinalRate({
+        connectionOrDb: db,
+        seller: overrideSeller,
+        rate: hasOverrideRate ? override_rate : null,
+        rateType: 'personal',
+      })
       const overrideGrossCommission = calculateGrossCommission(
         existingCommission.commission_base,
         finalOverrideRate
@@ -1740,12 +1754,6 @@ export const addMissingOverrideCommission = async (req, res) => {
     })
   }
 
-  if (isMissing(override_rate)) {
-    return res.status(400).json({
-      message: 'Override rate is required',
-    })
-  }
-
   const connection = await db.getConnection()
 
   try {
@@ -1828,7 +1836,12 @@ export const addMissingOverrideCommission = async (req, res) => {
       })
     }
 
-    const finalOverrideRate = normalizeRate(override_rate)
+    const finalOverrideRate = await getFinalRate({
+      connectionOrDb: connection,
+      seller: overrideSeller,
+      rate: isMissing(override_rate) ? null : override_rate,
+      rateType: 'personal',
+    })
 
     const createdOverride = await createAutoCommissionForClientUnit({
       connection,
@@ -2681,3 +2694,6 @@ export const addMissingOverrideCommission = async (req, res) => {
       data: rows,
     })
   }
+
+
+

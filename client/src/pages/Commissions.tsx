@@ -55,7 +55,7 @@ type Commission = {
   commission_role: string | null
   source_type: "main" | "override" | string
   parent_commission_id: number | null
-  sale_type: "distributed" | "direct" | "direct_to_developer" | string
+  sale_type: "distributed" | "direct" | string
   cash_kaliwaan_amount: number | string
   cash_kaliwaan_date: string | null
   cash_kaliwaan_notes: string | null
@@ -168,6 +168,9 @@ type Seller = {
   full_name: string
   seller_role: string
   commission_rate?: number | string | null
+  personal_commission_rate?: number | string | null
+  override_commission_rate?: number | string | null
+  direct_to_developer_rate?: number | string | null
   reports_under_display?: string | null
 }
 
@@ -191,7 +194,7 @@ type CommissionEditData = {
   rate: string
   commission_role: string
   source_type: "main" | "override"
-  sale_type: "distributed" | "direct" | "direct_to_developer"
+  sale_type: "distributed" | "direct"
   cash_kaliwaan_amount: string
   cash_kaliwaan_date: string
   cash_kaliwaan_notes: string
@@ -334,9 +337,6 @@ const updateCommission = async ({
     },
     body: JSON.stringify({
       seller_id: commissionData.seller_id || null,
-      rate: commissionData.rate === "" ? null : Number(commissionData.rate),
-      commission_role: commissionData.commission_role || null,
-      source_type: commissionData.source_type,
       sale_type: commissionData.sale_type,
       cash_kaliwaan_amount:
         commissionData.cash_kaliwaan_amount === ""
@@ -350,12 +350,6 @@ const updateCommission = async ({
         commissionData.sale_type === "distributed" &&
         commissionData.override_seller_id
           ? commissionData.override_seller_id
-          : null,
-      override_rate:
-        commissionData.source_type === "main" &&
-        commissionData.sale_type === "distributed" &&
-        commissionData.override_rate !== ""
-          ? Number(commissionData.override_rate)
           : null,
       override_notes_for_child:
         commissionData.source_type === "main" &&
@@ -387,7 +381,6 @@ const addMissingOverrideCommission = async ({
     },
     body: JSON.stringify({
       override_seller_id: data.seller_id || null,
-      override_rate: data.rate === "" ? null : Number(data.rate),
       override_notes: data.override_notes || null,
       cash_kaliwaan_amount:
         data.cash_kaliwaan_amount === ""
@@ -519,6 +512,47 @@ const getReleaseStageLabel = (stage: string | null | undefined) => {
   }
 }
 
+const getSellerTypeLabel = (sourceType?: string | null) => {
+  return sourceType === "override" ? "Hierarchy Residual" : "Main Seller"
+}
+
+const getSaleTypeLabel = (saleType?: string | null) => {
+  return saleType === "distributed" ? "Distributed" : "Direct"
+}
+
+const commissionRoleOrder: Record<string, number> = {
+  agent: 1,
+  manager: 2,
+  broker: 3,
+  broker_network_manager: 4,
+}
+
+const getCommissionRoleOrder = (commission?: Commission | null) => {
+  return commissionRoleOrder[commission?.commission_role || commission?.seller_role || ""] || 99
+}
+
+const getCommissionMilestoneSummary = (commission: Commission) => {
+  return [
+    { label: "20%", amount: commission.first_release_amount, status: commission.first_release_status },
+    { label: "40%", amount: commission.second_release_amount, status: commission.second_release_status },
+    { label: "60%", amount: commission.third_release_amount, status: commission.third_release_status },
+    { label: "75%", amount: commission.fourth_release_amount, status: commission.fourth_release_status },
+    { label: "Retention", amount: commission.retention_amount, status: commission.retention_status },
+  ]
+}
+
+const getSellerAccountRate = (seller?: Seller | null) => {
+  if (!seller) return null
+
+  return (
+    seller.personal_commission_rate ??
+    seller.commission_rate ??
+    seller.direct_to_developer_rate ??
+    seller.override_commission_rate ??
+    null
+  )
+}
+
 const getCommissionGroupKey = (commission: Commission) => {
   if (commission.source_type === "override" && commission.parent_commission_id) {
     return `main-${commission.parent_commission_id}`
@@ -536,7 +570,7 @@ const commissionToEditData = (
     rate: commission.rate === null || commission.rate === undefined ? "" : String(commission.rate),
     commission_role: commission.commission_role || "agent",
     source_type: commission.source_type === "override" ? "override" : "main",
-    sale_type: commission.sale_type === "direct" ? "direct" : "distributed",
+    sale_type: commission.sale_type === "distributed" ? "distributed" : "direct",
     cash_kaliwaan_amount:
       commission.cash_kaliwaan_amount === null ||
       commission.cash_kaliwaan_amount === undefined
@@ -840,10 +874,13 @@ const Commissions = () => {
       main.source_type === sourceFilter ||
       overrides.some((override) => override.source_type === sourceFilter)
 
+    const normalizedMainSaleType = main.sale_type === "distributed" ? "distributed" : "direct"
     const matchesSaleType =
       saleTypeFilter === "all" ||
-      main.sale_type === saleTypeFilter ||
-      overrides.some((override) => override.sale_type === saleTypeFilter)
+      normalizedMainSaleType === saleTypeFilter ||
+      overrides.some((override) =>
+        (override.sale_type === "distributed" ? "distributed" : "direct") === saleTypeFilter
+      )
 
     return matchesSearch && matchesStatus && matchesSource && matchesSaleType
   })
@@ -905,20 +942,34 @@ const Commissions = () => {
 
   const paginatedGroups = paginateRows(filteredGroups, page, rowsPerPage)
 
-  const openEditModal = (commission: Commission, providedOverride?: Commission) => {
-    const overrideCommission =
-      providedOverride ||
-      (commission.source_type === "main"
-        ? commissions.find(
-            (item) =>
-              item.source_type === "override" &&
-              Number(item.parent_commission_id || 0) === Number(commission.id) &&
-              item.status !== "cancelled"
-          )
-        : undefined)
+  const editMainCommission = editCommission
+    ? editCommission.source_type === "override" && editCommission.parent_commission_id
+      ? commissions.find(
+          (commission) => Number(commission.id) === Number(editCommission.parent_commission_id)
+        ) || editCommission
+      : editCommission
+    : null
 
+  const editHierarchyCommissions = editMainCommission
+    ? commissions
+        .filter(
+          (commission) =>
+            commission.source_type === "override" &&
+            Number(commission.parent_commission_id || 0) === Number(editMainCommission.id) &&
+            commission.status !== "cancelled"
+        )
+        .sort((a, b) => getCommissionRoleOrder(a) - getCommissionRoleOrder(b))
+    : []
+
+  const editExistingHierarchySellerIds = new Set(
+    editHierarchyCommissions.map((commission) => Number(commission.seller_id))
+  )
+
+  const openEditModal = (commission: Commission, providedOverride?: Commission) => {
+    // Existing hierarchy residuals are displayed as a full read-only list in the modal.
+    // Only prefill this section when a specific missing residual is being added.
     setEditCommission(commission)
-    setEditData(commissionToEditData(commission, overrideCommission))
+    setEditData(commissionToEditData(commission, providedOverride))
     setSuccessMessage("")
   }
 
@@ -1206,16 +1257,16 @@ const Commissions = () => {
           </Select>
 
           <Select
-            label="Source"
+            label="Seller Type"
             value={sourceFilter}
             onChange={(e) => {
               setSourceFilter(e.target.value)
               setPage(1)
             }}
           >
-            <option value="all">All Sources</option>
-            <option value="main">Main</option>
-            <option value="override">Override</option>
+            <option value="all">All Seller Types</option>
+            <option value="main">Main Seller</option>
+            <option value="override">Hierarchy Residual</option>
           </Select>
 
           <Select
@@ -1229,7 +1280,6 @@ const Commissions = () => {
             <option value="all">All Sale Types</option>
             <option value="distributed">Distributed</option>
             <option value="direct">Direct</option>
-            <option value="direct_to_developer">Direct to Developer</option>
           </Select>
         </div>
       </div>
@@ -1293,7 +1343,7 @@ const Commissions = () => {
                             Gross: {formatMoney(main.gross_commission)}
                           </p>
                           <p className="text-xs text-slate-500">
-                            Source: {formatText(main.source_type)}
+                            {getSellerTypeLabel(main.source_type)}
                           </p>
                         </td>
 
@@ -1318,9 +1368,9 @@ const Commissions = () => {
                           ) : (
                             <div>
                               <p className="text-sm text-slate-500">
-                                {main.sale_type === "direct_to_developer"
-                                  ? "Direct-to-developer sale: no hierarchy residuals"
-                                  : "No hierarchy residual commission"}
+                                {main.sale_type === "distributed"
+                                  ? "No hierarchy residual commission"
+                                  : "Direct sale: no hierarchy split"}
                               </p>
                               {canAddManualResidual ? (
                                 <Button
@@ -1363,7 +1413,7 @@ const Commissions = () => {
                         <td className="px-4 py-3">
                           <StatusBadge status={main.status} />
                           <p className="mt-2 text-xs text-slate-500">
-                            {formatText(main.sale_type)}
+                            {getSaleTypeLabel(main.sale_type)}
                           </p>
                         </td>
 
@@ -1378,7 +1428,7 @@ const Commissions = () => {
 
                             <Button
                               icon={<FiEdit2 />}
-                              onClick={() => openEditModal(main, overrides[0])}
+                              onClick={() => openEditModal(main)}
                             >
                               Edit Main
                             </Button>
@@ -1460,74 +1510,23 @@ const Commissions = () => {
                 ))}
               </Select>
 
-              <Input
-                label="Rate (%)"
-                type="number"
-                min={0}
-                step="0.01"
-                value={editData.rate}
-                disabled={hasReleasedMilestone(editCommission)}
-                onChange={(e) =>
-                  setEditData({
-                    ...editData,
-                    rate: e.target.value,
-                  })
-                }
-              />
-
               <Select
-                label="Commission Role"
-                value={editData.commission_role}
-                onChange={(e) =>
-                  setEditData({
-                    ...editData,
-                    commission_role: e.target.value,
-                  })
-                }
-              >
-                <option value="agent">Agent</option>
-                <option value="manager">Manager</option>
-                <option value="broker">Broker</option>
-                <option value="broker_network_manager">Broker Network Manager</option>
-              </Select>
-
-              <Select
-                label="Source Type"
-                value={editData.source_type}
-                onChange={(e) =>
-                  setEditData({
-                    ...editData,
-                    source_type: e.target.value as "main" | "override",
-                  })
-                }
-              >
-                <option value="main">Main</option>
-                <option value="override">Override</option>
-              </Select>
-
-              <Select
-                label="Sale Channel"
+                label="Sale Type"
                 value={editData.sale_type}
                 onChange={(e) => {
-                  const saleType = e.target.value as "distributed" | "direct" | "direct_to_developer"
+                  const saleType = e.target.value as "distributed" | "direct"
 
                   setEditData({
                     ...editData,
                     sale_type: saleType,
-                    override_seller_id:
-                      ["direct", "direct_to_developer"].includes(saleType) ? "" : editData.override_seller_id,
-                    override_rate:
-                      ["direct", "direct_to_developer"].includes(saleType) ? "" : editData.override_rate,
+                    override_seller_id: saleType === "direct" ? "" : editData.override_seller_id,
                     override_notes_for_child:
-                      ["direct", "direct_to_developer"].includes(saleType)
-                        ? ""
-                        : editData.override_notes_for_child,
+                      saleType === "direct" ? "" : editData.override_notes_for_child,
                   })
                 }}
               >
                 <option value="distributed">Distributed</option>
                 <option value="direct">Direct</option>
-                <option value="direct_to_developer">Direct to Developer</option>
               </Select>
 
               <Select
@@ -1546,6 +1545,13 @@ const Commissions = () => {
                 <option value="on_hold">On Hold</option>
                 <option value="cancelled">Cancelled</option>
               </Select>
+
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <p className="text-xs font-semibold uppercase text-slate-400">System-calculated</p>
+                <p className="mt-1 text-xs text-slate-600">
+                  Role, seller type, and rate come from the selected seller account. Use User Management to change seller rates.
+                </p>
+              </div>
             </div>
 
             {selectedEditSeller ? (
@@ -1560,10 +1566,10 @@ const Commissions = () => {
                     value={formatText(selectedEditSeller.seller_role)}
                   />
                   <ComputedBox
-                    label="Default Rate"
+                    label="Account Rate"
                     value={
-                      selectedEditSeller.commission_rate
-                        ? `${formatNumber(selectedEditSeller.commission_rate)}%`
+                      getSellerAccountRate(selectedEditSeller)
+                        ? `${formatNumber(getSellerAccountRate(selectedEditSeller))}%`
                         : "-"
                     }
                   />
@@ -1579,11 +1585,73 @@ const Commissions = () => {
                 </h3>
 
                 <p className="mt-1 text-xs text-slate-600">
-                  Use this if the main commission should have a linked optional
-                  override commission. If the main commission already has paid
-                  releases and the override was forgotten, use Add Missing
-                  Hierarchy / residual commission from the table instead.
+                  Distributed sales should show every active hierarchy residual for this sale.
+                  For an agent sale, this can include the Manager, Broker, and Broker Network Manager.
                 </p>
+
+                <div className="mt-4 space-y-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Existing hierarchy residuals
+                  </p>
+
+                  {editHierarchyCommissions.length > 0 ? (
+                    <div className="space-y-3">
+                      {editHierarchyCommissions.map((hierarchyCommission) => (
+                        <div
+                          key={hierarchyCommission.id}
+                          className="rounded-lg border border-blue-100 bg-white p-3"
+                        >
+                          <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+                            <div>
+                              <p className="text-sm font-bold text-slate-900">
+                                {hierarchyCommission.seller_name}
+                              </p>
+                              <p className="text-xs text-slate-500">
+                                {formatText(hierarchyCommission.seller_role)} residual · {formatNumber(hierarchyCommission.rate)}%
+                              </p>
+                              <p className="mt-1 text-xs text-slate-500">
+                                Gross: {formatMoney(hierarchyCommission.gross_commission)}
+                              </p>
+                            </div>
+                            <StatusBadge status={hierarchyCommission.status} />
+                          </div>
+
+                          <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+                            {getCommissionMilestoneSummary(hierarchyCommission).map((milestone) => (
+                              <div
+                                key={`${hierarchyCommission.id}-${milestone.label}`}
+                                className="rounded-md border border-slate-100 bg-slate-50 px-2 py-2"
+                              >
+                                <p className="text-[11px] font-bold uppercase text-slate-500">
+                                  {milestone.label}
+                                </p>
+                                <p className="text-xs font-semibold text-slate-900">
+                                  {formatMoney(milestone.amount)}
+                                </p>
+                                <p className="text-[11px] text-slate-500">
+                                  {formatText(milestone.status || "pending")}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700">
+                      No hierarchy residual commissions are connected yet. Recalculate pending commissions, or add only the missing residual seller below if the sale is already locked.
+                    </div>
+                  )}
+                </div>
+
+                <div className="mt-4 rounded-lg border border-blue-100 bg-white p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Add missing residual only
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Use this only if one hierarchy seller was not generated. Existing residual sellers are hidden from this dropdown.
+                  </p>
+                </div>
 
                 <div className="mt-4 grid gap-4 md:grid-cols-2">
                   <Select
@@ -1600,7 +1668,11 @@ const Commissions = () => {
                   >
                     <option value="">No override seller</option>
                     {sellers
-                      .filter((seller) => Number(seller.id) !== Number(editData.seller_id))
+                      .filter(
+                        (seller) =>
+                          Number(seller.id) !== Number(editData.seller_id) &&
+                          !editExistingHierarchySellerIds.has(Number(seller.id))
+                      )
                       .map((seller) => (
                         <option key={seller.id} value={seller.id}>
                           {seller.full_name} - {formatText(seller.seller_role)}
@@ -1608,17 +1680,12 @@ const Commissions = () => {
                       ))}
                   </Select>
 
-                  <Input
-                    label="Hierarchy / Residual Rate (%)"
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    value={editData.override_rate}
-                    onChange={(e) =>
-                      setEditData({
-                        ...editData,
-                        override_rate: e.target.value,
-                      })
+                  <ComputedBox
+                    label="Hierarchy / Residual Rate"
+                    value={
+                      selectedOverrideSeller && getSellerAccountRate(selectedOverrideSeller)
+                        ? `${formatNumber(getSellerAccountRate(selectedOverrideSeller))}% from account`
+                        : "Select a seller to use their saved account rate"
                     }
                   />
 
@@ -1745,8 +1812,7 @@ const Commissions = () => {
               <Button
                 disabled={
                   addMissingOverrideMutation.isPending ||
-                  !missingOverrideData.seller_id ||
-                  missingOverrideData.rate === ""
+                  !missingOverrideData.seller_id
                 }
                 onClick={handleAddMissingOverride}
                 variant="primary"
@@ -1804,17 +1870,12 @@ const Commissions = () => {
                   ))}
               </Select>
 
-              <Input
-                label="Hierarchy / Residual Rate (%)"
-                type="number"
-                min={0}
-                step="0.01"
-                value={missingOverrideData.rate}
-                onChange={(e) =>
-                  setMissingOverrideData({
-                    ...missingOverrideData,
-                    rate: e.target.value,
-                  })
+              <ComputedBox
+                label="Hierarchy / Residual Rate"
+                value={
+                  selectedMissingOverrideSeller && getSellerAccountRate(selectedMissingOverrideSeller)
+                    ? `${formatNumber(getSellerAccountRate(selectedMissingOverrideSeller))}% from account`
+                    : "Select a seller to use their saved account rate"
                 }
               />
 
@@ -1939,12 +2000,12 @@ const Commissions = () => {
                   value={formatText(commissionDetails.seller_role)}
                 />
                 <Detail
-                  label="Source"
-                  value={formatText(commissionDetails.source_type)}
+                  label="Seller Type"
+                  value={getSellerTypeLabel(commissionDetails.source_type)}
                 />
                 <Detail
                   label="Sale Type"
-                  value={formatText(commissionDetails.sale_type)}
+                  value={getSaleTypeLabel(commissionDetails.sale_type)}
                 />
                 <Detail
                   label="Commission Base"
@@ -2304,4 +2365,7 @@ const ComputedBox = ({ label, value }: { label: string; value: string }) => {
 }
 
 export default Commissions
+
+
+
 

@@ -958,13 +958,11 @@ export const updateClientProfile = async (req, res) => {
   }
 
   const nextProfileStatus =
-    profile.requested_profile_status === 'complete'
+    completion.isComplete
       ? 'complete'
       : profile.requested_profile_status === 'incomplete'
         ? 'incomplete'
-        : existingClient.profile_status === 'complete' && !completion.isComplete
-          ? 'incomplete'
-          : existingClient.profile_status || 'incomplete'
+        : 'incomplete'
 
   await db.query(
     `
@@ -1303,3 +1301,6 @@ export const deleteClient = async (req, res) => {
     message: 'Client deleted successfully',
   })
 }
+
+
+

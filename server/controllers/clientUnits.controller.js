@@ -148,7 +148,7 @@ const validateClientUnitStatus = (status) => {
 
 const validateSaleType = (saleType) => {
   if (isMissing(saleType)) return 'distributed'
-  if (saleType === 'direct') return 'direct_to_developer'
+  if (saleType === 'direct_to_developer') return 'direct'
   if (!allowedSaleTypes.includes(saleType)) return 'distributed'
   return saleType
 }
@@ -602,11 +602,11 @@ const createReservationCommissions = async ({
       commissionRole: null,
       sourceType: 'main',
       parentCommissionId: null,
-      saleType: saleType === 'direct' ? 'direct_to_developer' : saleType,
+      saleType: 'direct',
       cashKaliwaanAmount,
       cashKaliwaanDate,
       cashKaliwaanNotes,
-      notes: `Direct-to-developer commission from reservation of ${listing.unit_id}`,
+      notes: `Direct commission from reservation of ${listing.unit_id}`, 
       actorRole,
     })
 
@@ -1810,3 +1810,6 @@ export const deleteClientUnit = async (req, res) => {
     connection.release()
   }
 }
+
+
+
