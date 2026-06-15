@@ -351,6 +351,13 @@ const updateCommission = async ({
         commissionData.override_seller_id
           ? commissionData.override_seller_id
           : null,
+      override_rate:
+        commissionData.source_type === "main" &&
+        commissionData.sale_type === "distributed" &&
+        commissionData.override_seller_id &&
+        commissionData.override_rate !== ""
+          ? Number(commissionData.override_rate)
+          : null,
       override_notes_for_child:
         commissionData.source_type === "main" &&
         commissionData.sale_type === "distributed"
@@ -381,6 +388,7 @@ const addMissingOverrideCommission = async ({
     },
     body: JSON.stringify({
       override_seller_id: data.seller_id || null,
+      override_rate: data.rate === "" ? null : Number(data.rate),
       override_notes: data.override_notes || null,
       cash_kaliwaan_amount:
         data.cash_kaliwaan_amount === ""
@@ -551,6 +559,14 @@ const getSellerAccountRate = (seller?: Seller | null) => {
     seller.override_commission_rate ??
     null
   )
+}
+
+const getSellerAccountRateInputValue = (seller?: Seller | null) => {
+  const rate = getSellerAccountRate(seller)
+
+  if (rate === null || rate === undefined || rate === "") return ""
+
+  return String(rate)
 }
 
 const getCommissionGroupKey = (commission: Commission) => {
@@ -969,6 +985,20 @@ const Commissions = () => {
     editHierarchyCommissions.map((commission) => Number(commission.seller_id))
   )
 
+  const missingOverrideExistingSellerIds = new Set(
+    missingOverrideMain
+      ? commissions
+          .filter(
+            (commission) =>
+              commission.source_type === "override" &&
+              Number(commission.parent_commission_id || 0) ===
+                Number(missingOverrideMain.id) &&
+              commission.status !== "cancelled"
+          )
+          .map((commission) => Number(commission.seller_id))
+      : []
+  )
+
   const openEditModal = (commission: Commission, providedOverride?: Commission) => {
     // Existing hierarchy residuals are displayed as a full read-only list in the modal.
     // Only prefill this section when a specific missing residual is being added.
@@ -1208,7 +1238,7 @@ const Commissions = () => {
         <Alert variant="error" title={restoreCancelledReleaseMutation.error.message} />
       ) : null}
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <StatCard
           icon={<FiDollarSign />}
           title="Total Commission"
@@ -1223,6 +1253,11 @@ const Commissions = () => {
           icon={<FiDollarSign />}
           title="Released"
           value={formatMoney(summary?.total_released || 0)}
+        />
+        <StatCard
+          icon={<FiDollarSign />}
+          title="Cash Advance Deducted"
+          value={formatMoney(summary?.total_cash_advance_deduction || 0)}
         />
         <StatCard
           icon={<FiPause />}
@@ -1661,14 +1696,22 @@ const Commissions = () => {
                   <Select
                     label="Hierarchy / Residual Seller"
                     value={editData.override_seller_id}
-                    onChange={(e) =>
+                    onChange={(e) => {
+                      const nextSellerId = e.target.value
+                        ? Number(e.target.value)
+                        : ""
+                      const nextSeller = sellers.find(
+                        (seller) => Number(seller.id) === Number(nextSellerId)
+                      )
+
                       setEditData({
                         ...editData,
-                        override_seller_id: e.target.value
-                          ? Number(e.target.value)
+                        override_seller_id: nextSellerId,
+                        override_rate: nextSellerId
+                          ? getSellerAccountRateInputValue(nextSeller)
                           : "",
                       })
-                    }
+                    }}
                   >
                     <option value="">No override seller</option>
                     {sellers
@@ -1684,12 +1727,23 @@ const Commissions = () => {
                       ))}
                   </Select>
 
-                  <ComputedBox
-                    label="Hierarchy / Residual Rate"
-                    value={
-                      selectedOverrideSeller && getSellerAccountRate(selectedOverrideSeller)
-                        ? `${formatNumber(getSellerAccountRate(selectedOverrideSeller))}% from account`
-                        : "Select a seller to use their saved account rate"
+                  <Input
+                    label="Hierarchy / Residual Rate (%)"
+                    type="number"
+                    min={0}
+                    max={100}
+                    step="0.01"
+                    value={editData.override_rate}
+                    onChange={(e) =>
+                      setEditData({
+                        ...editData,
+                        override_rate: e.target.value,
+                      })
+                    }
+                    placeholder={
+                      selectedOverrideSeller
+                        ? "Enter residual rate"
+                        : "Select a seller first"
                     }
                   />
 
@@ -1857,16 +1911,30 @@ const Commissions = () => {
               <Select
                 label="Hierarchy / Residual Seller"
                 value={missingOverrideData.seller_id}
-                onChange={(e) =>
+                onChange={(e) => {
+                  const nextSellerId = e.target.value
+                    ? Number(e.target.value)
+                    : ""
+                  const nextSeller = sellers.find(
+                    (seller) => Number(seller.id) === Number(nextSellerId)
+                  )
+
                   setMissingOverrideData({
                     ...missingOverrideData,
-                    seller_id: e.target.value ? Number(e.target.value) : "",
+                    seller_id: nextSellerId,
+                    rate: nextSellerId
+                      ? getSellerAccountRateInputValue(nextSeller)
+                      : "",
                   })
-                }
+                }}
               >
                 <option value="">Select override seller</option>
                 {sellers
-                  .filter((seller) => Number(seller.id) !== Number(missingOverrideMain.seller_id))
+                  .filter(
+                    (seller) =>
+                      Number(seller.id) !== Number(missingOverrideMain.seller_id) &&
+                      !missingOverrideExistingSellerIds.has(Number(seller.id))
+                  )
                   .map((seller) => (
                     <option key={seller.id} value={seller.id}>
                       {seller.full_name} - {formatText(seller.seller_role)}
@@ -1874,12 +1942,23 @@ const Commissions = () => {
                   ))}
               </Select>
 
-              <ComputedBox
-                label="Hierarchy / Residual Rate"
-                value={
-                  selectedMissingOverrideSeller && getSellerAccountRate(selectedMissingOverrideSeller)
-                    ? `${formatNumber(getSellerAccountRate(selectedMissingOverrideSeller))}% from account`
-                    : "Select a seller to use their saved account rate"
+              <Input
+                label="Hierarchy / Residual Rate (%)"
+                type="number"
+                min={0}
+                max={100}
+                step="0.01"
+                value={missingOverrideData.rate}
+                onChange={(e) =>
+                  setMissingOverrideData({
+                    ...missingOverrideData,
+                    rate: e.target.value,
+                  })
+                }
+                placeholder={
+                  selectedMissingOverrideSeller
+                    ? "Enter residual rate"
+                    : "Select a seller first"
                 }
               />
 
@@ -2369,3 +2448,4 @@ const ComputedBox = ({ label, value }: { label: string; value: string }) => {
 }
 
 export default Commissions
+

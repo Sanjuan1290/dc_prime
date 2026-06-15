@@ -26,6 +26,7 @@ import {
   formatMoney,
   formatNumber,
   formatText,
+  getDateInputValue,
   getLocalDate,
 } from "../utils/formatters"
 import { paginateRows } from "../utils/pagination"
@@ -139,6 +140,12 @@ const paymentMethods = [
   "check",
   "other",
 ]
+
+const getPaymentDateValue = (date: string | null | undefined) => {
+  const formattedDate = formatDate(date)
+
+  return formattedDate === "-" ? "" : formattedDate
+}
 
 const paymentStatuses = ["pending", "verified", "rejected"]
 
@@ -258,9 +265,7 @@ const paymentToFormData = (payment: Payment): PaymentFormData => {
     payment_type: payment.payment_type || "monthly",
     payment_method: payment.payment_method || "cash",
     reference_id: payment.reference_id || "",
-    payment_date: payment.payment_date
-      ? payment.payment_date.slice(0, 10)
-      : getLocalDate(),
+    payment_date: getDateInputValue(payment.payment_date),
     status: payment.status || "pending",
   }
 }
@@ -383,7 +388,7 @@ const Payments = () => {
     const matchesStatus =
       statusFilter === "all" || payment.status === statusFilter
 
-    const paymentDate = payment.payment_date?.slice(0, 10) || ""
+    const paymentDate = getPaymentDateValue(payment.payment_date)
 
     const matchesDateFrom =
       dateFrom === "" || paymentDate >= dateFrom

@@ -2350,12 +2350,13 @@ export const addMissingOverrideCommission = async (req, res) => {
       SELECT id, status
       FROM commissions
       WHERE parent_commission_id = ?
+        AND seller_id = ?
         AND source_type = 'override'
         AND status <> 'cancelled'
       ORDER BY id DESC
       LIMIT 1
       `,
-      [id]
+      [id, override_seller_id]
     )
 
     if (existingOverrideRows.length > 0) {
@@ -2363,7 +2364,7 @@ export const addMissingOverrideCommission = async (req, res) => {
 
       return res.status(400).json({
         message:
-          'This main commission already has an active override commission. Edit the override row instead.',
+          'This residual seller already has an active commission for this sale.',
       })
     }
 
@@ -3247,3 +3248,4 @@ export const addMissingOverrideCommission = async (req, res) => {
       data: rows,
     })
   }
+

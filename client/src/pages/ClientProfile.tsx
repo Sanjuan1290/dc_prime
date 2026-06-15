@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { useNavigate, useParams } from "react-router-dom"
+import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate, useParams } from "react-router-dom";
 import {
   FiArrowLeft,
   FiEdit2,
@@ -12,67 +12,75 @@ import {
   FiUpload,
   FiDownload,
   FiUser,
-} from "react-icons/fi"
-import Alert from "../components/ui/Alert"
-import Button from "../components/ui/Button"
-import EmptyState from "../components/ui/EmptyState"
-import Input from "../components/ui/Input"
-import LoadingState from "../components/ui/LoadingState"
-import Modal from "../components/ui/Modal"
-import PageHeader from "../components/ui/PageHeader"
-import Select from "../components/ui/Select"
-import StatCard from "../components/ui/StatCard"
-import StatusBadge from "../components/ui/StatusBadge"
-import TableContainer from "../components/ui/TableContainer"
-import { API_URL, getErrorMessage } from "../utils/api"
+} from "react-icons/fi";
+import Alert from "../components/ui/Alert";
+import Button from "../components/ui/Button";
+import EmptyState from "../components/ui/EmptyState";
+import Input from "../components/ui/Input";
+import LoadingState from "../components/ui/LoadingState";
+import Modal from "../components/ui/Modal";
+import PageHeader from "../components/ui/PageHeader";
+import Select from "../components/ui/Select";
+import StatCard from "../components/ui/StatCard";
+import StatusBadge from "../components/ui/StatusBadge";
+import TableContainer from "../components/ui/TableContainer";
+import { API_URL, getErrorMessage } from "../utils/api";
 import {
   formatDate,
   formatMoney,
   formatNumber,
   formatText,
   getLocalDate,
-} from "../utils/formatters"
+} from "../utils/formatters";
 
 type Client = {
-  id: number
-  full_name: string
-  spouse_co_owner_name: string | null
-  buyer_type?: BuyerType | string | null
-  birth_date?: string | null
-  place_of_birth?: string | null
-  citizenship?: string | null
-  gender?: Gender | string | null
-  civil_status?: CivilStatus | string | null
-  email: string | null
-  contact_no: string | null
-  residence_phone_no?: string | null
-  tin?: string | null
-  address: string | null
-  present_address?: string | null
-  present_zip_code?: string | null
-  permanent_address?: string | null
-  permanent_zip_code?: string | null
-  region: string | null
-  profile_status?: ProfileStatus | string | null
-  default_seller_id?: number | null
-  default_seller_name?: string | null
-  default_seller_role?: string | null
-  default_seller_commission_rate?: number | string | null
-  created_at: string
-  updated_at: string
-}
+  id: number;
+  full_name: string;
+  spouse_co_owner_name: string | null;
+  buyer_type?: BuyerType | string | null;
+  birth_date?: string | null;
+  place_of_birth?: string | null;
+  citizenship?: string | null;
+  gender?: Gender | string | null;
+  civil_status?: CivilStatus | string | null;
+  email: string | null;
+  contact_no: string | null;
+  residence_phone_no?: string | null;
+  tin?: string | null;
+  address: string | null;
+  present_address?: string | null;
+  present_zip_code?: string | null;
+  permanent_address?: string | null;
+  permanent_zip_code?: string | null;
+  region: string | null;
+  profile_status?: ProfileStatus | string | null;
+  default_seller_id?: number | null;
+  default_seller_name?: string | null;
+  default_seller_role?: string | null;
+  default_seller_commission_rate?: number | string | null;
+  created_at: string;
+  updated_at: string;
+};
 
-type BuyerType = "single" | "spouses" | "and_account"
-type Gender = "male" | "female" | "other"
+type BuyerType = "single" | "spouses" | "and_account";
+type ReserveFormulaKey =
+  | "offer_purchase_price"
+  | "dp_gross"
+  | "dp_discount"
+  | "net_dp_payable"
+  | "per_give"
+  | "offer_balance"
+  | "monthly_preview";
+type Gender = "male" | "female" | "other";
 type CivilStatus =
   | "single"
   | "married"
   | "separated"
   | "annulled_divorced"
-  | "widower"
-type BuyerRole = "spouse" | "second_buyer"
-type ProfileStatus = "incomplete" | "complete"
-type PersonType = "principal" | "co_buyer"
+  | "widower";
+type BuyerRole = "spouse" | "second_buyer";
+type ProfileStatus = "incomplete" | "complete";
+type PersonType = "principal" | "co_buyer";
 type EmploymentStatus =
   | "employed_private"
   | "employed_government"
@@ -80,321 +88,330 @@ type EmploymentStatus =
   | "self_employed_business"
   | "self_employed_professional"
   | "ofw_immigrant"
-  | "other"
+  | "other";
 
 type CoBuyer = {
-  id: number
-  client_id: number
-  buyer_role: BuyerRole | string
-  full_name: string | null
-  birth_date: string | null
-  place_of_birth: string | null
-  citizenship: string | null
-  gender: Gender | string | null
-  civil_status: CivilStatus | string | null
-  present_address: string | null
-  present_zip_code: string | null
-  permanent_address: string | null
-  permanent_zip_code: string | null
-  mobile_no: string | null
-  residence_phone_no: string | null
-  email: string | null
-  tin: string | null
-}
+  id: number;
+  client_id: number;
+  buyer_role: BuyerRole | string;
+  full_name: string | null;
+  birth_date: string | null;
+  place_of_birth: string | null;
+  citizenship: string | null;
+  gender: Gender | string | null;
+  civil_status: CivilStatus | string | null;
+  present_address: string | null;
+  present_zip_code: string | null;
+  permanent_address: string | null;
+  permanent_zip_code: string | null;
+  mobile_no: string | null;
+  residence_phone_no: string | null;
+  email: string | null;
+  tin: string | null;
+};
 
 type EmploymentDetail = {
-  id: number
-  client_id: number
-  client_buyer_id: number | null
-  person_type: PersonType | string
-  employment_status: EmploymentStatus | string | null
-  employment_status_other: string | null
-  employer_business_name: string | null
-  employer_business_address: string | null
-  employer_zip_code: string | null
-  nature_of_work_business: string | null
-  occupation_position_title: string | null
-  monthly_income: number | string | null
-}
+  id: number;
+  client_id: number;
+  client_buyer_id: number | null;
+  person_type: PersonType | string;
+  employment_status: EmploymentStatus | string | null;
+  employment_status_other: string | null;
+  employer_business_name: string | null;
+  employer_business_address: string | null;
+  employer_zip_code: string | null;
+  nature_of_work_business: string | null;
+  occupation_position_title: string | null;
+  monthly_income: number | string | null;
+};
 
 type ProfileCompletion = {
-  isComplete: boolean
-  missingFields: string[]
-}
+  isComplete: boolean;
+  missingFields: string[];
+};
 
 type PrincipalProfileData = {
-  buyer_type: BuyerType
-  full_name: string
-  birth_date: string
-  place_of_birth: string
-  citizenship: string
-  gender: Gender | ""
-  civil_status: CivilStatus | ""
-  present_address: string
-  present_zip_code: string
-  permanent_address: string
-  permanent_zip_code: string
-  contact_no: string
-  residence_phone_no: string
-  email: string
-  tin: string
-}
+  buyer_type: BuyerType;
+  full_name: string;
+  birth_date: string;
+  place_of_birth: string;
+  citizenship: string;
+  gender: Gender | "";
+  civil_status: CivilStatus | "";
+  present_address: string;
+  present_zip_code: string;
+  permanent_address: string;
+  permanent_zip_code: string;
+  contact_no: string;
+  residence_phone_no: string;
+  email: string;
+  tin: string;
+};
 
 type CoBuyerFormData = {
-  buyer_role: BuyerRole
-  full_name: string
-  birth_date: string
-  place_of_birth: string
-  citizenship: string
-  gender: Gender | ""
-  civil_status: CivilStatus | ""
-  present_address: string
-  present_zip_code: string
-  permanent_address: string
-  permanent_zip_code: string
-  mobile_no: string
-  residence_phone_no: string
-  email: string
-  tin: string
-}
+  buyer_role: BuyerRole;
+  full_name: string;
+  birth_date: string;
+  place_of_birth: string;
+  citizenship: string;
+  gender: Gender | "";
+  civil_status: CivilStatus | "";
+  present_address: string;
+  present_zip_code: string;
+  permanent_address: string;
+  permanent_zip_code: string;
+  mobile_no: string;
+  residence_phone_no: string;
+  email: string;
+  tin: string;
+};
 
 type EmploymentFormData = {
-  person_type: PersonType
-  client_buyer_id: number | null
-  employment_status: EmploymentStatus | ""
-  employment_status_other: string
-  employer_business_name: string
-  employer_business_address: string
-  employer_zip_code: string
-  nature_of_work_business: string
-  occupation_position_title: string
-  monthly_income: string
-}
+  person_type: PersonType;
+  client_buyer_id: number | null;
+  employment_status: EmploymentStatus | "";
+  employment_status_other: string;
+  employer_business_name: string;
+  employer_business_address: string;
+  employer_zip_code: string;
+  nature_of_work_business: string;
+  occupation_position_title: string;
+  monthly_income: string;
+};
 
 type ClientUnit = {
-  id: number
-  client_id: number
-  client_name: string
-  listing_id: number
-  unit_id: string
-  project_name: string
-  lot_type: string | null
-  lot_area_sqm: number | string
-  price_per_sqm?: number | string
-  net_selling_price: number | string
-  legal_misc_rate?: number | string
-  legal_misc_fee: number | string
-  total_contract_price: number | string
-  paid_amount: number | string
-  balance: number | string
-  payment_percentage?: number | string
-  mode_of_payment?: string | null
-  buyer_type?: BuyerType | string | null
-  co_buyer_id?: number | string | null
-  co_buyer_role?: BuyerRole | string | null
-  co_buyer_name?: string | null
-  co_buyer_birth_date?: string | null
-  co_buyer_place_of_birth?: string | null
-  co_buyer_citizenship?: string | null
-  co_buyer_gender?: Gender | string | null
-  co_buyer_civil_status?: CivilStatus | string | null
-  co_buyer_present_address?: string | null
-  co_buyer_present_zip_code?: string | null
-  co_buyer_permanent_address?: string | null
-  co_buyer_permanent_zip_code?: string | null
-  co_buyer_mobile_no?: string | null
-  co_buyer_residence_phone_no?: string | null
-  co_buyer_email?: string | null
-  co_buyer_tin?: string | null
-  due_day: number | null
-  starting_date?: string | null
-  due_date?: string | null
-  next_due_date?: string | null
-  days_until_due?: number | string | null
-  offer_purchase_price?: number | string | null
-  reservation_fee_amount?: number | string | null
-  downpayment_amount?: number | string | null
-  deferred_cash_amount?: number | string | null
-  offer_balance_amount?: number | string | null
-  payment_terms_months?: number | string | null
-  interest_rate?: number | string | null
-  monthly_amortization?: number | string | null
-  contract_processing_status?: string | null
-  status: string
-  assigned_user_id: number | null
-  assigned_user_name: string | null
-  seller_id: number | null
-  seller_name: string | null
-  seller_role: string | null
-  seller_commission_rate?: number | string | null
-  sale_type?: "distributed" | "direct_to_developer" | string | null
-  reports_under: string | null
-  document_total_count?: number | string
-  document_checklist_count?: number | string
-  document_required_count?: number | string
-  document_submitted_count?: number | string
-  document_submitted_required_count?: number | string
-  document_approved_count?: number | string
-  document_rejected_count?: number | string
-  document_status: string
-  commission_count?: number | string
-  gross_commission_total?: number | string
-  released_commission_total?: number | string
-  created_at: string
-  updated_at: string
-}
+  id: number;
+  client_id: number;
+  client_name: string;
+  listing_id: number;
+  unit_id: string;
+  project_name: string;
+  lot_type: string | null;
+  lot_area_sqm: number | string;
+  price_per_sqm?: number | string;
+  net_selling_price: number | string;
+  legal_misc_rate?: number | string;
+  legal_misc_fee: number | string;
+  total_contract_price: number | string;
+  paid_amount: number | string;
+  balance: number | string;
+  payment_percentage?: number | string;
+  mode_of_payment?: string | null;
+  buyer_type?: BuyerType | string | null;
+  co_buyer_id?: number | string | null;
+  co_buyer_role?: BuyerRole | string | null;
+  co_buyer_name?: string | null;
+  co_buyer_birth_date?: string | null;
+  co_buyer_place_of_birth?: string | null;
+  co_buyer_citizenship?: string | null;
+  co_buyer_gender?: Gender | string | null;
+  co_buyer_civil_status?: CivilStatus | string | null;
+  co_buyer_present_address?: string | null;
+  co_buyer_present_zip_code?: string | null;
+  co_buyer_permanent_address?: string | null;
+  co_buyer_permanent_zip_code?: string | null;
+  co_buyer_mobile_no?: string | null;
+  co_buyer_residence_phone_no?: string | null;
+  co_buyer_email?: string | null;
+  co_buyer_tin?: string | null;
+  co_buyer_employment_status?: EmploymentStatus | string | null;
+  co_buyer_employment_status_other?: string | null;
+  co_buyer_employer_business_name?: string | null;
+  co_buyer_employer_business_address?: string | null;
+  co_buyer_employer_zip_code?: string | null;
+  co_buyer_nature_of_work_business?: string | null;
+  co_buyer_occupation_position_title?: string | null;
+  co_buyer_monthly_income?: number | string | null;
+  due_day: number | null;
+  starting_date?: string | null;
+  due_date?: string | null;
+  next_due_date?: string | null;
+  days_until_due?: number | string | null;
+  offer_purchase_price?: number | string | null;
+  reservation_fee_amount?: number | string | null;
+  downpayment_amount?: number | string | null;
+  deferred_cash_amount?: number | string | null;
+  offer_balance_amount?: number | string | null;
+  payment_terms_months?: number | string | null;
+  interest_rate?: number | string | null;
+  monthly_amortization?: number | string | null;
+  contract_processing_status?: string | null;
+  status: string;
+  assigned_user_id: number | null;
+  assigned_user_name: string | null;
+  seller_id: number | null;
+  seller_name: string | null;
+  seller_role: string | null;
+  seller_commission_rate?: number | string | null;
+  sale_type?: "distributed" | "direct_to_developer" | string | null;
+  reports_under: string | null;
+  document_total_count?: number | string;
+  document_checklist_count?: number | string;
+  document_required_count?: number | string;
+  document_submitted_count?: number | string;
+  document_submitted_required_count?: number | string;
+  document_approved_count?: number | string;
+  document_rejected_count?: number | string;
+  document_status: string;
+  commission_count?: number | string;
+  gross_commission_total?: number | string;
+  released_commission_total?: number | string;
+  created_at: string;
+  updated_at: string;
+};
 
 type AvailableListing = {
-  id: number
-  project_id: number
-  project_name: string
-  project_location?: string | null
-  unit_id: string
-  lot_type: string | null
-  lot_area_sqm: number | string
-  price_per_sqm: number | string
-  net_selling_price: number | string
-  legal_misc_rate?: number | string
-  legal_misc_fee: number | string
-  total_contract_price: number | string
-  reservation_fee: number | string
-  status: string
-}
+  id: number;
+  project_id: number;
+  project_name: string;
+  project_location?: string | null;
+  unit_id: string;
+  lot_type: string | null;
+  lot_area_sqm: number | string;
+  price_per_sqm: number | string;
+  net_selling_price: number | string;
+  legal_misc_rate?: number | string;
+  legal_misc_fee: number | string;
+  total_contract_price: number | string;
+  reservation_fee: number | string;
+  status: string;
+};
 
 type Seller = {
-  id: number
-  full_name: string
-  seller_role: string
-  parent_seller_id?: number | null
-  commission_rate?: number | string | null
-  commission_pool_rate?: number | string | null
-  personal_commission_rate?: number | string | null
-  override_commission_rate?: number | string | null
-  max_downline_rate?: number | string | null
-  reports_under_display?: string | null
-}
+  id: number;
+  full_name: string;
+  seller_role: string;
+  parent_seller_id?: number | null;
+  commission_rate?: number | string | null;
+  commission_pool_rate?: number | string | null;
+  personal_commission_rate?: number | string | null;
+  override_commission_rate?: number | string | null;
+  max_downline_rate?: number | string | null;
+  reports_under_display?: string | null;
+};
 
 type ClientDocument = {
-  id: number
-  client_unit_id: number
-  document_id: number
-  name: string
-  description: string | null
-  is_required: number | boolean
-  can_reuse: number | boolean
-  file_url: string | null
-  storage_provider?: string | null
-  drive_file_id?: string | null
-  drive_folder_id?: string | null
-  file_name?: string | null
-  mime_type?: string | null
-  file_size?: number | string | null
-  web_view_link?: string | null
-  uploaded_at?: string | null
-  uploaded_by?: number | null
-  uploaded_by_name?: string | null
-  status: "not_submitted" | "submitted" | "approved" | "rejected" | string
-  reviewed_by: number | null
-  reviewed_by_name: string | null
-  reviewed_at: string | null
-  created_at: string
-  updated_at: string
-}
+  id: number;
+  client_unit_id: number;
+  document_id: number;
+  name: string;
+  description: string | null;
+  is_required: number | boolean;
+  can_reuse: number | boolean;
+  file_url: string | null;
+  storage_provider?: string | null;
+  drive_file_id?: string | null;
+  drive_folder_id?: string | null;
+  file_name?: string | null;
+  mime_type?: string | null;
+  file_size?: number | string | null;
+  web_view_link?: string | null;
+  uploaded_at?: string | null;
+  uploaded_by?: number | null;
+  uploaded_by_name?: string | null;
+  status: "not_submitted" | "submitted" | "approved" | "rejected" | string;
+  reviewed_by: number | null;
+  reviewed_by_name: string | null;
+  reviewed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
 
 type ClientResponse = {
-  client: Client
-  co_buyers?: CoBuyer[]
-  employment_details?: EmploymentDetail[]
-  profile_completion?: ProfileCompletion
-  data?: Client
-}
+  client: Client;
+  co_buyers?: CoBuyer[];
+  employment_details?: EmploymentDetail[];
+  profile_completion?: ProfileCompletion;
+  data?: Client;
+};
 
 type ClientUnitsResponse = {
-  client?: Client
-  clientUnits?: ClientUnit[]
-  units?: ClientUnit[]
-  data?: ClientUnit[]
-}
+  client?: Client;
+  clientUnits?: ClientUnit[];
+  units?: ClientUnit[];
+  data?: ClientUnit[];
+};
 
 type AvailableListingsResponse = {
-  listings?: AvailableListing[]
-  availableListings?: AvailableListing[]
-  data?: AvailableListing[]
-}
+  listings?: AvailableListing[];
+  availableListings?: AvailableListing[];
+  data?: AvailableListing[];
+};
 
 type SellersResponse = {
-  accreditedSellers?: Seller[]
-  sellers?: Seller[]
-  data?: Seller[]
-}
+  accreditedSellers?: Seller[];
+  sellers?: Seller[];
+  data?: Seller[];
+};
 
 type ClientDocumentsResponse = {
-  documents?: ClientDocument[]
-  clientDocuments?: ClientDocument[]
-  data?: ClientDocument[]
-}
+  documents?: ClientDocument[];
+  clientDocuments?: ClientDocument[];
+  data?: ClientDocument[];
+};
 
 type ReserveListingData = {
-  listing_id: number | ""
-  seller_id: number | ""
-  status: string
-  mode_of_payment: "cash" | "installment"
-  buyer_type: BuyerType
-  co_buyer: CoBuyerFormData
-  starting_date: string
-  due_date: string
-  reservation_fee_amount: string
-  downpayment_amount: string
-  downpayment_percent: string
-  downpayment_percent_option: string
-  downpayment_percent_custom: string
-  downpayment_gives: string
-  downpayment_gives_option: string
-  downpayment_gives_custom: string
-  downpayment_discount_rate: string
-  downpayment_discount_rate_option: string
-  downpayment_discount_rate_custom: string
-  deferred_cash_amount: string
-  payment_terms_months: number | ""
-  payment_terms_months_option: string
-  payment_terms_months_custom: string
-  interest_rate: string
-  monthly_amortization: string
-  sale_type: "distributed" | "direct_to_developer"
-  override_seller_id: number | ""
-  override_rate: string
-  override_notes: string
-  cash_kaliwaan_amount: string
-  cash_kaliwaan_date: string
-  cash_kaliwaan_notes: string
-}
+  listing_id: number | "";
+  seller_id: number | "";
+  status: string;
+  mode_of_payment: "cash" | "installment";
+  buyer_type: BuyerType;
+  co_buyer: CoBuyerFormData;
+  co_buyer_employment: EmploymentFormData;
+  starting_date: string;
+  due_date: string;
+  reservation_fee_amount: string;
+  downpayment_amount: string;
+  downpayment_percent: string;
+  downpayment_percent_option: string;
+  downpayment_percent_custom: string;
+  downpayment_gives: string;
+  downpayment_gives_option: string;
+  downpayment_gives_custom: string;
+  downpayment_discount_rate: string;
+  downpayment_discount_rate_option: string;
+  downpayment_discount_rate_custom: string;
+  deferred_cash_amount: string;
+  payment_terms_months: number | "";
+  payment_terms_months_option: string;
+  payment_terms_months_custom: string;
+  interest_rate: string;
+  monthly_amortization: string;
+  sale_type: "distributed" | "direct_to_developer";
+  override_seller_id: number | "";
+  override_rate: string;
+  override_notes: string;
+  cash_kaliwaan_amount: string;
+  cash_kaliwaan_date: string;
+  cash_kaliwaan_notes: string;
+};
 
 type EditUnitData = {
-  seller_id: string
-  due_date: string
-  status: string
-  mode_of_payment: "cash" | "installment"
-  buyer_type: BuyerType
-  co_buyer: CoBuyerFormData
-  regenerate_commission: boolean
-  sale_type: "distributed" | "direct_to_developer"
-  override_seller_id: string
-  override_rate: string
-  override_notes: string
-}
+  seller_id: string;
+  due_date: string;
+  status: string;
+  mode_of_payment: "cash" | "installment";
+  buyer_type: BuyerType;
+  co_buyer: CoBuyerFormData;
+  co_buyer_employment: EmploymentFormData;
+  regenerate_commission: boolean;
+  sale_type: "distributed" | "direct_to_developer";
+  override_seller_id: string;
+  override_rate: string;
+  override_notes: string;
+};
 
 type ChangeUnitData = {
-  new_listing_id: number | ""
-  status: string
-  regenerate_commission: boolean
-  reason: string
-}
+  new_listing_id: number | "";
+  status: string;
+  regenerate_commission: boolean;
+  reason: string;
+};
 
 type CancelUnitData = {
-  release_listing: boolean
-  reason: string
-}
-
+  release_listing: boolean;
+  reason: string;
+};
 
 const createBlankCoBuyerData = (): CoBuyerFormData => ({
   buyer_role: "spouse",
@@ -412,7 +429,23 @@ const createBlankCoBuyerData = (): CoBuyerFormData => ({
   residence_phone_no: "",
   email: "",
   tin: "",
-})
+});
+
+const createBlankEmploymentData = (
+  personType: PersonType,
+  clientBuyerId: number | null = null,
+): EmploymentFormData => ({
+  person_type: personType,
+  client_buyer_id: clientBuyerId,
+  employment_status: "",
+  employment_status_other: "",
+  employer_business_name: "",
+  employer_business_address: "",
+  employer_zip_code: "",
+  nature_of_work_business: "",
+  occupation_position_title: "",
+  monthly_income: "",
+});
 
 const createDefaultReserveData = (): ReserveListingData => ({
   listing_id: "",
@@ -421,6 +454,7 @@ const createDefaultReserveData = (): ReserveListingData => ({
   mode_of_payment: "installment",
   buyer_type: "single",
   co_buyer: createBlankCoBuyerData(),
+  co_buyer_employment: createBlankEmploymentData("co_buyer"),
   starting_date: getLocalDate(),
   due_date: getLocalDate(),
   reservation_fee_amount: "",
@@ -447,17 +481,18 @@ const createDefaultReserveData = (): ReserveListingData => ({
   cash_kaliwaan_amount: "",
   cash_kaliwaan_date: "",
   cash_kaliwaan_notes: "",
-})
+});
 
 const getSelectedNumber = (
   optionValue: string | number | null | undefined,
   customValue: string | number | null | undefined,
-  fallback = 0
+  fallback = 0,
 ) => {
-  const value = String(optionValue ?? "") === "custom" ? customValue : optionValue
-  const parsed = Number(value)
-  return Number.isFinite(parsed) ? parsed : fallback
-}
+  const value =
+    String(optionValue ?? "") === "custom" ? customValue : optionValue;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
 
 const defaultEditUnitData: EditUnitData = {
   seller_id: "",
@@ -466,24 +501,25 @@ const defaultEditUnitData: EditUnitData = {
   mode_of_payment: "installment",
   buyer_type: "single",
   co_buyer: createBlankCoBuyerData(),
+  co_buyer_employment: createBlankEmploymentData("co_buyer"),
   regenerate_commission: false,
   sale_type: "distributed",
   override_seller_id: "",
   override_rate: "",
   override_notes: "",
-}
+};
 
 const defaultChangeUnitData: ChangeUnitData = {
   new_listing_id: "",
   status: "reserved",
   regenerate_commission: true,
   reason: "",
-}
+};
 
 const defaultCancelUnitData: CancelUnitData = {
   release_listing: true,
   reason: "",
-}
+};
 
 const emptyPrincipalProfileData = (): PrincipalProfileData => ({
   buyer_type: "single",
@@ -501,37 +537,26 @@ const emptyPrincipalProfileData = (): PrincipalProfileData => ({
   residence_phone_no: "",
   email: "",
   tin: "",
-})
+});
 
-const emptyCoBuyerData = (): CoBuyerFormData => createBlankCoBuyerData()
+const emptyCoBuyerData = (): CoBuyerFormData => createBlankCoBuyerData();
 
 const emptyEmploymentData = (
   personType: PersonType,
-  clientBuyerId: number | null = null
-): EmploymentFormData => ({
-  person_type: personType,
-  client_buyer_id: clientBuyerId,
-  employment_status: "",
-  employment_status_other: "",
-  employer_business_name: "",
-  employer_business_address: "",
-  employer_zip_code: "",
-  nature_of_work_business: "",
-  occupation_position_title: "",
-  monthly_income: "",
-})
+  clientBuyerId: number | null = null,
+): EmploymentFormData => createBlankEmploymentData(personType, clientBuyerId);
 
 const buyerTypeOptions = [
   { label: "Single", value: "single" },
   { label: "Spouses", value: "spouses" },
   { label: "And Account", value: "and_account" },
-] as const
+] as const;
 
 const genderOptions = [
   { label: "Male", value: "male" },
   { label: "Female", value: "female" },
   { label: "Other", value: "other" },
-] as const
+] as const;
 
 const civilStatusOptions = [
   { label: "Single", value: "single" },
@@ -539,31 +564,39 @@ const civilStatusOptions = [
   { label: "Separated", value: "separated" },
   { label: "Annulled / Divorced", value: "annulled_divorced" },
   { label: "Widower", value: "widower" },
-] as const
+] as const;
 
 const employmentStatusOptions = [
   { label: "Employed - Private", value: "employed_private" },
   { label: "Employed - Government", value: "employed_government" },
   { label: "Employed - NGO", value: "employed_ngo" },
   { label: "Self-Employed (Business)", value: "self_employed_business" },
-  { label: "Self-Employed (Professional)", value: "self_employed_professional" },
+  {
+    label: "Self-Employed (Professional)",
+    value: "self_employed_professional",
+  },
   { label: "OFW / Immigrant", value: "ofw_immigrant" },
   { label: "Other", value: "other" },
-] as const
+] as const;
 
 const normalizeBuyerType = (value: string | null | undefined): BuyerType => {
-  if (value === "spouses" || value === "and_account") return value
-  return "single"
-}
+  if (value === "spouses" || value === "and_account") return value;
+  return "single";
+};
 
-const clientToPrincipalProfileData = (client: Client): PrincipalProfileData => ({
+const clientToPrincipalProfileData = (
+  client: Client,
+): PrincipalProfileData => ({
   buyer_type: normalizeBuyerType(client.buyer_type),
   full_name: client.full_name || "",
-  birth_date: formatDate(client.birth_date) === "-" ? "" : formatDate(client.birth_date),
+  birth_date:
+    formatDate(client.birth_date) === "-" ? "" : formatDate(client.birth_date),
   place_of_birth: client.place_of_birth || "",
   citizenship: client.citizenship || "",
   gender:
-    client.gender === "male" || client.gender === "female" || client.gender === "other"
+    client.gender === "male" ||
+    client.gender === "female" ||
+    client.gender === "other"
       ? client.gender
       : "",
   civil_status:
@@ -582,19 +615,22 @@ const clientToPrincipalProfileData = (client: Client): PrincipalProfileData => (
   residence_phone_no: client.residence_phone_no || "",
   email: client.email || "",
   tin: client.tin || "",
-})
+});
 
 const coBuyerToFormData = (buyer: CoBuyer | undefined): CoBuyerFormData => {
-  if (!buyer) return emptyCoBuyerData()
+  if (!buyer) return emptyCoBuyerData();
 
   return {
     buyer_role: buyer.buyer_role === "second_buyer" ? "second_buyer" : "spouse",
     full_name: buyer.full_name || "",
-    birth_date: formatDate(buyer.birth_date) === "-" ? "" : formatDate(buyer.birth_date),
+    birth_date:
+      formatDate(buyer.birth_date) === "-" ? "" : formatDate(buyer.birth_date),
     place_of_birth: buyer.place_of_birth || "",
     citizenship: buyer.citizenship || "",
     gender:
-      buyer.gender === "male" || buyer.gender === "female" || buyer.gender === "other"
+      buyer.gender === "male" ||
+      buyer.gender === "female" ||
+      buyer.gender === "other"
         ? buyer.gender
         : "",
     civil_status:
@@ -613,16 +649,21 @@ const coBuyerToFormData = (buyer: CoBuyer | undefined): CoBuyerFormData => {
     residence_phone_no: buyer.residence_phone_no || "",
     email: buyer.email || "",
     tin: buyer.tin || "",
-  }
-}
+  };
+};
 
-const clientUnitToCoBuyerFormData = (unit: ClientUnit | null): CoBuyerFormData => {
-  if (!unit) return emptyCoBuyerData()
+const clientUnitToCoBuyerFormData = (
+  unit: ClientUnit | null,
+): CoBuyerFormData => {
+  if (!unit) return emptyCoBuyerData();
 
   return {
-    buyer_role: unit.co_buyer_role === "second_buyer" ? "second_buyer" : "spouse",
+    buyer_role:
+      unit.co_buyer_role === "second_buyer" ? "second_buyer" : "spouse",
     full_name: unit.co_buyer_name || "",
-    birth_date: unit.co_buyer_birth_date ? String(unit.co_buyer_birth_date).slice(0, 10) : "",
+    birth_date: unit.co_buyer_birth_date
+      ? String(unit.co_buyer_birth_date).slice(0, 10)
+      : "",
     place_of_birth: unit.co_buyer_place_of_birth || "",
     citizenship: unit.co_buyer_citizenship || "",
     gender:
@@ -647,23 +688,51 @@ const clientUnitToCoBuyerFormData = (unit: ClientUnit | null): CoBuyerFormData =
     residence_phone_no: unit.co_buyer_residence_phone_no || "",
     email: unit.co_buyer_email || "",
     tin: unit.co_buyer_tin || "",
-  }
-}
+  };
+};
+
+const clientUnitToCoBuyerEmploymentFormData = (
+  unit: ClientUnit | null,
+): EmploymentFormData => {
+  if (!unit) return emptyEmploymentData("co_buyer");
+
+  return {
+    person_type: "co_buyer",
+    client_buyer_id: unit.co_buyer_id ? Number(unit.co_buyer_id) : null,
+    employment_status: employmentStatusOptions.some(
+      (option) => option.value === unit.co_buyer_employment_status,
+    )
+      ? (unit.co_buyer_employment_status as EmploymentStatus)
+      : "",
+    employment_status_other: unit.co_buyer_employment_status_other || "",
+    employer_business_name: unit.co_buyer_employer_business_name || "",
+    employer_business_address: unit.co_buyer_employer_business_address || "",
+    employer_zip_code: unit.co_buyer_employer_zip_code || "",
+    nature_of_work_business: unit.co_buyer_nature_of_work_business || "",
+    occupation_position_title: unit.co_buyer_occupation_position_title || "",
+    monthly_income:
+      unit.co_buyer_monthly_income === null ||
+      unit.co_buyer_monthly_income === undefined
+        ? ""
+        : String(unit.co_buyer_monthly_income),
+  };
+};
 
 const employmentToFormData = (
   detail: EmploymentDetail | undefined,
   personType: PersonType,
-  clientBuyerId: number | null = null
+  clientBuyerId: number | null = null,
 ): EmploymentFormData => {
-  if (!detail) return emptyEmploymentData(personType, clientBuyerId)
+  if (!detail) return emptyEmploymentData(personType, clientBuyerId);
 
   return {
     person_type: personType,
     client_buyer_id: detail.client_buyer_id || clientBuyerId,
-    employment_status:
-      employmentStatusOptions.some((option) => option.value === detail.employment_status)
-        ? (detail.employment_status as EmploymentStatus)
-        : "",
+    employment_status: employmentStatusOptions.some(
+      (option) => option.value === detail.employment_status,
+    )
+      ? (detail.employment_status as EmploymentStatus)
+      : "",
     employment_status_other: detail.employment_status_other || "",
     employer_business_name: detail.employer_business_name || "",
     employer_business_address: detail.employer_business_address || "",
@@ -674,35 +743,35 @@ const employmentToFormData = (
       detail.monthly_income === null || detail.monthly_income === undefined
         ? ""
         : String(detail.monthly_income),
-  }
-}
+  };
+};
 
 const calculateAge = (birthDate: string) => {
-  if (!birthDate) return "-"
+  if (!birthDate) return "-";
 
-  const birth = new Date(`${birthDate}T00:00:00`)
+  const birth = new Date(`${birthDate}T00:00:00`);
 
-  if (Number.isNaN(birth.getTime())) return "-"
+  if (Number.isNaN(birth.getTime())) return "-";
 
-  const today = new Date()
-  let age = today.getFullYear() - birth.getFullYear()
-  const monthDiff = today.getMonth() - birth.getMonth()
+  const today = new Date();
+  let age = today.getFullYear() - birth.getFullYear();
+  const monthDiff = today.getMonth() - birth.getMonth();
 
   if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
-    age -= 1
+    age -= 1;
   }
 
-  return age >= 0 ? String(age) : "-"
-}
+  return age >= 0 ? String(age) : "-";
+};
 
 const fetchClient = async (clientId: string) => {
   const res = await fetch(`${API_URL}/clients/${clientId}`, {
     credentials: "include",
-  })
+  });
 
-  if (!res.ok) throw new Error(await getErrorMessage(res))
+  if (!res.ok) throw new Error(await getErrorMessage(res));
 
-  const data = (await res.json()) as ClientResponse
+  const data = (await res.json()) as ClientResponse;
   return {
     client: data.client || data.data,
     co_buyers: data.co_buyers || [],
@@ -711,61 +780,61 @@ const fetchClient = async (clientId: string) => {
       isComplete: false,
       missingFields: [],
     },
-  }
-}
+  };
+};
 
 const fetchClientUnits = async (clientId: string) => {
   const res = await fetch(`${API_URL}/clients/${clientId}/units`, {
     credentials: "include",
-  })
+  });
 
-  if (!res.ok) throw new Error(await getErrorMessage(res))
+  if (!res.ok) throw new Error(await getErrorMessage(res));
 
-  const data = (await res.json()) as ClientUnitsResponse
-  return data.clientUnits || data.units || data.data || []
-}
+  const data = (await res.json()) as ClientUnitsResponse;
+  return data.clientUnits || data.units || data.data || [];
+};
 
 const fetchAvailableListings = async () => {
   const res = await fetch(`${API_URL}/available-listings`, {
     credentials: "include",
-  })
+  });
 
-  if (!res.ok) throw new Error(await getErrorMessage(res))
+  if (!res.ok) throw new Error(await getErrorMessage(res));
 
-  const data = (await res.json()) as AvailableListingsResponse
-  return data.listings || data.availableListings || data.data || []
-}
+  const data = (await res.json()) as AvailableListingsResponse;
+  return data.listings || data.availableListings || data.data || [];
+};
 
 const fetchSellers = async () => {
   const res = await fetch(`${API_URL}/accredited-sellers?status=active`, {
     credentials: "include",
-  })
+  });
 
-  if (!res.ok) throw new Error(await getErrorMessage(res))
+  if (!res.ok) throw new Error(await getErrorMessage(res));
 
-  const data = (await res.json()) as SellersResponse
-  return data.accreditedSellers || data.sellers || data.data || []
-}
+  const data = (await res.json()) as SellersResponse;
+  return data.accreditedSellers || data.sellers || data.data || [];
+};
 
 const fetchClientDocuments = async (clientUnitId: number | null) => {
-  if (!clientUnitId) return []
+  if (!clientUnitId) return [];
 
   const res = await fetch(`${API_URL}/client-units/${clientUnitId}/documents`, {
     credentials: "include",
-  })
+  });
 
-  if (!res.ok) throw new Error(await getErrorMessage(res))
+  if (!res.ok) throw new Error(await getErrorMessage(res));
 
-  const data = (await res.json()) as ClientDocumentsResponse
-  return data.documents || data.clientDocuments || data.data || []
-}
+  const data = (await res.json()) as ClientDocumentsResponse;
+  return data.documents || data.clientDocuments || data.data || [];
+};
 
 const reserveListing = async ({
   clientId,
   reserveData,
 }: {
-  clientId: string
-  reserveData: ReserveListingData
+  clientId: string;
+  reserveData: ReserveListingData;
 }) => {
   const res = await fetch(`${API_URL}/clients/${clientId}/reserve-listing`, {
     method: "POST",
@@ -779,7 +848,15 @@ const reserveListing = async ({
       status: reserveData.status,
       mode_of_payment: reserveData.mode_of_payment,
       buyer_type: reserveData.buyer_type,
-      co_buyer: reserveData.buyer_type === "single" ? null : reserveData.co_buyer,
+      co_buyer:
+        reserveData.buyer_type === "single" ? null : reserveData.co_buyer,
+      co_buyer_employment:
+        reserveData.buyer_type === "single"
+          ? null
+          : {
+              ...reserveData.co_buyer_employment,
+              person_type: "co_buyer",
+            },
       starting_date: reserveData.starting_date,
       due_date: reserveData.due_date,
       reservation_fee_amount: Number(reserveData.reservation_fee_amount || 0),
@@ -789,15 +866,27 @@ const reserveListing = async ({
           : 0,
       downpayment_percent:
         reserveData.mode_of_payment === "installment"
-          ? getSelectedNumber(reserveData.downpayment_percent_option, reserveData.downpayment_percent_custom, 30)
+          ? getSelectedNumber(
+              reserveData.downpayment_percent_option,
+              reserveData.downpayment_percent_custom,
+              30,
+            )
           : 0,
       downpayment_gives:
         reserveData.mode_of_payment === "installment"
-          ? getSelectedNumber(reserveData.downpayment_gives_option, reserveData.downpayment_gives_custom, 3)
+          ? getSelectedNumber(
+              reserveData.downpayment_gives_option,
+              reserveData.downpayment_gives_custom,
+              3,
+            )
           : 0,
       downpayment_discount_rate:
         reserveData.mode_of_payment === "installment"
-          ? getSelectedNumber(reserveData.downpayment_discount_rate_option, reserveData.downpayment_discount_rate_custom, 0)
+          ? getSelectedNumber(
+              reserveData.downpayment_discount_rate_option,
+              reserveData.downpayment_discount_rate_custom,
+              0,
+            )
           : 0,
       deferred_cash_amount:
         reserveData.mode_of_payment === "cash"
@@ -805,7 +894,11 @@ const reserveListing = async ({
           : 0,
       payment_terms_months:
         reserveData.mode_of_payment === "installment"
-          ? getSelectedNumber(reserveData.payment_terms_months_option, reserveData.payment_terms_months_custom, 36)
+          ? getSelectedNumber(
+              reserveData.payment_terms_months_option,
+              reserveData.payment_terms_months_custom,
+              36,
+            )
           : null,
       interest_rate:
         reserveData.mode_of_payment === "installment"
@@ -824,21 +917,21 @@ const reserveListing = async ({
       cash_kaliwaan_date: reserveData.cash_kaliwaan_date || null,
       cash_kaliwaan_notes: reserveData.cash_kaliwaan_notes || null,
     }),
-  })
+  });
 
-  if (!res.ok) throw new Error(await getErrorMessage(res))
+  if (!res.ok) throw new Error(await getErrorMessage(res));
 
-  return res.json()
-}
+  return res.json();
+};
 
 const savePrincipalProfile = async ({
   clientId,
   profileData,
   profileStatus,
 }: {
-  clientId: string
-  profileData: PrincipalProfileData
-  profileStatus?: ProfileStatus
+  clientId: string;
+  profileData: PrincipalProfileData;
+  profileStatus?: ProfileStatus;
 }) => {
   const res = await fetch(`${API_URL}/clients/${clientId}/profile`, {
     method: "PATCH",
@@ -850,19 +943,19 @@ const savePrincipalProfile = async ({
       ...profileData,
       profile_status: profileStatus || undefined,
     }),
-  })
+  });
 
-  if (!res.ok) throw new Error(await getErrorMessage(res))
+  if (!res.ok) throw new Error(await getErrorMessage(res));
 
-  return res.json()
-}
+  return res.json();
+};
 
 const replaceCoBuyers = async ({
   clientId,
   coBuyers,
 }: {
-  clientId: string
-  coBuyers: CoBuyerFormData[]
+  clientId: string;
+  coBuyers: CoBuyerFormData[];
 }) => {
   const res = await fetch(`${API_URL}/clients/${clientId}/co-buyers`, {
     method: "PUT",
@@ -871,19 +964,19 @@ const replaceCoBuyers = async ({
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ co_buyers: coBuyers }),
-  })
+  });
 
-  if (!res.ok) throw new Error(await getErrorMessage(res))
+  if (!res.ok) throw new Error(await getErrorMessage(res));
 
-  return (await res.json()) as ClientResponse
-}
+  return (await res.json()) as ClientResponse;
+};
 
 const replaceEmploymentDetails = async ({
   clientId,
   employmentDetails,
 }: {
-  clientId: string
-  employmentDetails: EmploymentFormData[]
+  clientId: string;
+  employmentDetails: EmploymentFormData[];
 }) => {
   const res = await fetch(`${API_URL}/clients/${clientId}/employment-details`, {
     method: "PUT",
@@ -892,12 +985,12 @@ const replaceEmploymentDetails = async ({
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ employment_details: employmentDetails }),
-  })
+  });
 
-  if (!res.ok) throw new Error(await getErrorMessage(res))
+  if (!res.ok) throw new Error(await getErrorMessage(res));
 
-  return res.json()
-}
+  return res.json();
+};
 
 const saveBuyerProfile = async ({
   clientId,
@@ -907,57 +1000,57 @@ const saveBuyerProfile = async ({
   coBuyerEmploymentData,
   markComplete = false,
 }: {
-  clientId: string
-  profileData: PrincipalProfileData
-  coBuyerData: CoBuyerFormData[]
-  principalEmploymentData: EmploymentFormData
-  coBuyerEmploymentData: EmploymentFormData
-  markComplete?: boolean
+  clientId: string;
+  profileData: PrincipalProfileData;
+  coBuyerData: CoBuyerFormData[];
+  principalEmploymentData: EmploymentFormData;
+  coBuyerEmploymentData: EmploymentFormData;
+  markComplete?: boolean;
 }) => {
-  await savePrincipalProfile({ clientId, profileData })
+  await savePrincipalProfile({ clientId, profileData });
   const coBuyerResponse = await replaceCoBuyers({
     clientId,
     coBuyers: profileData.buyer_type === "single" ? [] : coBuyerData,
-  })
-  const savedCoBuyerId = coBuyerResponse.co_buyers?.[0]?.id || null
+  });
+  const savedCoBuyerId = coBuyerResponse.co_buyers?.[0]?.id || null;
   const employmentDetails: EmploymentFormData[] = [
     {
       ...principalEmploymentData,
       person_type: "principal" as const,
       client_buyer_id: null,
     },
-  ]
+  ];
 
   if (profileData.buyer_type !== "single") {
     employmentDetails.push({
       ...coBuyerEmploymentData,
       person_type: "co_buyer",
       client_buyer_id: savedCoBuyerId,
-    })
+    });
   }
 
   await replaceEmploymentDetails({
     clientId,
     employmentDetails,
-  })
+  });
 
   if (markComplete) {
     return savePrincipalProfile({
       clientId,
       profileData,
       profileStatus: "complete",
-    })
+    });
   }
 
-  return savePrincipalProfile({ clientId, profileData })
-}
+  return savePrincipalProfile({ clientId, profileData });
+};
 
 const updateClientUnit = async ({
   clientUnitId,
   unitData,
 }: {
-  clientUnitId: number
-  unitData: EditUnitData
+  clientUnitId: number;
+  unitData: EditUnitData;
 }) => {
   const res = await fetch(`${API_URL}/client-units/${clientUnitId}`, {
     method: "PATCH",
@@ -972,48 +1065,58 @@ const updateClientUnit = async ({
       mode_of_payment: unitData.mode_of_payment,
       buyer_type: unitData.buyer_type,
       co_buyer: unitData.buyer_type === "single" ? null : unitData.co_buyer,
+      co_buyer_employment:
+        unitData.buyer_type === "single"
+          ? null
+          : {
+              ...unitData.co_buyer_employment,
+              person_type: "co_buyer",
+            },
       regenerate_commission: unitData.regenerate_commission,
       sale_type: unitData.sale_type,
     }),
-  })
+  });
 
-  if (!res.ok) throw new Error(await getErrorMessage(res))
+  if (!res.ok) throw new Error(await getErrorMessage(res));
 
-  return res.json()
-}
+  return res.json();
+};
 
 const changeClientUnitListing = async ({
   clientUnitId,
   changeData,
 }: {
-  clientUnitId: number
-  changeData: ChangeUnitData
+  clientUnitId: number;
+  changeData: ChangeUnitData;
 }) => {
-  const res = await fetch(`${API_URL}/client-units/${clientUnitId}/change-listing`, {
-    method: "PATCH",
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
+  const res = await fetch(
+    `${API_URL}/client-units/${clientUnitId}/change-listing`,
+    {
+      method: "PATCH",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        new_listing_id: changeData.new_listing_id,
+        status: changeData.status,
+        regenerate_commission: changeData.regenerate_commission,
+        reason: changeData.reason || null,
+      }),
     },
-    body: JSON.stringify({
-      new_listing_id: changeData.new_listing_id,
-      status: changeData.status,
-      regenerate_commission: changeData.regenerate_commission,
-      reason: changeData.reason || null,
-    }),
-  })
+  );
 
-  if (!res.ok) throw new Error(await getErrorMessage(res))
+  if (!res.ok) throw new Error(await getErrorMessage(res));
 
-  return res.json()
-}
+  return res.json();
+};
 
 const cancelClientUnit = async ({
   clientUnitId,
   cancelData,
 }: {
-  clientUnitId: number
-  cancelData: CancelUnitData
+  clientUnitId: number;
+  cancelData: CancelUnitData;
 }) => {
   const res = await fetch(`${API_URL}/client-units/${clientUnitId}/cancel`, {
     method: "PATCH",
@@ -1025,23 +1128,23 @@ const cancelClientUnit = async ({
       release_listing: cancelData.release_listing,
       reason: cancelData.reason || null,
     }),
-  })
+  });
 
-  if (!res.ok) throw new Error(await getErrorMessage(res))
+  if (!res.ok) throw new Error(await getErrorMessage(res));
 
-  return res.json()
-}
+  return res.json();
+};
 
 const deleteClientUnit = async (clientUnitId: number) => {
   const res = await fetch(`${API_URL}/client-units/${clientUnitId}`, {
     method: "DELETE",
     credentials: "include",
-  })
+  });
 
-  if (!res.ok) throw new Error(await getErrorMessage(res))
+  if (!res.ok) throw new Error(await getErrorMessage(res));
 
-  return res.json()
-}
+  return res.json();
+};
 
 const createDocumentChecklist = async (clientUnitId: number) => {
   const res = await fetch(
@@ -1049,13 +1152,13 @@ const createDocumentChecklist = async (clientUnitId: number) => {
     {
       method: "POST",
       credentials: "include",
-    }
-  )
+    },
+  );
 
-  if (!res.ok) throw new Error(await getErrorMessage(res))
+  if (!res.ok) throw new Error(await getErrorMessage(res));
 
-  return res.json()
-}
+  return res.json();
+};
 
 const applyExistingReusableDocuments = async (clientUnitId: number) => {
   const res = await fetch(
@@ -1063,136 +1166,144 @@ const applyExistingReusableDocuments = async (clientUnitId: number) => {
     {
       method: "POST",
       credentials: "include",
-    }
-  )
+    },
+  );
 
-  if (!res.ok) throw new Error(await getErrorMessage(res))
+  if (!res.ok) throw new Error(await getErrorMessage(res));
 
-  return res.json()
-}
+  return res.json();
+};
 
 const updateClientDocumentStatus = async ({
   clientDocumentId,
   status,
 }: {
-  clientDocumentId: number
-  status: string
+  clientDocumentId: number;
+  status: string;
 }) => {
-  const res = await fetch(`${API_URL}/client-documents/${clientDocumentId}/status`, {
-    method: "PATCH",
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
+  const res = await fetch(
+    `${API_URL}/client-documents/${clientDocumentId}/status`,
+    {
+      method: "PATCH",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ status }),
     },
-    body: JSON.stringify({ status }),
-  })
+  );
 
-  if (!res.ok) throw new Error(await getErrorMessage(res))
+  if (!res.ok) throw new Error(await getErrorMessage(res));
 
-  return res.json()
-}
-
+  return res.json();
+};
 
 const uploadClientDocumentFile = async ({
   clientDocumentId,
   file,
 }: {
-  clientDocumentId: number
-  file: File
+  clientDocumentId: number;
+  file: File;
 }) => {
-  const formData = new FormData()
-  formData.append("file", file)
+  const formData = new FormData();
+  formData.append("file", file);
 
-  const res = await fetch(`${API_URL}/client-documents/${clientDocumentId}/upload`, {
-    method: "PATCH",
-    credentials: "include",
-    body: formData,
-  })
+  const res = await fetch(
+    `${API_URL}/client-documents/${clientDocumentId}/upload`,
+    {
+      method: "PATCH",
+      credentials: "include",
+      body: formData,
+    },
+  );
 
-  if (!res.ok) throw new Error(await getErrorMessage(res))
+  if (!res.ok) throw new Error(await getErrorMessage(res));
 
-  return res.json()
-}
+  return res.json();
+};
 
 const downloadClientUnitDocumentsPdf = async (unit: ClientUnit) => {
-  const res = await fetch(`${API_URL}/client-units/${unit.id}/documents/download-pdf`, {
-    credentials: "include",
-  })
+  const res = await fetch(
+    `${API_URL}/client-units/${unit.id}/documents/download-pdf`,
+    {
+      credentials: "include",
+    },
+  );
 
-  if (!res.ok) throw new Error(await getErrorMessage(res))
+  if (!res.ok) throw new Error(await getErrorMessage(res));
 
-  const blob = await res.blob()
-  const url = window.URL.createObjectURL(blob)
-  const link = document.createElement("a")
-  link.href = url
-  link.download = `documents-${unit.unit_id || unit.id}.pdf`
-  document.body.appendChild(link)
-  link.click()
-  link.remove()
-  window.URL.revokeObjectURL(url)
-}
+  const blob = await res.blob();
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `documents-${unit.unit_id || unit.id}.pdf`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+};
 
 const isSubmitted = (status: string) => {
-  return ["submitted", "approved"].includes(status)
-}
+  return ["submitted", "approved"].includes(status);
+};
 
 const isRequired = (value: number | boolean) => {
-  return value === true || Number(value) === 1
-}
+  return value === true || Number(value) === 1;
+};
 
 const documentStatusOptions = [
   { label: "Not Submitted", value: "not_submitted" },
   { label: "Submitted", value: "submitted" },
   { label: "Approved", value: "approved" },
   { label: "Rejected", value: "rejected" },
-]
+];
 
 const documentStatusTransitions: Record<string, string[]> = {
   not_submitted: ["submitted"],
   submitted: ["approved", "rejected"],
   rejected: ["submitted"],
   approved: ["submitted", "not_submitted"],
-}
+};
 
 const getDocumentStatusOptions = (status: string) => {
   const allowedStatuses = new Set([
     status,
     ...(documentStatusTransitions[status] || []),
-  ])
+  ]);
 
   return documentStatusOptions.filter((option) =>
-    allowedStatuses.has(option.value)
-  )
-}
+    allowedStatuses.has(option.value),
+  );
+};
 
 const countValue = (value: number | string | null | undefined) => {
-  return Number(value || 0)
-}
+  return Number(value || 0);
+};
 
 const moneyInputValue = (value: string) => {
-  if (value === "") return 0
+  if (value === "") return 0;
 
-  const parsedValue = Number(value)
+  const parsedValue = Number(value);
 
-  return Number.isFinite(parsedValue) ? parsedValue : 0
-}
+  return Number.isFinite(parsedValue) ? parsedValue : 0;
+};
 
 const isPresentMoneyInputValid = (value: string) => {
-  if (value === "") return true
+  if (value === "") return true;
 
-  const parsedValue = Number(value)
+  const parsedValue = Number(value);
 
-  return Number.isFinite(parsedValue) && parsedValue >= 0
-}
+  return Number.isFinite(parsedValue) && parsedValue >= 0;
+};
 
 const getUnitDocumentSummary = (unit: ClientUnit) => {
-  const checklistCount = countValue(unit.document_checklist_count)
-  const totalCount = countValue(unit.document_total_count)
-  const submittedCount = countValue(unit.document_submitted_count)
-  const requiredCount = countValue(unit.document_required_count)
+  const checklistCount = countValue(unit.document_checklist_count);
+  const totalCount = countValue(unit.document_total_count);
+  const submittedCount = countValue(unit.document_submitted_count);
+  const requiredCount = countValue(unit.document_required_count);
   const submittedRequiredCount = countValue(
-    unit.document_submitted_required_count
-  )
+    unit.document_submitted_required_count,
+  );
 
   return {
     checklistCount,
@@ -1209,43 +1320,49 @@ const getUnitDocumentSummary = (unit: ClientUnit) => {
       requiredCount > 0
         ? `Required: ${submittedRequiredCount}/${requiredCount}`
         : "No required documents",
-  }
-}
+  };
+};
 
 const ClientProfile = () => {
-  const navigate = useNavigate()
-  const queryClient = useQueryClient()
-  const { id: clientId } = useParams()
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const { id: clientId } = useParams();
 
-  const [isReserveOpen, setIsReserveOpen] = useState(false)
-  const [reserveData, setReserveData] = useState<ReserveListingData>(
-    () => createDefaultReserveData()
-  )
-  const [listingSearch, setListingSearch] = useState("")
-  const [editUnit, setEditUnit] = useState<ClientUnit | null>(null)
+  const [isReserveOpen, setIsReserveOpen] = useState(false);
+  const [reserveData, setReserveData] = useState<ReserveListingData>(() =>
+    createDefaultReserveData(),
+  );
+  const [listingSearch, setListingSearch] = useState("");
+  const [editUnit, setEditUnit] = useState<ClientUnit | null>(null);
   const [editUnitData, setEditUnitData] =
-    useState<EditUnitData>(defaultEditUnitData)
-  const [changeUnit, setChangeUnit] = useState<ClientUnit | null>(null)
-  const [changeUnitData, setChangeUnitData] =
-    useState<ChangeUnitData>(defaultChangeUnitData)
-  const [changeListingSearch, setChangeListingSearch] = useState("")
-  const [cancelUnit, setCancelUnit] = useState<ClientUnit | null>(null)
-  const [cancelUnitData, setCancelUnitData] =
-    useState<CancelUnitData>(defaultCancelUnitData)
-  const [deleteUnit, setDeleteUnit] = useState<ClientUnit | null>(null)
+    useState<EditUnitData>(defaultEditUnitData);
+  const [changeUnit, setChangeUnit] = useState<ClientUnit | null>(null);
+  const [changeUnitData, setChangeUnitData] = useState<ChangeUnitData>(
+    defaultChangeUnitData,
+  );
+  const [changeListingSearch, setChangeListingSearch] = useState("");
+  const [cancelUnit, setCancelUnit] = useState<ClientUnit | null>(null);
+  const [cancelUnitData, setCancelUnitData] = useState<CancelUnitData>(
+    defaultCancelUnitData,
+  );
+  const [deleteUnit, setDeleteUnit] = useState<ClientUnit | null>(null);
   const [selectedDocumentsUnit, setSelectedDocumentsUnit] =
-    useState<ClientUnit | null>(null)
-  const [successMessage, setSuccessMessage] = useState("")
-  const [reserveValidationMessage, setReserveValidationMessage] = useState("")
+    useState<ClientUnit | null>(null);
+  const [successMessage, setSuccessMessage] = useState("");
+  const [reserveValidationMessage, setReserveValidationMessage] = useState("");
+  const [reserveFormulaKey, setReserveFormulaKey] = useState<
+    ReserveFormulaKey | ""
+  >("");
+  const [isBuyerProfileEditing, setIsBuyerProfileEditing] = useState(false);
   const [principalProfileData, setPrincipalProfileData] =
-    useState<PrincipalProfileData>(() => emptyPrincipalProfileData())
+    useState<PrincipalProfileData>(() => emptyPrincipalProfileData());
   const [coBuyerData, setCoBuyerData] = useState<CoBuyerFormData[]>(() => [
     emptyCoBuyerData(),
-  ])
+  ]);
   const [principalEmploymentData, setPrincipalEmploymentData] =
-    useState<EmploymentFormData>(() => emptyEmploymentData("principal"))
+    useState<EmploymentFormData>(() => emptyEmploymentData("principal"));
   const [coBuyerEmploymentData, setCoBuyerEmploymentData] =
-    useState<EmploymentFormData>(() => emptyEmploymentData("co_buyer"))
+    useState<EmploymentFormData>(() => emptyEmploymentData("co_buyer"));
 
   const {
     data: clientProfile,
@@ -1255,21 +1372,21 @@ const ClientProfile = () => {
     queryKey: ["client", clientId],
     queryFn: () => fetchClient(clientId || ""),
     enabled: Boolean(clientId),
-  })
+  });
 
-  const client = clientProfile?.client
+  const client = clientProfile?.client;
   const coBuyers = useMemo(
     () => clientProfile?.co_buyers || [],
-    [clientProfile?.co_buyers]
-  )
+    [clientProfile?.co_buyers],
+  );
   const employmentDetails = useMemo(
     () => clientProfile?.employment_details || [],
-    [clientProfile?.employment_details]
-  )
+    [clientProfile?.employment_details],
+  );
   const profileCompletion = clientProfile?.profile_completion || {
     isComplete: false,
     missingFields: [],
-  }
+  };
 
   const {
     data: clientUnits = [],
@@ -1279,17 +1396,17 @@ const ClientProfile = () => {
     queryKey: ["client-units", clientId],
     queryFn: () => fetchClientUnits(clientId || ""),
     enabled: Boolean(clientId),
-  })
+  });
 
   const { data: availableListings = [] } = useQuery({
     queryKey: ["available-listings"],
     queryFn: fetchAvailableListings,
-  })
+  });
 
   const { data: sellers = [] } = useQuery({
     queryKey: ["accredited-sellers", "active"],
     queryFn: fetchSellers,
-  })
+  });
 
   const {
     data: clientDocuments = [],
@@ -1299,302 +1416,405 @@ const ClientProfile = () => {
     queryKey: ["client-unit-documents", selectedDocumentsUnit?.id || null],
     queryFn: () => fetchClientDocuments(selectedDocumentsUnit?.id || null),
     enabled: Boolean(selectedDocumentsUnit?.id),
-  })
+  });
 
   useEffect(() => {
-    if (!client) return
+    if (!client) return;
 
-    const firstCoBuyer = coBuyers[0]
+    const firstCoBuyer = coBuyers[0];
     const principalEmployment = employmentDetails.find(
-      (detail) => detail.person_type === "principal"
-    )
+      (detail) => detail.person_type === "principal",
+    );
     const coBuyerEmployment = firstCoBuyer
       ? employmentDetails.find(
           (detail) =>
             detail.person_type === "co_buyer" &&
-            Number(detail.client_buyer_id) === Number(firstCoBuyer.id)
+            Number(detail.client_buyer_id) === Number(firstCoBuyer.id),
         ) ||
         employmentDetails.find((detail) => detail.person_type === "co_buyer")
-      : undefined
+      : undefined;
 
     const timeoutId = window.setTimeout(() => {
-      setPrincipalProfileData(clientToPrincipalProfileData(client))
-      setCoBuyerData([coBuyerToFormData(firstCoBuyer)])
+      setPrincipalProfileData(clientToPrincipalProfileData(client));
+      setCoBuyerData([coBuyerToFormData(firstCoBuyer)]);
       setPrincipalEmploymentData(
-        employmentToFormData(principalEmployment, "principal")
-      )
+        employmentToFormData(principalEmployment, "principal"),
+      );
       setCoBuyerEmploymentData(
         employmentToFormData(
           coBuyerEmployment,
           "co_buyer",
-          firstCoBuyer?.id || null
-        )
-      )
-    }, 0)
+          firstCoBuyer?.id || null,
+        ),
+      );
+    }, 0);
 
-    return () => window.clearTimeout(timeoutId)
-  }, [client, coBuyers, employmentDetails])
+    return () => window.clearTimeout(timeoutId);
+  }, [client, coBuyers, employmentDetails]);
 
   const invalidateClientProfile = () => {
-    queryClient.invalidateQueries({ queryKey: ["client", clientId] })
-    queryClient.invalidateQueries({ queryKey: ["client-units", clientId] })
-    queryClient.invalidateQueries({ queryKey: ["client-units"] })
-    queryClient.invalidateQueries({ queryKey: ["available-listings"] })
-    queryClient.invalidateQueries({ queryKey: ["listings"] })
-    queryClient.invalidateQueries({ queryKey: ["commissions"] })
-    queryClient.invalidateQueries({ queryKey: ["commission-summary"] })
-    queryClient.invalidateQueries({ queryKey: ["commission-releases"] })
+    queryClient.invalidateQueries({ queryKey: ["client", clientId] });
+    queryClient.invalidateQueries({ queryKey: ["client-units", clientId] });
+    queryClient.invalidateQueries({ queryKey: ["client-units"] });
+    queryClient.invalidateQueries({ queryKey: ["available-listings"] });
+    queryClient.invalidateQueries({ queryKey: ["listings"] });
+    queryClient.invalidateQueries({ queryKey: ["commissions"] });
+    queryClient.invalidateQueries({ queryKey: ["commission-summary"] });
+    queryClient.invalidateQueries({ queryKey: ["commission-releases"] });
 
     if (selectedDocumentsUnit?.id) {
       queryClient.invalidateQueries({
         queryKey: ["client-unit-documents", selectedDocumentsUnit.id],
-      })
+      });
     }
-  }
+  };
 
   const reserveMutation = useMutation({
     mutationFn: reserveListing,
     onSuccess: () => {
-      invalidateClientProfile()
-      setIsReserveOpen(false)
-      setReserveData(createDefaultReserveData())
-      setReserveValidationMessage("")
-      setSuccessMessage("Listing reserved and commission generated successfully")
+      invalidateClientProfile();
+      setIsReserveOpen(false);
+      setReserveFormulaKey("");
+      setReserveData(createDefaultReserveData());
+      setReserveValidationMessage("");
+      setSuccessMessage(
+        "Listing reserved and commission generated successfully",
+      );
     },
-  })
+  });
 
   const saveBuyerProfileMutation = useMutation({
     mutationFn: saveBuyerProfile,
     onSuccess: () => {
-      invalidateClientProfile()
-      setSuccessMessage("Buyer profile saved successfully")
+      invalidateClientProfile();
+      setIsBuyerProfileEditing(false);
+      setSuccessMessage("Buyer profile saved successfully");
     },
-  })
-
-  const markBuyerProfileCompleteMutation = useMutation({
-    mutationFn: saveBuyerProfile,
-    onSuccess: () => {
-      invalidateClientProfile()
-      setSuccessMessage("Buyer profile marked complete")
-    },
-  })
+  });
 
   const updateUnitMutation = useMutation({
     mutationFn: updateClientUnit,
     onSuccess: () => {
-      invalidateClientProfile()
-      setEditUnit(null)
-      setSuccessMessage("Client unit updated successfully")
+      invalidateClientProfile();
+      setEditUnit(null);
+      setSuccessMessage("Client unit updated successfully");
     },
-  })
+  });
 
   const changeUnitMutation = useMutation({
     mutationFn: changeClientUnitListing,
     onSuccess: () => {
-      invalidateClientProfile()
-      setChangeUnit(null)
-      setChangeUnitData(defaultChangeUnitData)
-      setChangeListingSearch("")
-      setSuccessMessage("Client unit changed successfully")
+      invalidateClientProfile();
+      setChangeUnit(null);
+      setChangeUnitData(defaultChangeUnitData);
+      setChangeListingSearch("");
+      setSuccessMessage("Client unit changed successfully");
     },
-  })
+  });
 
   const cancelUnitMutation = useMutation({
     mutationFn: cancelClientUnit,
     onSuccess: () => {
-      invalidateClientProfile()
-      setCancelUnit(null)
-      setCancelUnitData(defaultCancelUnitData)
-      setSuccessMessage("Client unit cancelled successfully")
+      invalidateClientProfile();
+      setCancelUnit(null);
+      setCancelUnitData(defaultCancelUnitData);
+      setSuccessMessage("Client unit cancelled successfully");
     },
-  })
+  });
 
   const deleteUnitMutation = useMutation({
     mutationFn: deleteClientUnit,
     onSuccess: () => {
-      invalidateClientProfile()
-      setDeleteUnit(null)
-      setSuccessMessage("Client unit deleted successfully")
+      invalidateClientProfile();
+      setDeleteUnit(null);
+      setSuccessMessage("Client unit deleted successfully");
     },
-  })
+  });
 
   const updateDocumentMutation = useMutation({
     mutationFn: updateClientDocumentStatus,
     onSuccess: () => {
-      invalidateClientProfile()
-      setSuccessMessage("Document checklist updated successfully")
+      invalidateClientProfile();
+      setSuccessMessage("Document checklist updated successfully");
     },
-  })
+  });
 
   const uploadDocumentMutation = useMutation({
     mutationFn: uploadClientDocumentFile,
     onSuccess: () => {
-      invalidateClientProfile()
-      setSuccessMessage("Document file uploaded successfully")
+      invalidateClientProfile();
+      setSuccessMessage("Document file uploaded successfully");
     },
-  })
+  });
 
   const downloadDocumentsMutation = useMutation({
     mutationFn: downloadClientUnitDocumentsPdf,
     onError: () => undefined,
-  })
+  });
 
   const createChecklistMutation = useMutation({
     mutationFn: createDocumentChecklist,
     onSuccess: () => {
-      invalidateClientProfile()
-      setSuccessMessage("Document checklist created successfully")
+      invalidateClientProfile();
+      setSuccessMessage("Document checklist created successfully");
     },
-  })
+  });
 
   const applyReusableMutation = useMutation({
     mutationFn: applyExistingReusableDocuments,
     onSuccess: () => {
-      invalidateClientProfile()
-      setSuccessMessage("Reusable documents applied successfully")
+      invalidateClientProfile();
+      setSuccessMessage("Reusable documents applied successfully");
     },
-  })
+  });
 
   const selectedMainSeller = sellers.find(
-    (seller) => Number(seller.id) === Number(reserveData.seller_id)
-  )
+    (seller) => Number(seller.id) === Number(reserveData.seller_id),
+  );
 
   const sellerById = useMemo(() => {
-    return new Map(sellers.map((seller) => [Number(seller.id), seller]))
-  }, [sellers])
+    return new Map(sellers.map((seller) => [Number(seller.id), seller]));
+  }, [sellers]);
 
   const reserveCommissionPreview = useMemo(() => {
-    if (!selectedMainSeller) return []
+    if (!selectedMainSeller) return [];
 
-    const chain: Seller[] = []
-    let current: Seller | undefined = selectedMainSeller
-    const visited = new Set<number>()
+    const chain: Seller[] = [];
+    let current: Seller | undefined = selectedMainSeller;
+    const visited = new Set<number>();
 
     while (current && !visited.has(Number(current.id)) && chain.length < 10) {
-      visited.add(Number(current.id))
-      chain.push(current)
+      visited.add(Number(current.id));
+      chain.push(current);
       current = current.parent_seller_id
         ? sellerById.get(Number(current.parent_seller_id))
-        : undefined
+        : undefined;
     }
 
     const personalRate = Number(
-      selectedMainSeller.personal_commission_rate || selectedMainSeller.commission_rate || 0
-    )
-    const manager = chain.find((seller) => seller.seller_role === "manager")
-    const broker = chain.find((seller) => seller.seller_role === "broker")
-    const bnm = chain.find((seller) => seller.seller_role === "broker_network_manager")
+      selectedMainSeller.personal_commission_rate ||
+        selectedMainSeller.commission_rate ||
+        0,
+    );
+    const manager = chain.find((seller) => seller.seller_role === "manager");
+    const broker = chain.find((seller) => seller.seller_role === "broker");
+    const bnm = chain.find(
+      (seller) => seller.seller_role === "broker_network_manager",
+    );
     const rows = [
       {
         seller: selectedMainSeller,
         label: "Main Seller",
         rate: personalRate,
       },
-    ]
+    ];
 
-    let allocatedBelowBroker = personalRate
+    let allocatedBelowBroker = personalRate;
 
     if (manager && Number(manager.id) !== Number(selectedMainSeller.id)) {
-      const managerRate = Number(manager.override_commission_rate || 0)
+      const managerRate = Number(manager.override_commission_rate || 0);
       if (managerRate > 0) {
-        rows.push({ seller: manager, label: "Manager Override", rate: managerRate })
-        allocatedBelowBroker += managerRate
+        rows.push({
+          seller: manager,
+          label: "Manager Override",
+          rate: managerRate,
+        });
+        allocatedBelowBroker += managerRate;
       }
     }
 
     if (broker && Number(broker.id) !== Number(selectedMainSeller.id)) {
-      const brokerPool = Number(broker.commission_pool_rate || broker.commission_rate || 0)
-      const brokerResidual = Math.max(brokerPool - allocatedBelowBroker, 0)
+      const brokerPool = Number(
+        broker.commission_pool_rate || broker.commission_rate || 0,
+      );
+      const brokerResidual = Math.max(brokerPool - allocatedBelowBroker, 0);
       if (brokerResidual > 0) {
-        rows.push({ seller: broker, label: "Broker Residual", rate: brokerResidual })
+        rows.push({
+          seller: broker,
+          label: "Broker Residual",
+          rate: brokerResidual,
+        });
       }
 
       if (bnm) {
-        const bnmPool = Number(bnm.commission_pool_rate || 0)
-        const bnmResidual = Math.max(bnmPool - brokerPool, 0)
+        const bnmPool = Number(bnm.commission_pool_rate || 0);
+        const bnmResidual = Math.max(bnmPool - brokerPool, 0);
         if (bnmResidual > 0) {
-          rows.push({ seller: bnm, label: "BNM Residual", rate: bnmResidual })
+          rows.push({ seller: bnm, label: "BNM Residual", rate: bnmResidual });
         }
       }
     }
 
-    return rows.filter((row) => Number(row.rate) > 0)
-  }, [selectedMainSeller, sellerById])
+    return rows.filter((row) => Number(row.rate) > 0);
+  }, [selectedMainSeller, sellerById]);
 
   const selectedListing = availableListings.find(
-    (listing) => Number(listing.id) === Number(reserveData.listing_id)
-  )
+    (listing) => Number(listing.id) === Number(reserveData.listing_id),
+  );
 
   const reservePurchasePrice = selectedListing
     ? Number(selectedListing.total_contract_price || 0)
-    : 0
+    : 0;
   const reserveReservationFee = moneyInputValue(
-    reserveData.reservation_fee_amount
-  )
+    reserveData.reservation_fee_amount,
+  );
   const reserveDownpaymentPercent =
     reserveData.mode_of_payment === "installment"
-      ? getSelectedNumber(reserveData.downpayment_percent_option, reserveData.downpayment_percent_custom, 30)
-      : 0
+      ? getSelectedNumber(
+          reserveData.downpayment_percent_option,
+          reserveData.downpayment_percent_custom,
+          30,
+        )
+      : 0;
   const reserveDownpaymentTarget =
     reserveData.mode_of_payment === "installment"
       ? reservePurchasePrice * (reserveDownpaymentPercent / 100)
-      : 0
+      : 0;
   const reserveDownpaymentGross = Math.max(
     reserveDownpaymentTarget - reserveReservationFee,
-    0
-  )
+    0,
+  );
   const reserveDownpaymentGives =
     reserveData.mode_of_payment === "installment"
-      ? Math.max(getSelectedNumber(reserveData.downpayment_gives_option, reserveData.downpayment_gives_custom, 3), 1)
-      : 0
+      ? Math.max(
+          getSelectedNumber(
+            reserveData.downpayment_gives_option,
+            reserveData.downpayment_gives_custom,
+            3,
+          ),
+          1,
+        )
+      : 0;
   const reserveIsSpotDownpayment =
-    reserveData.mode_of_payment === "installment" && reserveDownpaymentGives === 1
+    reserveData.mode_of_payment === "installment" &&
+    reserveDownpaymentGives === 1;
   const reserveDownpaymentDiscountRate = reserveIsSpotDownpayment
-    ? getSelectedNumber(reserveData.downpayment_discount_rate_option, reserveData.downpayment_discount_rate_custom, 0)
-    : 0
+    ? getSelectedNumber(
+        reserveData.downpayment_discount_rate_option,
+        reserveData.downpayment_discount_rate_custom,
+        0,
+      )
+    : 0;
   const reserveDownpaymentDiscountAmount = reserveIsSpotDownpayment
     ? reserveDownpaymentGross * (reserveDownpaymentDiscountRate / 100)
-    : 0
+    : 0;
   const reserveDownpayment =
     reserveData.mode_of_payment === "installment"
       ? Math.max(reserveDownpaymentGross - reserveDownpaymentDiscountAmount, 0)
-      : 0
+      : 0;
   const reserveDownpaymentPerGive =
     reserveData.mode_of_payment === "installment" && reserveDownpaymentGives > 0
       ? reserveDownpayment / reserveDownpaymentGives
-      : 0
+      : 0;
   const reserveDeferredCash =
     reserveData.mode_of_payment === "cash"
       ? moneyInputValue(reserveData.deferred_cash_amount)
-      : 0
+      : 0;
   const reserveBalanceRaw =
     reservePurchasePrice -
     reserveReservationFee -
     reserveDownpayment -
-    reserveDeferredCash
-  const reserveOfferBalance = Math.max(reserveBalanceRaw, 0)
+    reserveDeferredCash;
+  const reserveOfferBalance = Math.max(reserveBalanceRaw, 0);
   const reserveTermsMonths =
     reserveData.mode_of_payment === "installment"
-      ? getSelectedNumber(reserveData.payment_terms_months_option, reserveData.payment_terms_months_custom, 36)
-      : 0
-  const reserveInterestRate = moneyInputValue(reserveData.interest_rate)
+      ? getSelectedNumber(
+          reserveData.payment_terms_months_option,
+          reserveData.payment_terms_months_custom,
+          36,
+        )
+      : 0;
+  const reserveInterestRate = moneyInputValue(reserveData.interest_rate);
   const reserveBalanceWithInterest =
-    reserveOfferBalance + reserveOfferBalance * (reserveInterestRate / 100)
+    reserveOfferBalance + reserveOfferBalance * (reserveInterestRate / 100);
   const computedMonthlyAmortization =
     reserveData.mode_of_payment === "installment" && reserveTermsMonths > 0
       ? reserveBalanceWithInterest / reserveTermsMonths
-      : 0
+      : 0;
   const displayedMonthlyAmortization =
     reserveData.monthly_amortization ||
     (computedMonthlyAmortization > 0
       ? computedMonthlyAmortization.toFixed(2)
-      : "")
+      : "");
+
+  const reserveFormulaRows: Array<{
+    key: ReserveFormulaKey;
+    label: string;
+    value: string;
+    formula: string;
+    note?: string;
+  }> = [
+    {
+      key: "offer_purchase_price",
+      label: "Offer Purchase Price",
+      value: formatMoney(reservePurchasePrice),
+      formula: `TCP from selected listing: Net Selling Price + LMF = ${formatMoney(reservePurchasePrice)}`,
+    },
+    {
+      key: "dp_gross",
+      label: "DP Gross",
+      value:
+        reserveData.mode_of_payment === "installment"
+          ? formatMoney(reserveDownpaymentGross)
+          : "-",
+      formula: `(${formatMoney(reservePurchasePrice)} × ${formatNumber(reserveDownpaymentPercent)}%) - ${formatMoney(reserveReservationFee)}`,
+      note: "Downpayment target less reservation fee.",
+    },
+    {
+      key: "dp_discount",
+      label: "DP Discount",
+      value: reserveIsSpotDownpayment
+        ? formatMoney(reserveDownpaymentDiscountAmount)
+        : "-",
+      formula: reserveIsSpotDownpayment
+        ? `${formatMoney(reserveDownpaymentGross)} × ${formatNumber(reserveDownpaymentDiscountRate)}%`
+        : "No discount unless Downpayment Gives is Spot Cash.",
+    },
+    {
+      key: "net_dp_payable",
+      label: "Net DP Payable",
+      value:
+        reserveData.mode_of_payment === "installment"
+          ? formatMoney(reserveDownpayment)
+          : "-",
+      formula: `${formatMoney(reserveDownpaymentGross)} - ${formatMoney(reserveDownpaymentDiscountAmount)}`,
+      note: "This is the net downpayment after discount.",
+    },
+    {
+      key: "per_give",
+      label: "Per Give",
+      value:
+        reserveData.mode_of_payment === "installment"
+          ? formatMoney(reserveDownpaymentPerGive)
+          : "-",
+      formula: `${formatMoney(reserveDownpayment)} ÷ ${formatNumber(reserveDownpaymentGives || 1)} give(s)`,
+    },
+    {
+      key: "offer_balance",
+      label: "Offer Balance",
+      value: formatMoney(reserveOfferBalance),
+      formula: `${formatMoney(reservePurchasePrice)} - ${formatMoney(reserveReservationFee)} - ${formatMoney(reserveDownpayment)} - ${formatMoney(reserveDeferredCash)}`,
+      note: "Deferred cash only applies when mode of payment is cash.",
+    },
+    {
+      key: "monthly_preview",
+      label: "Monthly Preview",
+      value:
+        reserveData.mode_of_payment === "installment"
+          ? formatMoney(computedMonthlyAmortization)
+          : "-",
+      formula: `(${formatMoney(reserveOfferBalance)} + ${formatMoney(reserveOfferBalance * (reserveInterestRate / 100))} interest) ÷ ${formatNumber(reserveTermsMonths || 1)} month(s)`,
+    },
+  ];
+
+  const selectedReserveFormula =
+    reserveFormulaRows.find((row) => row.key === reserveFormulaKey) || null;
 
   const filteredReserveListings = availableListings.filter((listing) => {
-    const search = listingSearch.toLowerCase().trim()
+    const search = listingSearch.toLowerCase().trim();
 
     if (!search || Number(listing.id) === Number(reserveData.listing_id)) {
-      return true
+      return true;
     }
 
     return [
@@ -1607,14 +1827,17 @@ const ClientProfile = () => {
       .filter(Boolean)
       .join(" ")
       .toLowerCase()
-      .includes(search)
-  })
+      .includes(search);
+  });
 
   const filteredChangeListings = availableListings.filter((listing) => {
-    const search = changeListingSearch.toLowerCase().trim()
+    const search = changeListingSearch.toLowerCase().trim();
 
-    if (!search || Number(listing.id) === Number(changeUnitData.new_listing_id)) {
-      return true
+    if (
+      !search ||
+      Number(listing.id) === Number(changeUnitData.new_listing_id)
+    ) {
+      return true;
     }
 
     return [
@@ -1627,192 +1850,250 @@ const ClientProfile = () => {
       .filter(Boolean)
       .join(" ")
       .toLowerCase()
-      .includes(search)
-  })
+      .includes(search);
+  });
 
   const submittedDocumentCount = useMemo(() => {
-    return clientDocuments.filter((document) => isSubmitted(document.status)).length
-  }, [clientDocuments])
+    return clientDocuments.filter((document) => isSubmitted(document.status))
+      .length;
+  }, [clientDocuments]);
 
   const requiredDocumentCount = useMemo(() => {
-    return clientDocuments.filter((document) => isRequired(document.is_required)).length
-  }, [clientDocuments])
+    return clientDocuments.filter((document) =>
+      isRequired(document.is_required),
+    ).length;
+  }, [clientDocuments]);
 
   const submittedRequiredDocumentCount = useMemo(() => {
     return clientDocuments.filter(
       (document) =>
-        isRequired(document.is_required) && isSubmitted(document.status)
-    ).length
-  }, [clientDocuments])
+        isRequired(document.is_required) && isSubmitted(document.status),
+    ).length;
+  }, [clientDocuments]);
 
   const totals = useMemo(() => {
     return clientUnits.reduce(
       (summary, unit) => {
-        summary.totalContractPrice += Number(unit.total_contract_price || 0)
-        summary.totalPaid += Number(unit.paid_amount || 0)
-        summary.totalBalance += Number(unit.balance || 0)
-        summary.totalCommission += Number(unit.gross_commission_total || 0)
+        summary.totalContractPrice += Number(unit.total_contract_price || 0);
+        summary.totalPaid += Number(unit.paid_amount || 0);
+        summary.totalBalance += Number(unit.balance || 0);
+        summary.totalCommission += Number(unit.gross_commission_total || 0);
 
-        return summary
+        return summary;
       },
       {
         totalContractPrice: 0,
         totalPaid: 0,
         totalBalance: 0,
         totalCommission: 0,
-      }
-    )
-  }, [clientUnits])
+      },
+    );
+  }, [clientUnits]);
 
-  const activeCoBuyerData = coBuyerData[0] || emptyCoBuyerData()
-  const showCoBuyerProfile = false
+  const activeCoBuyerData = coBuyerData[0] || emptyCoBuyerData();
+  const showCoBuyerProfile = false;
   const currentProfileStatus: ProfileStatus =
-    client?.profile_status === "complete" ? "complete" : "incomplete"
-  const isSavingBuyerProfile =
-    saveBuyerProfileMutation.isPending ||
-    markBuyerProfileCompleteMutation.isPending
+    client?.profile_status === "complete" ? "complete" : "incomplete";
+  const isSavingBuyerProfile = saveBuyerProfileMutation.isPending;
 
   const getReserveValidationMessage = () => {
     if (!reserveData.listing_id || !selectedListing) {
-      return "Listing is required"
+      return "Listing is required";
     }
 
     if (!reserveData.mode_of_payment) {
-      return "Mode of payment is required"
+      return "Mode of payment is required";
     }
 
     if (!reserveData.starting_date) {
-      return "Starting date is required"
+      return "Starting date is required";
     }
 
     if (!reserveData.due_date) {
-      return "First due date is required"
+      return "First due date is required";
     }
 
     if (
       reserveData.reservation_fee_amount === "" ||
       !isPresentMoneyInputValid(reserveData.reservation_fee_amount)
     ) {
-      return "Reservation fee must be a non-negative amount"
+      return "Reservation fee must be a non-negative amount";
     }
 
     if (
       reserveData.mode_of_payment === "cash" &&
       !isPresentMoneyInputValid(reserveData.deferred_cash_amount)
     ) {
-      return "Deferred cash amount must be a non-negative amount"
+      return "Deferred cash amount must be a non-negative amount";
     }
 
     if (reserveData.mode_of_payment === "installment") {
-      const parsedTermsMonths = getSelectedNumber(reserveData.payment_terms_months_option, reserveData.payment_terms_months_custom, 36)
+      const parsedTermsMonths = getSelectedNumber(
+        reserveData.payment_terms_months_option,
+        reserveData.payment_terms_months_custom,
+        36,
+      );
 
-      if (!Number.isInteger(parsedTermsMonths) || parsedTermsMonths < 1 || parsedTermsMonths > 120) {
-        return "Payment terms must be between 1 and 120 months"
+      if (
+        !Number.isInteger(parsedTermsMonths) ||
+        parsedTermsMonths < 1 ||
+        parsedTermsMonths > 120
+      ) {
+        return "Payment terms must be between 1 and 120 months";
       }
 
-      if (!Number.isFinite(reserveDownpaymentPercent) || reserveDownpaymentPercent < 0) {
-        return "Downpayment percentage must be a non-negative amount"
+      if (
+        !Number.isFinite(reserveDownpaymentPercent) ||
+        reserveDownpaymentPercent < 0
+      ) {
+        return "Downpayment percentage must be a non-negative amount";
       }
 
-      if (!Number.isInteger(reserveDownpaymentGives) || reserveDownpaymentGives < 1) {
-        return "Downpayment gives must be at least 1"
+      if (
+        !Number.isInteger(reserveDownpaymentGives) ||
+        reserveDownpaymentGives < 1
+      ) {
+        return "Downpayment gives must be at least 1";
       }
 
-      if (reserveIsSpotDownpayment && (!Number.isFinite(reserveDownpaymentDiscountRate) || reserveDownpaymentDiscountRate < 0)) {
-        return "Spot downpayment discount must be a non-negative percentage"
+      if (
+        reserveIsSpotDownpayment &&
+        (!Number.isFinite(reserveDownpaymentDiscountRate) ||
+          reserveDownpaymentDiscountRate < 0)
+      ) {
+        return "Spot downpayment discount must be a non-negative percentage";
       }
 
       if (!isPresentMoneyInputValid(reserveData.interest_rate)) {
-        return "Interest rate must be a non-negative percentage"
+        return "Interest rate must be a non-negative percentage";
       }
 
       if (!isPresentMoneyInputValid(reserveData.monthly_amortization)) {
-        return "Monthly amortization must be a non-negative amount"
+        return "Monthly amortization must be a non-negative amount";
       }
     }
 
     if (reserveBalanceRaw < 0) {
-      return "Reservation fee, downpayment, and deferred cash cannot exceed TCP"
+      return "Reservation fee, downpayment, and deferred cash cannot exceed TCP";
     }
 
-    return ""
-  }
+    return "";
+  };
 
   const openReserveModal = () => {
     setReserveData({
       ...createDefaultReserveData(),
       seller_id: client?.default_seller_id || "",
-    })
-    setListingSearch("")
-    setSuccessMessage("")
-    setReserveValidationMessage("")
-    setIsReserveOpen(true)
-  }
+    });
+    setListingSearch("");
+    setSuccessMessage("");
+    setReserveValidationMessage("");
+    setReserveFormulaKey("");
+    setIsReserveOpen(true);
+  };
 
   const openEditUnitModal = (unit: ClientUnit) => {
-    setEditUnit(unit)
+    setEditUnit(unit);
     setEditUnitData({
       seller_id: unit.seller_id ? String(unit.seller_id) : "",
       due_date: unit.due_date ? String(unit.due_date).slice(0, 10) : "",
       status: unit.status || "reserved",
-      mode_of_payment:
-        unit.mode_of_payment === "cash" ? "cash" : "installment",
+      mode_of_payment: unit.mode_of_payment === "cash" ? "cash" : "installment",
       buyer_type: normalizeBuyerType(unit.buyer_type),
       co_buyer: clientUnitToCoBuyerFormData(unit),
+      co_buyer_employment: clientUnitToCoBuyerEmploymentFormData(unit),
       regenerate_commission: false,
-      sale_type: unit.sale_type === "direct_to_developer" || unit.sale_type === "direct" ? "direct_to_developer" : "distributed",
+      sale_type:
+        unit.sale_type === "direct_to_developer" || unit.sale_type === "direct"
+          ? "direct_to_developer"
+          : "distributed",
       override_seller_id: "",
       override_rate: "",
       override_notes: "",
-    })
-  }
+    });
+  };
 
   const openChangeUnitModal = (unit: ClientUnit) => {
-    setChangeUnit(unit)
+    setChangeUnit(unit);
     setChangeUnitData({
       ...defaultChangeUnitData,
       status: unit.status === "active" ? "active" : "reserved",
-    })
-    setChangeListingSearch("")
-    setSuccessMessage("")
-  }
+    });
+    setChangeListingSearch("");
+    setSuccessMessage("");
+  };
 
   const openCancelUnitModal = (unit: ClientUnit) => {
-    setCancelUnit(unit)
-    setCancelUnitData(defaultCancelUnitData)
-    setSuccessMessage("")
-  }
+    setCancelUnit(unit);
+    setCancelUnitData(defaultCancelUnitData);
+    setSuccessMessage("");
+  };
 
   const openDeleteUnitModal = (unit: ClientUnit) => {
-    setDeleteUnit(unit)
-    setSuccessMessage("")
-  }
+    setDeleteUnit(unit);
+    setSuccessMessage("");
+  };
 
   const openDocumentsModal = (unit: ClientUnit) => {
-    setSelectedDocumentsUnit(unit)
-    setSuccessMessage("")
-  }
+    setSelectedDocumentsUnit(unit);
+    setSuccessMessage("");
+  };
 
   const handleReserveListing = () => {
-    if (!clientId || !reserveData.listing_id) return
+    if (!clientId || !reserveData.listing_id) return;
 
-    const validationMessage = getReserveValidationMessage()
+    const validationMessage = getReserveValidationMessage();
 
     if (validationMessage) {
-      setReserveValidationMessage(validationMessage)
-      return
+      setReserveValidationMessage(validationMessage);
+      return;
     }
 
-    setReserveValidationMessage("")
+    setReserveValidationMessage("");
 
     reserveMutation.mutate({
       clientId,
       reserveData,
-    })
-  }
+    });
+  };
+
+  const resetBuyerProfileForm = () => {
+    if (!client) return;
+
+    const firstCoBuyer = coBuyers[0];
+    const principalEmployment = employmentDetails.find(
+      (detail) => detail.person_type === "principal",
+    );
+    const coBuyerEmployment = firstCoBuyer
+      ? employmentDetails.find(
+          (detail) =>
+            detail.person_type === "co_buyer" &&
+            Number(detail.client_buyer_id) === Number(firstCoBuyer.id),
+        ) ||
+        employmentDetails.find((detail) => detail.person_type === "co_buyer")
+      : undefined;
+
+    setPrincipalProfileData(clientToPrincipalProfileData(client));
+    setCoBuyerData([coBuyerToFormData(firstCoBuyer)]);
+    setPrincipalEmploymentData(
+      employmentToFormData(principalEmployment, "principal"),
+    );
+    setCoBuyerEmploymentData(
+      employmentToFormData(
+        coBuyerEmployment,
+        "co_buyer",
+        firstCoBuyer?.id || null,
+      ),
+    );
+  };
+
+  const handleCancelBuyerProfileEdit = () => {
+    resetBuyerProfileForm();
+    setIsBuyerProfileEditing(false);
+  };
 
   const handleSaveBuyerProfile = () => {
-    if (!clientId) return
+    if (!clientId) return;
 
     saveBuyerProfileMutation.mutate({
       clientId,
@@ -1820,75 +2101,65 @@ const ClientProfile = () => {
       coBuyerData: [],
       principalEmploymentData,
       coBuyerEmploymentData: emptyEmploymentData("co_buyer"),
-    })
-  }
-
-  const handleMarkBuyerProfileComplete = () => {
-    if (!clientId) return
-
-    markBuyerProfileCompleteMutation.mutate({
-      clientId,
-      profileData: { ...principalProfileData, buyer_type: "single" },
-      coBuyerData: [],
-      principalEmploymentData,
-      coBuyerEmploymentData: emptyEmploymentData("co_buyer"),
-      markComplete: true,
-    })
-  }
+    });
+  };
 
   const handleUpdateUnit = () => {
-    if (!editUnit) return
+    if (!editUnit) return;
 
     updateUnitMutation.mutate({
       clientUnitId: editUnit.id,
       unitData: editUnitData,
-    })
-  }
+    });
+  };
 
   const handleChangeUnit = () => {
-    if (!changeUnit || !changeUnitData.new_listing_id) return
+    if (!changeUnit || !changeUnitData.new_listing_id) return;
 
     changeUnitMutation.mutate({
       clientUnitId: changeUnit.id,
       changeData: changeUnitData,
-    })
-  }
+    });
+  };
 
   const handleCancelUnit = () => {
-    if (!cancelUnit) return
+    if (!cancelUnit) return;
 
     cancelUnitMutation.mutate({
       clientUnitId: cancelUnit.id,
       cancelData: cancelUnitData,
-    })
-  }
+    });
+  };
 
   const handleDeleteUnit = () => {
-    if (!deleteUnit) return
+    if (!deleteUnit) return;
 
-    deleteUnitMutation.mutate(deleteUnit.id)
-  }
+    deleteUnitMutation.mutate(deleteUnit.id);
+  };
 
   const handleDocumentStatusChange = (
     document: ClientDocument,
-    status: string
+    status: string,
   ) => {
     updateDocumentMutation.mutate({
       clientDocumentId: document.id,
       status,
-    })
-  }
+    });
+  };
 
-  const handleDocumentFileChange = (document: ClientDocument, file: File | null) => {
-    if (!file) return
+  const handleDocumentFileChange = (
+    document: ClientDocument,
+    file: File | null,
+  ) => {
+    if (!file) return;
     uploadDocumentMutation.mutate({
       clientDocumentId: document.id,
       file,
-    })
-  }
+    });
+  };
 
   if (isClientLoading || areUnitsLoading) {
-    return <LoadingState label="Loading client profile..." />
+    return <LoadingState label="Loading client profile..." />;
   }
 
   if (clientError || unitsError || !client) {
@@ -1899,7 +2170,7 @@ const ClientProfile = () => {
           Back to Clients
         </Button>
       </div>
-    )
+    );
   }
 
   return (
@@ -1913,17 +2184,27 @@ const ClientProfile = () => {
             <Button icon={<FiArrowLeft />} onClick={() => navigate("/clients")}>
               Back
             </Button>
-            <Button icon={<FiPlus />} onClick={openReserveModal} variant="primary">
+            <Button
+              icon={<FiPlus />}
+              onClick={openReserveModal}
+              variant="primary"
+            >
               Reserve Listing
             </Button>
           </div>
         }
       />
 
-      {successMessage ? <Alert variant="success" title={successMessage} /> : null}
+      {successMessage ? (
+        <Alert variant="success" title={successMessage} />
+      ) : null}
 
       {clientUnits
-        .filter((unit) => Number(unit.days_until_due ?? 999) >= 0 && Number(unit.days_until_due ?? 999) <= 7)
+        .filter(
+          (unit) =>
+            Number(unit.days_until_due ?? 999) >= 0 &&
+            Number(unit.days_until_due ?? 999) <= 7,
+        )
         .slice(0, 1)
         .map((unit) => (
           <Alert
@@ -1955,16 +2236,6 @@ const ClientProfile = () => {
         />
       ) : null}
 
-      {markBuyerProfileCompleteMutation.error ? (
-        <Alert
-          variant="error"
-          title={
-            markBuyerProfileCompleteMutation.error instanceof Error
-              ? markBuyerProfileCompleteMutation.error.message
-              : "Failed to mark buyer profile complete"
-          }
-        />
-      ) : null}
 
       {updateUnitMutation.error ? (
         <Alert
@@ -2065,36 +2336,57 @@ const ClientProfile = () => {
 
           <div className="flex flex-wrap items-center gap-2">
             <StatusBadge status={currentProfileStatus} />
-            <Button
-              disabled={isSavingBuyerProfile}
-              onClick={handleSaveBuyerProfile}
-              variant="secondary"
-            >
-              {saveBuyerProfileMutation.isPending ? "Saving..." : "Save Buyer Profile"}
-            </Button>
-            <Button
-              disabled={isSavingBuyerProfile}
-              onClick={handleMarkBuyerProfileComplete}
-              variant="primary"
-            >
-              {markBuyerProfileCompleteMutation.isPending
-                ? "Checking..."
-                : "Mark Profile Complete"}
-            </Button>
+            {isBuyerProfileEditing ? (
+              <>
+                <Button
+                  disabled={isSavingBuyerProfile}
+                  onClick={handleCancelBuyerProfileEdit}
+                  variant="secondary"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  disabled={isSavingBuyerProfile}
+                  onClick={handleSaveBuyerProfile}
+                  variant="primary"
+                >
+                  {saveBuyerProfileMutation.isPending
+                    ? "Saving..."
+                    : "Save Changes"}
+                </Button>
+              </>
+            ) : (
+              <Button
+                icon={<FiEdit2 />}
+                onClick={() => setIsBuyerProfileEditing(true)}
+                variant="primary"
+              >
+                Edit
+              </Button>
+            )}
           </div>
         </div>
 
-        {currentProfileStatus === "incomplete" &&
-        profileCompletion.missingFields.length > 0 ? (
+        {currentProfileStatus === "incomplete" ? (
           <div className="mt-4">
             <Alert
               variant="warning"
-              title={`Missing: ${profileCompletion.missingFields.join(", ")}`}
+              title="Buyer profile is incomplete"
+              message={
+                profileCompletion.missingFields.length > 0
+                  ? `Missing: ${profileCompletion.missingFields.join(", ")}`
+                  : "Review the buyer profile details before printing forms."
+              }
             />
           </div>
         ) : null}
 
-        <div className="mt-5 space-y-5">
+        <fieldset
+          disabled={!isBuyerProfileEditing || isSavingBuyerProfile}
+          className={`mt-5 space-y-5 ${
+            !isBuyerProfileEditing ? "opacity-70" : ""
+          }`}
+        >
           <div className="rounded-xl border border-slate-200 p-4">
             <h3 className="text-sm font-bold text-slate-900">
               Principal Buyer
@@ -2528,7 +2820,7 @@ const ClientProfile = () => {
               ) : null}
             </div>
           </div>
-        </div>
+        </fieldset>
       </div>
 
       <div className="mt-6">
@@ -2542,7 +2834,11 @@ const ClientProfile = () => {
               title="No reserved units"
               description="Reserve a listing for this client."
               action={
-                <Button icon={<FiPlus />} onClick={openReserveModal} variant="primary">
+                <Button
+                  icon={<FiPlus />}
+                  onClick={openReserveModal}
+                  variant="primary"
+                >
                   Reserve Listing
                 </Button>
               }
@@ -2574,165 +2870,172 @@ const ClientProfile = () => {
 
               <tbody>
                 {clientUnits.map((unit) => {
-                  const documentSummary = getUnitDocumentSummary(unit)
+                  const documentSummary = getUnitDocumentSummary(unit);
 
                   return (
                     <tr key={unit.id} className="border-b border-slate-100">
-                    <td className="px-4 py-3">
-                      <p className="font-bold text-slate-900">{unit.unit_id}</p>
-                      <p className="text-xs text-slate-500">
-                        {unit.lot_type || "-"} · {formatNumber(unit.lot_area_sqm)} sqm
-                      </p>
-                    </td>
+                      <td className="px-4 py-3">
+                        <p className="font-bold text-slate-900">
+                          {unit.unit_id}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          {unit.lot_type || "-"} ·{" "}
+                          {formatNumber(unit.lot_area_sqm)} sqm
+                        </p>
+                      </td>
 
-                    <td className="px-4 py-3 text-slate-600">
-                      {unit.project_name}
-                    </td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {unit.project_name}
+                      </td>
 
-                    <td className="px-4 py-3 font-semibold text-slate-900">
-                      {formatMoney(unit.total_contract_price)}
-                    </td>
+                      <td className="px-4 py-3 font-semibold text-slate-900">
+                        {formatMoney(unit.total_contract_price)}
+                      </td>
 
-                    <td className="px-4 py-3 text-slate-600">
-                      {formatMoney(unit.paid_amount)}
-                    </td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {formatMoney(unit.paid_amount)}
+                      </td>
 
-                    <td className="px-4 py-3 text-slate-600">
-                      {formatMoney(unit.balance)}
-                    </td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {formatMoney(unit.balance)}
+                      </td>
 
-                    <td className="px-4 py-3 text-slate-600">
-                      {formatNumber(unit.payment_percentage || 0)}%
-                    </td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {formatNumber(unit.payment_percentage || 0)}%
+                      </td>
 
-                    <td className="px-4 py-3">
-                      <p className="font-semibold text-slate-900">
-                        {unit.seller_name || "-"}
-                      </p>
-                      <p className="text-xs text-slate-500">
-                        {unit.seller_role ? formatText(unit.seller_role) : "-"}
-                      </p>
-                    </td>
+                      <td className="px-4 py-3">
+                        <p className="font-semibold text-slate-900">
+                          {unit.seller_name || "-"}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          {unit.seller_role
+                            ? formatText(unit.seller_role)
+                            : "-"}
+                        </p>
+                      </td>
 
-                    <td className="px-4 py-3 text-slate-600">
-                      {formatText(unit.sale_type || "distributed")}
-                    </td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {formatText(unit.sale_type || "distributed")}
+                      </td>
 
-                    <td className="px-4 py-3 text-slate-600">
-                      <p>{formatText(unit.buyer_type || "single")}</p>
-                      {unit.buyer_type !== "single" && unit.co_buyer_name ? (
-                        <p className="text-xs text-slate-500">{unit.co_buyer_name}</p>
-                      ) : null}
-                    </td>
+                      <td className="px-4 py-3 text-slate-600">
+                        <p>{formatText(unit.buyer_type || "single")}</p>
+                        {unit.buyer_type !== "single" && unit.co_buyer_name ? (
+                          <p className="text-xs text-slate-500">
+                            {unit.co_buyer_name}
+                          </p>
+                        ) : null}
+                      </td>
 
-                    <td className="px-4 py-3 text-slate-600">
-                      {formatDate(unit.starting_date)}
-                    </td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {formatDate(unit.starting_date)}
+                      </td>
 
-                    <td className="px-4 py-3 text-slate-600">
-                      {formatDate(unit.due_date)}
-                    </td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {formatDate(unit.due_date)}
+                      </td>
 
-                    <td className="px-4 py-3 text-slate-600">
-                      {unit.mode_of_payment === "cash"
-                        ? "Cash"
-                        : unit.payment_terms_months
-                          ? `${formatNumber(unit.payment_terms_months)} months`
-                          : "-"}
-                    </td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {unit.mode_of_payment === "cash"
+                          ? "Cash"
+                          : unit.payment_terms_months
+                            ? `${formatNumber(unit.payment_terms_months)} months`
+                            : "-"}
+                      </td>
 
-                    <td className="px-4 py-3 text-slate-600">
-                      {unit.mode_of_payment === "cash"
-                        ? "-"
-                        : unit.monthly_amortization !== null &&
-                            unit.monthly_amortization !== undefined
-                          ? formatMoney(unit.monthly_amortization)
-                          : "-"}
-                    </td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {unit.mode_of_payment === "cash"
+                          ? "-"
+                          : unit.monthly_amortization !== null &&
+                              unit.monthly_amortization !== undefined
+                            ? formatMoney(unit.monthly_amortization)
+                            : "-"}
+                      </td>
 
-                    <td className="min-w-56 px-4 py-3">
-                      <button
-                        className="w-full rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-left shadow-sm transition hover:border-blue-300 hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                        onClick={() => openDocumentsModal(unit)}
-                        type="button"
-                      >
-                        <span className="flex items-start gap-2">
-                          <FiFileText className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" />
-                          <span className="min-w-0">
-                            <span className="block text-sm font-bold text-blue-700">
-                              Open Checklist
-                            </span>
-                            <span className="mt-0.5 block text-xs font-semibold text-slate-700">
-                              {documentSummary.progressLabel}
-                            </span>
-                            <span className="mt-0.5 block text-xs text-slate-500">
-                              {documentSummary.requiredLabel}
-                            </span>
-                            <span className="mt-2 block">
-                              <StatusBadge
-                                status={unit.document_status || "incomplete"}
-                              />
+                      <td className="min-w-56 px-4 py-3">
+                        <button
+                          className="w-full rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-left shadow-sm transition hover:border-blue-300 hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                          onClick={() => openDocumentsModal(unit)}
+                          type="button"
+                        >
+                          <span className="flex items-start gap-2">
+                            <FiFileText className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" />
+                            <span className="min-w-0">
+                              <span className="block text-sm font-bold text-blue-700">
+                                Open Checklist
+                              </span>
+                              <span className="mt-0.5 block text-xs font-semibold text-slate-700">
+                                {documentSummary.progressLabel}
+                              </span>
+                              <span className="mt-0.5 block text-xs text-slate-500">
+                                {documentSummary.requiredLabel}
+                              </span>
+                              <span className="mt-2 block">
+                                <StatusBadge
+                                  status={unit.document_status || "incomplete"}
+                                />
+                              </span>
                             </span>
                           </span>
-                        </span>
-                      </button>
-                    </td>
+                        </button>
+                      </td>
 
-                    <td className="px-4 py-3">
-                      <StatusBadge status={unit.status} />
-                    </td>
+                      <td className="px-4 py-3">
+                        <StatusBadge status={unit.status} />
+                      </td>
 
-                    <td className="px-4 py-3">
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          icon={<FiPrinter />}
-                          onClick={() =>
-                            window.open(
-                              `/client/${clientId}/units/${unit.id}/offer-to-buy/print`,
-                              "_blank",
-                              "noopener,noreferrer"
-                            )
-                          }
-                        >
-                          Offer to Buy
-                        </Button>
-                        <Button
-                          icon={<FiPrinter />}
-                          onClick={() =>
-                            window.open(
-                              `/client/${clientId}/units/${unit.id}/statement-of-account/print`,
-                              "_blank",
-                              "noopener,noreferrer"
-                            )
-                          }
-                        >
-                          SOA
-                        </Button>
-                        <Button
-                          icon={<FiEdit2 />}
-                          onClick={() => openEditUnitModal(unit)}
-                        >
-                          Edit
-                        </Button>
-                        <Button onClick={() => openChangeUnitModal(unit)}>
-                          Change Unit
-                        </Button>
-                        <Button
-                          onClick={() => openCancelUnitModal(unit)}
-                          variant="secondary"
-                        >
-                          Cancel
-                        </Button>
-                        <Button
-                          onClick={() => openDeleteUnitModal(unit)}
-                          variant="danger"
-                        >
-                          Delete
-                        </Button>
-                      </div>
-                    </td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            icon={<FiPrinter />}
+                            onClick={() =>
+                              window.open(
+                                `/client/${clientId}/units/${unit.id}/offer-to-buy/print`,
+                                "_blank",
+                                "noopener,noreferrer",
+                              )
+                            }
+                          >
+                            Offer to Buy
+                          </Button>
+                          <Button
+                            icon={<FiPrinter />}
+                            onClick={() =>
+                              window.open(
+                                `/client/${clientId}/units/${unit.id}/statement-of-account/print`,
+                                "_blank",
+                                "noopener,noreferrer",
+                              )
+                            }
+                          >
+                            SOA
+                          </Button>
+                          <Button
+                            icon={<FiEdit2 />}
+                            onClick={() => openEditUnitModal(unit)}
+                          >
+                            Edit
+                          </Button>
+                          <Button onClick={() => openChangeUnitModal(unit)}>
+                            Change Unit
+                          </Button>
+                          <Button
+                            onClick={() => openCancelUnitModal(unit)}
+                            variant="secondary"
+                          >
+                            Cancel
+                          </Button>
+                          <Button
+                            onClick={() => openDeleteUnitModal(unit)}
+                            variant="danger"
+                          >
+                            Delete
+                          </Button>
+                        </div>
+                      </td>
                     </tr>
-                  )
+                  );
                 })}
               </tbody>
             </table>
@@ -2743,11 +3046,21 @@ const ClientProfile = () => {
       {isReserveOpen ? (
         <Modal
           title="Reserve Listing"
-          onClose={() => setIsReserveOpen(false)}
+          onClose={() => {
+            setIsReserveOpen(false);
+            setReserveFormulaKey("");
+          }}
           size="xl"
           footer={
             <div className="flex justify-end gap-2">
-              <Button onClick={() => setIsReserveOpen(false)}>Cancel</Button>
+              <Button
+                onClick={() => {
+                  setIsReserveOpen(false);
+                  setReserveFormulaKey("");
+                }}
+              >
+                Cancel
+              </Button>
               <Button
                 disabled={reserveMutation.isPending || !reserveData.listing_id}
                 onClick={handleReserveListing}
@@ -2768,14 +3081,15 @@ const ClientProfile = () => {
                 label="Search Available Listing"
                 value={listingSearch}
                 onChange={(e) => {
-                  setListingSearch(e.target.value)
+                  setListingSearch(e.target.value);
                   setReserveData({
                     ...reserveData,
                     listing_id: "",
                     reservation_fee_amount: "",
                     monthly_amortization: "",
-                  })
-                  setReserveValidationMessage("")
+                  });
+                  setReserveValidationMessage("");
+                  setReserveFormulaKey("");
                 }}
                 placeholder="Search unit, project, or lot type"
               />
@@ -2784,14 +3098,16 @@ const ClientProfile = () => {
                 {filteredReserveListings.length > 0 ? (
                   filteredReserveListings.map((listing) => {
                     const isSelected =
-                      Number(reserveData.listing_id) === Number(listing.id)
-                    const label = `${listing.unit_id} - ${listing.project_name} - ${formatMoney(listing.total_contract_price)}`
+                      Number(reserveData.listing_id) === Number(listing.id);
+                    const label = `${listing.unit_id} - ${listing.project_name} - ${formatMoney(listing.total_contract_price)}`;
 
                     return (
                       <button
                         className={[
                           "block w-full border-b border-slate-100 px-3 py-2 text-left text-sm last:border-b-0 hover:bg-slate-50",
-                          isSelected ? "bg-blue-50 text-blue-700" : "text-slate-700",
+                          isSelected
+                            ? "bg-blue-50 text-blue-700"
+                            : "text-slate-700",
                         ].join(" ")}
                         key={listing.id}
                         onClick={() => {
@@ -2799,12 +3115,13 @@ const ClientProfile = () => {
                             ...reserveData,
                             listing_id: listing.id,
                             reservation_fee_amount: String(
-                              Number(listing.reservation_fee || 0)
+                              Number(listing.reservation_fee || 0),
                             ),
                             monthly_amortization: "",
-                          })
-                          setReserveValidationMessage("")
-                          setListingSearch(label)
+                          });
+                          setReserveValidationMessage("");
+                          setReserveFormulaKey("");
+                          setListingSearch(label);
                         }}
                         type="button"
                       >
@@ -2815,7 +3132,7 @@ const ClientProfile = () => {
                           {formatMoney(listing.total_contract_price)}
                         </span>
                       </button>
-                    )
+                    );
                   })
                 ) : (
                   <p className="px-3 py-3 text-sm text-slate-500">
@@ -2828,7 +3145,10 @@ const ClientProfile = () => {
             {selectedListing ? (
               <div className="grid gap-4 rounded-xl border border-slate-200 bg-slate-50 p-4 md:grid-cols-4">
                 <MiniDetail label="Unit ID" value={selectedListing.unit_id} />
-                <MiniDetail label="Project" value={selectedListing.project_name} />
+                <MiniDetail
+                  label="Project"
+                  value={selectedListing.project_name}
+                />
                 <MiniDetail
                   label="Area"
                   value={`${formatNumber(selectedListing.lot_area_sqm)} sqm`}
@@ -2843,6 +3163,7 @@ const ClientProfile = () => {
             <UnitBuyerFields
               buyerType={reserveData.buyer_type}
               coBuyer={reserveData.co_buyer}
+              coBuyerEmployment={reserveData.co_buyer_employment}
               onBuyerTypeChange={(buyerType) => {
                 setReserveData({
                   ...reserveData,
@@ -2852,15 +3173,26 @@ const ClientProfile = () => {
                       ? createBlankCoBuyerData()
                       : {
                           ...reserveData.co_buyer,
-                          buyer_role: buyerType === "spouses" ? "spouse" : "second_buyer",
+                          buyer_role:
+                            buyerType === "spouses" ? "spouse" : "second_buyer",
                         },
-                })
-                setReserveValidationMessage("")
+                  co_buyer_employment:
+                    buyerType === "single"
+                      ? createBlankEmploymentData("co_buyer")
+                      : reserveData.co_buyer_employment,
+                });
+                setReserveValidationMessage("");
               }}
               onCoBuyerChange={(coBuyer) =>
                 setReserveData({
                   ...reserveData,
                   co_buyer: coBuyer,
+                })
+              }
+              onCoBuyerEmploymentChange={(coBuyerEmployment) =>
+                setReserveData({
+                  ...reserveData,
+                  co_buyer_employment: coBuyerEmployment,
                 })
               }
             />
@@ -2888,7 +3220,7 @@ const ClientProfile = () => {
                 label="Mode of Payment"
                 value={reserveData.mode_of_payment}
                 onChange={(e) => {
-                  const paymentMode = e.target.value as "cash" | "installment"
+                  const paymentMode = e.target.value as "cash" | "installment";
 
                   setReserveData({
                     ...reserveData,
@@ -2934,8 +3266,8 @@ const ClientProfile = () => {
                         ? reserveData.interest_rate || "0"
                         : "0",
                     monthly_amortization: "",
-                  })
-                  setReserveValidationMessage("")
+                  });
+                  setReserveValidationMessage("");
                 }}
               >
                 <option value="installment">Installment</option>
@@ -2960,12 +3292,14 @@ const ClientProfile = () => {
                 label="Sale Channel"
                 value={reserveData.sale_type}
                 onChange={(e) => {
-                  const saleType = e.target.value as "distributed" | "direct_to_developer"
+                  const saleType = e.target.value as
+                    | "distributed"
+                    | "direct_to_developer";
 
                   setReserveData({
                     ...reserveData,
                     sale_type: saleType,
-                  })
+                  });
                 }}
               >
                 <option value="distributed">Distributed</option>
@@ -2990,8 +3324,8 @@ const ClientProfile = () => {
                       ...reserveData,
                       reservation_fee_amount: e.target.value,
                       monthly_amortization: "",
-                    })
-                    setReserveValidationMessage("")
+                    });
+                    setReserveValidationMessage("");
                   }}
                 />
 
@@ -3003,8 +3337,8 @@ const ClientProfile = () => {
                     setReserveData({
                       ...reserveData,
                       starting_date: e.target.value,
-                    })
-                    setReserveValidationMessage("")
+                    });
+                    setReserveValidationMessage("");
                   }}
                 />
 
@@ -3016,12 +3350,12 @@ const ClientProfile = () => {
                     setReserveData({
                       ...reserveData,
                       due_date: e.target.value,
-                    })
-                    setReserveValidationMessage("")
+                    });
+                    setReserveValidationMessage("");
                   }}
                 />
 
-            {reserveData.mode_of_payment === "cash" ? (
+                {reserveData.mode_of_payment === "cash" ? (
                   <Input
                     label="Deferred Cash Amount"
                     type="number"
@@ -3033,8 +3367,8 @@ const ClientProfile = () => {
                         ...reserveData,
                         deferred_cash_amount: e.target.value,
                         monthly_amortization: "",
-                      })
-                      setReserveValidationMessage("")
+                      });
+                      setReserveValidationMessage("");
                     }}
                   />
                 ) : null}
@@ -3048,10 +3382,13 @@ const ClientProfile = () => {
                         setReserveData({
                           ...reserveData,
                           downpayment_percent_option: e.target.value,
-                          downpayment_percent: e.target.value === "custom" ? reserveData.downpayment_percent_custom : e.target.value,
+                          downpayment_percent:
+                            e.target.value === "custom"
+                              ? reserveData.downpayment_percent_custom
+                              : e.target.value,
                           monthly_amortization: "",
-                        })
-                        setReserveValidationMessage("")
+                        });
+                        setReserveValidationMessage("");
                       }}
                     >
                       <option value="15">15%</option>
@@ -3072,8 +3409,8 @@ const ClientProfile = () => {
                             downpayment_percent_custom: e.target.value,
                             downpayment_percent: e.target.value,
                             monthly_amortization: "",
-                          })
-                          setReserveValidationMessage("")
+                          });
+                          setReserveValidationMessage("");
                         }}
                       />
                     ) : null}
@@ -3082,19 +3419,27 @@ const ClientProfile = () => {
                       label="Downpayment Terms"
                       value={reserveData.downpayment_gives_option}
                       onChange={(e) => {
-                        const nextGives = e.target.value
-                        const nextActualGives = nextGives === "custom" ? reserveData.downpayment_gives_custom : nextGives
+                        const nextGives = e.target.value;
+                        const nextActualGives =
+                          nextGives === "custom"
+                            ? reserveData.downpayment_gives_custom
+                            : nextGives;
                         setReserveData({
                           ...reserveData,
                           downpayment_gives_option: nextGives,
                           downpayment_gives: nextActualGives,
                           downpayment_discount_rate_option:
-                            nextGives === "1" ? reserveData.downpayment_discount_rate_option || "7.5" : "0",
+                            nextGives === "1"
+                              ? reserveData.downpayment_discount_rate_option ||
+                                "7.5"
+                              : "0",
                           downpayment_discount_rate:
-                            nextGives === "1" ? reserveData.downpayment_discount_rate || "7.5" : "0",
+                            nextGives === "1"
+                              ? reserveData.downpayment_discount_rate || "7.5"
+                              : "0",
                           monthly_amortization: "",
-                        })
-                        setReserveValidationMessage("")
+                        });
+                        setReserveValidationMessage("");
                       }}
                     >
                       <option value="1">Spot Cash</option>
@@ -3116,8 +3461,8 @@ const ClientProfile = () => {
                             downpayment_gives_custom: e.target.value,
                             downpayment_gives: e.target.value,
                             monthly_amortization: "",
-                          })
-                          setReserveValidationMessage("")
+                          });
+                          setReserveValidationMessage("");
                         }}
                       />
                     ) : null}
@@ -3130,10 +3475,13 @@ const ClientProfile = () => {
                           setReserveData({
                             ...reserveData,
                             downpayment_discount_rate_option: e.target.value,
-                            downpayment_discount_rate: e.target.value === "custom" ? reserveData.downpayment_discount_rate_custom : e.target.value,
+                            downpayment_discount_rate:
+                              e.target.value === "custom"
+                                ? reserveData.downpayment_discount_rate_custom
+                                : e.target.value,
                             monthly_amortization: "",
-                          })
-                          setReserveValidationMessage("")
+                          });
+                          setReserveValidationMessage("");
                         }}
                       >
                         <option value="2.5">2.5%</option>
@@ -3144,7 +3492,9 @@ const ClientProfile = () => {
                       </Select>
                     ) : null}
 
-                    {reserveIsSpotDownpayment && reserveData.downpayment_discount_rate_option === "custom" ? (
+                    {reserveIsSpotDownpayment &&
+                    reserveData.downpayment_discount_rate_option ===
+                      "custom" ? (
                       <Input
                         label="Custom DP Discount %"
                         type="number"
@@ -3157,8 +3507,8 @@ const ClientProfile = () => {
                             downpayment_discount_rate_custom: e.target.value,
                             downpayment_discount_rate: e.target.value,
                             monthly_amortization: "",
-                          })
-                          setReserveValidationMessage("")
+                          });
+                          setReserveValidationMessage("");
                         }}
                       />
                     ) : null}
@@ -3170,10 +3520,13 @@ const ClientProfile = () => {
                         setReserveData({
                           ...reserveData,
                           payment_terms_months_option: e.target.value,
-                          payment_terms_months: e.target.value === "custom" ? "" : Number(e.target.value),
+                          payment_terms_months:
+                            e.target.value === "custom"
+                              ? ""
+                              : Number(e.target.value),
                           monthly_amortization: "",
-                        })
-                        setReserveValidationMessage("")
+                        });
+                        setReserveValidationMessage("");
                       }}
                     >
                       <option value={12}>12 months</option>
@@ -3197,8 +3550,8 @@ const ClientProfile = () => {
                             payment_terms_months_custom: e.target.value,
                             payment_terms_months: Number(e.target.value),
                             monthly_amortization: "",
-                          })
-                          setReserveValidationMessage("")
+                          });
+                          setReserveValidationMessage("");
                         }}
                       />
                     ) : null}
@@ -3214,8 +3567,8 @@ const ClientProfile = () => {
                           ...reserveData,
                           interest_rate: e.target.value,
                           monthly_amortization: "",
-                        })
-                        setReserveValidationMessage("")
+                        });
+                        setReserveValidationMessage("");
                       }}
                     />
 
@@ -3229,8 +3582,8 @@ const ClientProfile = () => {
                         setReserveData({
                           ...reserveData,
                           monthly_amortization: e.target.value,
-                        })
-                        setReserveValidationMessage("")
+                        });
+                        setReserveValidationMessage("");
                       }}
                     />
                   </>
@@ -3238,55 +3591,54 @@ const ClientProfile = () => {
               </div>
 
               {selectedListing ? (
-                <div className="mt-4 grid gap-3 rounded-lg border border-slate-100 bg-slate-50 p-3 md:grid-cols-3">
-                  <MiniDetail
-                    label="Offer Purchase Price"
-                    value={formatMoney(reservePurchasePrice)}
-                  />
-                  <MiniDetail
-                    label="DP Gross"
-                    value={
-                      reserveData.mode_of_payment === "installment"
-                        ? formatMoney(reserveDownpaymentGross)
-                        : "-"
-                    }
-                  />
-                  <MiniDetail
-                    label="DP Discount"
-                    value={
-                      reserveIsSpotDownpayment
-                        ? formatMoney(reserveDownpaymentDiscountAmount)
-                        : "-"
-                    }
-                  />
-                  <MiniDetail
-                    label="Net DP Payable"
-                    value={
-                      reserveData.mode_of_payment === "installment"
-                        ? formatMoney(reserveDownpayment)
-                        : "-"
-                    }
-                  />
-                  <MiniDetail
-                    label="Per Give"
-                    value={
-                      reserveData.mode_of_payment === "installment"
-                        ? formatMoney(reserveDownpaymentPerGive)
-                        : "-"
-                    }
-                  />
-                  <MiniDetail
-                    label="Offer Balance"
-                    value={formatMoney(reserveOfferBalance)}
-                  />
-                  <MiniDetail
-                    label="Monthly Preview"
-                    value={
-                      reserveData.mode_of_payment === "installment"
-                        ? formatMoney(computedMonthlyAmortization)
-                        : "-"
-                    }
-                  />
+                <div className="mt-4 rounded-lg border border-slate-100 bg-slate-50 p-3">
+                  <div className="grid gap-3 md:grid-cols-3">
+                    {reserveFormulaRows.map((row) => {
+                      const isSelected = reserveFormulaKey === row.key;
+
+                      return (
+                        <button
+                          className={[
+                            "rounded-lg border bg-white p-3 text-left transition hover:border-blue-300 hover:bg-blue-50",
+                            isSelected
+                              ? "border-blue-400 bg-blue-50"
+                              : "border-slate-200",
+                          ].join(" ")}
+                          key={row.key}
+                          onClick={() =>
+                            setReserveFormulaKey(isSelected ? "" : row.key)
+                          }
+                          type="button"
+                        >
+                          <p className="text-xs font-semibold uppercase text-slate-400">
+                            {row.label}
+                          </p>
+                          <p className="mt-1 text-sm font-semibold text-slate-900">
+                            {row.value}
+                          </p>
+                          <p className="mt-1 text-xs text-blue-600">
+                            Click to show formula
+                          </p>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {selectedReserveFormula ? (
+                    <div className="mt-3 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-slate-700">
+                      <p className="font-bold text-slate-900">
+                        {selectedReserveFormula.label} Formula
+                      </p>
+                      <p className="mt-1 font-mono text-xs text-slate-700">
+                        {selectedReserveFormula.formula}
+                      </p>
+                      {selectedReserveFormula.note ? (
+                        <p className="mt-2 text-xs text-slate-600">
+                          {selectedReserveFormula.note}
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
             </div>
@@ -3297,7 +3649,10 @@ const ClientProfile = () => {
                   Main Seller Commission
                 </h3>
                 <div className="mt-3 grid gap-4 md:grid-cols-3">
-                  <MiniDetail label="Seller" value={selectedMainSeller.full_name} />
+                  <MiniDetail
+                    label="Seller"
+                    value={selectedMainSeller.full_name}
+                  />
                   <MiniDetail
                     label="Role"
                     value={formatText(selectedMainSeller.seller_role)}
@@ -3305,7 +3660,8 @@ const ClientProfile = () => {
                   <MiniDetail
                     label="Rate"
                     value={
-                      selectedMainSeller.personal_commission_rate || selectedMainSeller.commission_rate
+                      selectedMainSeller.personal_commission_rate ||
+                      selectedMainSeller.commission_rate
                         ? `${formatNumber(selectedMainSeller.personal_commission_rate || selectedMainSeller.commission_rate)}%`
                         : "-"
                     }
@@ -3321,7 +3677,9 @@ const ClientProfile = () => {
                 </h3>
 
                 <p className="mt-1 text-xs text-slate-600">
-                  Distributed sales now use the seller hierarchy and saved pool/split rates. Manual override seller/rate is no longer used here.
+                  Distributed sales now use the seller hierarchy and saved
+                  pool/split rates. Manual override seller/rate is no longer
+                  used here.
                 </p>
 
                 {reserveCommissionPreview.length > 0 ? (
@@ -3338,20 +3696,20 @@ const ClientProfile = () => {
                           {row.seller.full_name}
                         </p>
                         <p className="text-xs text-slate-500">
-                          {formatText(row.seller.seller_role)} • {formatNumber(row.rate)}%
+                          {formatText(row.seller.seller_role)} •{" "}
+                          {formatNumber(row.rate)}%
                         </p>
                       </div>
                     ))}
                   </div>
                 ) : (
                   <p className="mt-3 text-sm text-amber-700">
-                    Select a seller with saved commission rates to preview the automatic split.
+                    Select a seller with saved commission rates to preview the
+                    automatic split.
                   </p>
                 )}
               </div>
             ) : null}
-
-
 
             {reserveData.sale_type === "direct_to_developer" ? (
               <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-4">
@@ -3359,7 +3717,9 @@ const ClientProfile = () => {
                   Direct to Developer Commission
                 </h3>
                 <p className="mt-1 text-sm text-slate-600">
-                  Only the selected agent/seller receives commission. Manager, broker, and BNM override releases will not be generated for this sale.
+                  Only the selected agent/seller receives commission. Manager,
+                  broker, and BNM override releases will not be generated for
+                  this sale.
                 </p>
               </div>
             ) : null}
@@ -3503,12 +3863,14 @@ const ClientProfile = () => {
               label="Sale Channel"
               value={editUnitData.sale_type}
               onChange={(e) => {
-                const saleType = e.target.value as "distributed" | "direct_to_developer"
+                const saleType = e.target.value as
+                  | "distributed"
+                  | "direct_to_developer";
 
                 setEditUnitData({
                   ...editUnitData,
                   sale_type: saleType,
-                })
+                });
               }}
             >
               <option value="distributed">Distributed</option>
@@ -3519,6 +3881,7 @@ const ClientProfile = () => {
               <UnitBuyerFields
                 buyerType={editUnitData.buyer_type}
                 coBuyer={editUnitData.co_buyer}
+                coBuyerEmployment={editUnitData.co_buyer_employment}
                 onBuyerTypeChange={(buyerType) =>
                   setEditUnitData({
                     ...editUnitData,
@@ -3528,14 +3891,27 @@ const ClientProfile = () => {
                         ? createBlankCoBuyerData()
                         : {
                             ...editUnitData.co_buyer,
-                            buyer_role: buyerType === "spouses" ? "spouse" : "second_buyer",
+                            buyer_role:
+                              buyerType === "spouses"
+                                ? "spouse"
+                                : "second_buyer",
                           },
+                    co_buyer_employment:
+                      buyerType === "single"
+                        ? createBlankEmploymentData("co_buyer")
+                        : editUnitData.co_buyer_employment,
                   })
                 }
                 onCoBuyerChange={(coBuyer) =>
                   setEditUnitData({
                     ...editUnitData,
                     co_buyer: coBuyer,
+                  })
+                }
+                onCoBuyerEmploymentChange={(coBuyerEmployment) =>
+                  setEditUnitData({
+                    ...editUnitData,
+                    co_buyer_employment: coBuyerEmployment,
                   })
                 }
               />
@@ -3563,19 +3939,24 @@ const ClientProfile = () => {
               </h3>
 
               <p className="mt-1 text-xs text-slate-600">
-                Recalculate only when seller/rates were corrected. This cancels old pending commission records and creates new ones using the current saved rates. Released commissions and cash-advance-linked commissions are locked.
+                Recalculate only when seller/rates were corrected. This cancels
+                old pending commission records and creates new ones using the
+                current saved rates. Released commissions and
+                cash-advance-linked commissions are locked.
               </p>
             </div>
           ) : null}
 
           {editUnitData.sale_type === "direct_to_developer" ? (
             <div className="mt-4 rounded-xl border border-emerald-100 bg-emerald-50 p-4 text-sm text-slate-600">
-              Direct-to-developer sales generate only the selected seller commission. No hierarchy override milestones will be created.
+              Direct-to-developer sales generate only the selected seller
+              commission. No hierarchy override milestones will be created.
             </div>
           ) : null}
 
           <p className="mt-3 text-sm text-slate-500">
-            Seller/rate changes are blocked after a commission release is paid or when this unit has pending/approved/deducted cash advances.
+            Seller/rate changes are blocked after a commission release is paid
+            or when this unit has pending/approved/deducted cash advances.
           </p>
         </Modal>
       ) : null}
@@ -3589,7 +3970,10 @@ const ClientProfile = () => {
             <div className="flex justify-end gap-2">
               <Button onClick={() => setChangeUnit(null)}>Cancel</Button>
               <Button
-                disabled={changeUnitMutation.isPending || changeUnitData.new_listing_id === ""}
+                disabled={
+                  changeUnitMutation.isPending ||
+                  changeUnitData.new_listing_id === ""
+                }
                 onClick={handleChangeUnit}
                 variant="primary"
               >
@@ -3606,7 +3990,10 @@ const ClientProfile = () => {
 
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <MiniDetail label="Current Unit" value={changeUnit.unit_id} />
-              <MiniDetail label="Current Project" value={changeUnit.project_name} />
+              <MiniDetail
+                label="Current Project"
+                value={changeUnit.project_name}
+              />
             </div>
 
             <div className="space-y-2">
@@ -3614,11 +4001,11 @@ const ClientProfile = () => {
                 label="New Available Listing"
                 value={changeListingSearch}
                 onChange={(e) => {
-                  setChangeListingSearch(e.target.value)
+                  setChangeListingSearch(e.target.value);
                   setChangeUnitData({
                     ...changeUnitData,
                     new_listing_id: "",
-                  })
+                  });
                 }}
                 placeholder="Search unit, project, or lot type"
               />
@@ -3627,22 +4014,25 @@ const ClientProfile = () => {
                 {filteredChangeListings.length > 0 ? (
                   filteredChangeListings.map((listing) => {
                     const isSelected =
-                      Number(changeUnitData.new_listing_id) === Number(listing.id)
-                    const label = `${listing.unit_id} - ${listing.project_name} - ${formatMoney(listing.total_contract_price)}`
+                      Number(changeUnitData.new_listing_id) ===
+                      Number(listing.id);
+                    const label = `${listing.unit_id} - ${listing.project_name} - ${formatMoney(listing.total_contract_price)}`;
 
                     return (
                       <button
                         className={[
                           "block w-full border-b border-slate-100 px-3 py-2 text-left text-sm last:border-b-0 hover:bg-slate-50",
-                          isSelected ? "bg-blue-50 text-blue-700" : "text-slate-700",
+                          isSelected
+                            ? "bg-blue-50 text-blue-700"
+                            : "text-slate-700",
                         ].join(" ")}
                         key={listing.id}
                         onClick={() => {
                           setChangeUnitData({
                             ...changeUnitData,
                             new_listing_id: listing.id,
-                          })
-                          setChangeListingSearch(label)
+                          });
+                          setChangeListingSearch(label);
                         }}
                         type="button"
                       >
@@ -3653,7 +4043,7 @@ const ClientProfile = () => {
                           {formatMoney(listing.total_contract_price)}
                         </span>
                       </button>
-                    )
+                    );
                   })
                 ) : (
                   <p className="px-3 py-3 text-sm text-slate-500">
@@ -3816,7 +4206,9 @@ const ClientProfile = () => {
                 <Button
                   icon={<FiDownload />}
                   disabled={downloadDocumentsMutation.isPending}
-                  onClick={() => downloadDocumentsMutation.mutate(selectedDocumentsUnit)}
+                  onClick={() =>
+                    downloadDocumentsMutation.mutate(selectedDocumentsUnit)
+                  }
                 >
                   Download Docs Images
                 </Button>
@@ -3929,101 +4321,111 @@ const ClientProfile = () => {
                       const submittedDate =
                         document.status === "not_submitted"
                           ? null
-                          : document.reviewed_at || document.updated_at
+                          : document.reviewed_at || document.updated_at;
 
                       return (
-                        <tr key={document.id} className="border-b border-slate-100">
-                        <td className="px-4 py-3">
-                          <p className="font-semibold text-slate-900">
-                            {document.name}
-                          </p>
-                          <p className="text-xs text-slate-500">
-                            {document.description || "-"}
-                          </p>
-                        </td>
+                        <tr
+                          key={document.id}
+                          className="border-b border-slate-100"
+                        >
+                          <td className="px-4 py-3">
+                            <p className="font-semibold text-slate-900">
+                              {document.name}
+                            </p>
+                            <p className="text-xs text-slate-500">
+                              {document.description || "-"}
+                            </p>
+                          </td>
 
-                        <td className="px-4 py-3">
-                          <span
-                            className={[
-                              "inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold",
-                              isRequired(document.is_required)
-                                ? "border-blue-200 bg-blue-50 text-blue-700"
-                                : "border-slate-200 bg-slate-50 text-slate-600",
-                            ].join(" ")}
-                          >
-                            {isRequired(document.is_required)
-                              ? "Required"
-                              : "Optional"}
-                          </span>
-                        </td>
-
-                        <td className="px-4 py-3 text-slate-600">
-                          {isRequired(document.can_reuse) ? "Yes" : "No"}
-                        </td>
-
-                        <td className="px-4 py-3">
-                          <StatusBadge status={document.status} />
-                        </td>
-
-                        <td className="px-4 py-3 text-slate-600">
-                          {document.file_name ? (
-                            <a
-                              className="font-semibold text-blue-600 hover:text-blue-700"
-                              href={`${API_URL}/client-documents/${document.id}/file`}
-                              target="_blank"
-                              rel="noreferrer"
+                          <td className="px-4 py-3">
+                            <span
+                              className={[
+                                "inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold",
+                                isRequired(document.is_required)
+                                  ? "border-blue-200 bg-blue-50 text-blue-700"
+                                  : "border-slate-200 bg-slate-50 text-slate-600",
+                              ].join(" ")}
                             >
-                              {document.file_name}
-                            </a>
-                          ) : (
-                            "-"
-                          )}
-                        </td>
+                              {isRequired(document.is_required)
+                                ? "Required"
+                                : "Optional"}
+                            </span>
+                          </td>
 
-                        <td className="px-4 py-3 text-slate-600">
-                          {submittedDate ? formatDate(submittedDate) : "-"}
-                        </td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {isRequired(document.can_reuse) ? "Yes" : "No"}
+                          </td>
 
-                        <td className="px-4 py-3">
-                          <div className="flex min-w-[220px] flex-col gap-2">
-                          <Select
-                            aria-label={`Update ${document.name} status`}
-                            disabled={updateDocumentMutation.isPending}
-                            value={document.status}
-                            onChange={(e) =>
-                              handleDocumentStatusChange(
-                                document,
-                                e.target.value
-                              )
-                            }
-                          >
-                            {getDocumentStatusOptions(document.status).map((option) => (
-                              <option key={option.value} value={option.value}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </Select>
+                          <td className="px-4 py-3">
+                            <StatusBadge status={document.status} />
+                          </td>
 
-                          <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-blue-300 hover:text-blue-700">
-                            <FiUpload />
-                            {uploadDocumentMutation.isPending ? "Uploading..." : "Upload"}
-                            <input
-                              className="hidden"
-                              type="file"
-                              accept="image/jpeg,image/png,image/webp,application/pdf"
-                              disabled={uploadDocumentMutation.isPending}
-                              onChange={(event) =>
-                                handleDocumentFileChange(
-                                  document,
-                                  event.target.files?.[0] || null
-                                )
-                              }
-                            />
-                          </label>
-                          </div>
-                        </td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {document.file_name ? (
+                              <a
+                                className="font-semibold text-blue-600 hover:text-blue-700"
+                                href={`${API_URL}/client-documents/${document.id}/file`}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                {document.file_name}
+                              </a>
+                            ) : (
+                              "-"
+                            )}
+                          </td>
+
+                          <td className="px-4 py-3 text-slate-600">
+                            {submittedDate ? formatDate(submittedDate) : "-"}
+                          </td>
+
+                          <td className="px-4 py-3">
+                            <div className="flex min-w-[220px] flex-col gap-2">
+                              <Select
+                                aria-label={`Update ${document.name} status`}
+                                disabled={updateDocumentMutation.isPending}
+                                value={document.status}
+                                onChange={(e) =>
+                                  handleDocumentStatusChange(
+                                    document,
+                                    e.target.value,
+                                  )
+                                }
+                              >
+                                {getDocumentStatusOptions(document.status).map(
+                                  (option) => (
+                                    <option
+                                      key={option.value}
+                                      value={option.value}
+                                    >
+                                      {option.label}
+                                    </option>
+                                  ),
+                                )}
+                              </Select>
+
+                              <label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-blue-300 hover:text-blue-700">
+                                <FiUpload />
+                                {uploadDocumentMutation.isPending
+                                  ? "Uploading..."
+                                  : "Upload"}
+                                <input
+                                  className="hidden"
+                                  type="file"
+                                  accept="image/jpeg,image/png,image/webp,application/pdf"
+                                  disabled={uploadDocumentMutation.isPending}
+                                  onChange={(event) =>
+                                    handleDocumentFileChange(
+                                      document,
+                                      event.target.files?.[0] || null,
+                                    )
+                                  }
+                                />
+                              </label>
+                            </div>
+                          </td>
                         </tr>
-                      )
+                      );
                     })}
                   </tbody>
                 </table>
@@ -4033,23 +4435,27 @@ const ClientProfile = () => {
         </Modal>
       ) : null}
     </div>
-  )
-}
-
+  );
+};
 
 const UnitBuyerFields = ({
   buyerType,
   coBuyer,
+  coBuyerEmployment,
   onBuyerTypeChange,
   onCoBuyerChange,
+  onCoBuyerEmploymentChange,
 }: {
-  buyerType: BuyerType
-  coBuyer: CoBuyerFormData
-  onBuyerTypeChange: (buyerType: BuyerType) => void
-  onCoBuyerChange: (coBuyer: CoBuyerFormData) => void
+  buyerType: BuyerType;
+  coBuyer: CoBuyerFormData;
+  coBuyerEmployment: EmploymentFormData;
+  onBuyerTypeChange: (buyerType: BuyerType) => void;
+  onCoBuyerChange: (coBuyer: CoBuyerFormData) => void;
+  onCoBuyerEmploymentChange: (employmentData: EmploymentFormData) => void;
 }) => {
-  const showCoBuyer = buyerType !== "single"
-  const sectionTitle = buyerType === "spouses" ? "Spouse Details" : "Second Buyer Details"
+  const showCoBuyer = buyerType !== "single";
+  const sectionTitle =
+    buyerType === "spouses" ? "Spouse Details" : "Second Buyer Details";
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -4111,7 +4517,10 @@ const UnitBuyerFields = ({
               }
             />
 
-            <MiniDetail label="Computed Age" value={calculateAge(coBuyer.birth_date)} />
+            <MiniDetail
+              label="Computed Age"
+              value={calculateAge(coBuyer.birth_date)}
+            />
 
             <Input
               label="Place of Birth"
@@ -4260,24 +4669,39 @@ const UnitBuyerFields = ({
               }
             />
           </div>
+
+          <div className="mt-4">
+            <EmploymentFields
+              data={coBuyerEmployment}
+              onChange={(employmentData) =>
+                onCoBuyerEmploymentChange({
+                  ...employmentData,
+                  person_type: "co_buyer",
+                  client_buyer_id: coBuyerEmployment.client_buyer_id || null,
+                })
+              }
+              title={`${sectionTitle} — Work / Business Information`}
+            />
+          </div>
         </div>
       ) : (
         <p className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500">
-          Single buyer selected. No spouse or second buyer details needed for this unit.
+          Single buyer selected. No spouse or second buyer details needed for
+          this unit.
         </p>
       )}
     </div>
-  )
-}
+  );
+};
 
 const EmploymentFields = ({
   data,
   onChange,
   title,
 }: {
-  data: EmploymentFormData
-  onChange: (data: EmploymentFormData) => void
-  title: string
+  data: EmploymentFormData;
+  onChange: (data: EmploymentFormData) => void;
+  title: string;
 }) => {
   return (
     <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
@@ -4385,15 +4809,15 @@ const EmploymentFields = ({
         </div>
       </div>
     </div>
-  )
-}
+  );
+};
 
 const Detail = ({
   label,
   value,
 }: {
-  label: string
-  value: string | number | null | undefined
+  label: string;
+  value: string | number | null | undefined;
 }) => {
   return (
     <div>
@@ -4404,15 +4828,15 @@ const Detail = ({
         {value === null || value === undefined || value === "" ? "-" : value}
       </p>
     </div>
-  )
-}
+  );
+};
 
 const MiniDetail = ({
   label,
   value,
 }: {
-  label: string
-  value: string | number | null | undefined
+  label: string;
+  value: string | number | null | undefined;
 }) => {
   return (
     <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
@@ -4421,7 +4845,7 @@ const MiniDetail = ({
         {value === null || value === undefined || value === "" ? "-" : value}
       </p>
     </div>
-  )
-}
+  );
+};
 
-export default ClientProfile
+export default ClientProfile;

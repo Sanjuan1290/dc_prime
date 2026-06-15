@@ -118,12 +118,29 @@ const fetchPrintData = async (clientUnitId) => {
 
   const [employmentDetails] = await db.query(
     `
-    SELECT *
-    FROM client_employment_details
-    WHERE client_id = ?
-    ORDER BY FIELD(person_type, 'principal', 'co_buyer'), id ASC
+    SELECT ced.*
+    FROM client_employment_details ced
+    LEFT JOIN client_buyers cb ON cb.id = ced.client_buyer_id
+    WHERE ced.client_id = ?
+      AND (
+        ced.person_type = 'principal'
+        OR cb.client_unit_id = ?
+        OR (
+          ced.person_type = 'co_buyer'
+          AND cb.client_unit_id IS NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM client_buyers scoped_buyers
+            WHERE scoped_buyers.client_unit_id = ?
+          )
+        )
+      )
+    ORDER BY
+      FIELD(ced.person_type, 'principal', 'co_buyer'),
+      CASE WHEN cb.client_unit_id = ? THEN 0 ELSE 1 END,
+      ced.id ASC
     `,
-    [unit.client_id]
+    [unit.client_id, clientUnitId, clientUnitId, clientUnitId]
   )
 
   const [payments] = await db.query(

@@ -22,6 +22,15 @@ const allowedBuyerTypes = ['single', 'spouses', 'and_account']
 const allowedBuyerRoles = ['spouse', 'second_buyer']
 const allowedGenders = ['male', 'female', 'other']
 const allowedCivilStatuses = ['single', 'married', 'separated', 'annulled_divorced', 'widower']
+const allowedEmploymentStatuses = [
+  'employed_private',
+  'employed_government',
+  'employed_ngo',
+  'self_employed_business',
+  'self_employed_professional',
+  'ofw_immigrant',
+  'other',
+]
 const allowedPaymentTermsMonths = [12, 18, 20, 36, 60]
 const defaultContractProcessingStatus = 'pending_profile'
 
@@ -32,6 +41,12 @@ const isMissing = (value) => {
 const nullableValue = (value) => {
   if (isMissing(value)) return null
   return value
+}
+
+const nullableNumber = (value) => {
+  if (isMissing(value)) return null
+  const parsedValue = Number(value)
+  return Number.isFinite(parsedValue) ? parsedValue : null
 }
 
 const normalizeMoney = (value) => {
@@ -196,12 +211,41 @@ const normalizeCoBuyerPayload = (coBuyer = {}, buyerType = 'single') => {
   }
 }
 
+const normalizeEmploymentPayload = (employment = {}) => {
+  return {
+    employment_status: nullableEnum(employment.employment_status, allowedEmploymentStatuses),
+    employment_status_other: nullableValue(employment.employment_status_other),
+    employer_business_name: nullableValue(employment.employer_business_name),
+    employer_business_address: nullableValue(employment.employer_business_address),
+    employer_zip_code: nullableValue(employment.employer_zip_code),
+    nature_of_work_business: nullableValue(employment.nature_of_work_business),
+    occupation_position_title: nullableValue(employment.occupation_position_title),
+    monthly_income: nullableNumber(employment.monthly_income),
+  }
+}
+
+const hasEmploymentPayload = (employment) => {
+  if (!employment) return false
+
+  return [
+    employment.employment_status,
+    employment.employment_status_other,
+    employment.employer_business_name,
+    employment.employer_business_address,
+    employment.employer_zip_code,
+    employment.nature_of_work_business,
+    employment.occupation_position_title,
+    employment.monthly_income,
+  ].some((value) => !isMissing(value))
+}
+
 const replaceClientUnitCoBuyer = async ({
   connection,
   clientId,
   clientUnitId,
   buyerType,
   coBuyer,
+  coBuyerEmployment = null,
 }) => {
   await connection.query(
     `DELETE FROM client_buyers WHERE client_id = ? AND client_unit_id = ?`,
@@ -255,7 +299,43 @@ const replaceClientUnitCoBuyer = async ({
     ]
   )
 
-  return result.insertId
+  const clientBuyerId = result.insertId
+
+  if (hasEmploymentPayload(coBuyerEmployment)) {
+    const normalizedEmployment = normalizeEmploymentPayload(coBuyerEmployment)
+
+    await connection.query(
+      `
+      INSERT INTO client_employment_details (
+        client_id,
+        client_buyer_id,
+        person_type,
+        employment_status,
+        employment_status_other,
+        employer_business_name,
+        employer_business_address,
+        employer_zip_code,
+        nature_of_work_business,
+        occupation_position_title,
+        monthly_income
+      ) VALUES (?, ?, 'co_buyer', ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        clientId,
+        clientBuyerId,
+        normalizedEmployment.employment_status,
+        normalizedEmployment.employment_status_other,
+        normalizedEmployment.employer_business_name,
+        normalizedEmployment.employer_business_address,
+        normalizedEmployment.employer_zip_code,
+        normalizedEmployment.nature_of_work_business,
+        normalizedEmployment.occupation_position_title,
+        normalizedEmployment.monthly_income,
+      ]
+    )
+  }
+
+  return clientBuyerId
 }
 
 const getListingPurchasePrice = (listing) => {
@@ -543,6 +623,14 @@ const clientUnitFields = `
   unit_co_buyer.residence_phone_no AS co_buyer_residence_phone_no,
   unit_co_buyer.email AS co_buyer_email,
   unit_co_buyer.tin AS co_buyer_tin,
+  unit_co_buyer_work.employment_status AS co_buyer_employment_status,
+  unit_co_buyer_work.employment_status_other AS co_buyer_employment_status_other,
+  unit_co_buyer_work.employer_business_name AS co_buyer_employer_business_name,
+  unit_co_buyer_work.employer_business_address AS co_buyer_employer_business_address,
+  unit_co_buyer_work.employer_zip_code AS co_buyer_employer_zip_code,
+  unit_co_buyer_work.nature_of_work_business AS co_buyer_nature_of_work_business,
+  unit_co_buyer_work.occupation_position_title AS co_buyer_occupation_position_title,
+  unit_co_buyer_work.monthly_income AS co_buyer_monthly_income,
   cu.due_day,
   CASE
     WHEN cu.due_day IS NULL THEN NULL
@@ -617,6 +705,9 @@ const clientUnitJoins = `
   LEFT JOIN accredited_sellers parent_seller ON parent_seller.id = seller.parent_seller_id
   LEFT JOIN client_buyers unit_co_buyer
     ON unit_co_buyer.client_unit_id = cu.id
+  LEFT JOIN client_employment_details unit_co_buyer_work
+    ON unit_co_buyer_work.client_buyer_id = unit_co_buyer.id
+    AND unit_co_buyer_work.person_type = 'co_buyer'
   LEFT JOIN (
     SELECT
       client_unit_id,
@@ -1112,6 +1203,7 @@ export const reserveListing = async (req, res) => {
     mode_of_payment,
     buyer_type = 'single',
     co_buyer = null,
+    co_buyer_employment = null,
     starting_date,
     due_date,
     reservation_fee_amount,
@@ -1320,6 +1412,7 @@ export const reserveListing = async (req, res) => {
       clientUnitId,
       buyerType: finalBuyerType,
       coBuyer: co_buyer,
+      coBuyerEmployment: co_buyer_employment,
     })
 
     const nextListingStatus = listingStatusFromClientUnitStatus(status)
@@ -1408,6 +1501,7 @@ export const updateClientUnit = async (req, res) => {
     mode_of_payment,
     buyer_type,
     co_buyer = null,
+    co_buyer_employment = null,
     regenerate_commission = false,
     main_commission_rate_override,
     sale_type,
@@ -1555,6 +1649,7 @@ export const updateClientUnit = async (req, res) => {
       clientUnitId: id,
       buyerType: finalBuyerType,
       coBuyer: co_buyer,
+      coBuyerEmployment: co_buyer_employment,
     })
 
     const nextListingStatus = listingStatusFromClientUnitStatus(finalStatus)

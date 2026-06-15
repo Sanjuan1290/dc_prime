@@ -205,44 +205,27 @@ const normalLotTypes = ["inner", "corner", "end"];
 const chartColors = ["#2563eb", "#f59e0b", "#8b5cf6", "#10b981", "#ef4444"];
 
 const formulaTooltips: Record<string, string> = {
-  Installment:
-    "Lot/installment type. Value comes from listing.lot_type.",
-  "Unit ID":
-    "Unit identifier. Value comes from listing.unit_id.",
-  Area:
-    "Area = lot_area_sqm. This is the lot area in square meters.",
+  Installment: "Lot/installment type. Value comes from listing.lot_type.",
+  "Unit ID": "Unit identifier. Value comes from listing.unit_id.",
+  Area: "Area = lot_area_sqm. This is the lot area in square meters.",
   "Price per SQM":
     "Price per SQM = price_per_sqm. This is the selling price per square meter.",
-  "Net Selling Price":
-    "Net Selling Price = Area × Price per SQM.",
-  LMF:
-    "LMF = Legal/Misc Fee rate. LMF Amount = Net Selling Price × LMF%.",
-  TCP:
-    "TCP = Net Selling Price + Legal/Misc Fee Amount.",
-  RS:
-    "RS = Reservation Fee. This is deducted from the 30% downpayment computation.",
-  "30%":
-    "30% Downpayment Balance = (TCP × 30%) - Reservation Fee.",
-  "7.5%":
-    "7.5% Discount = 30% Downpayment Balance × 7.5%.",
-  "SPOT DP":
-    "SPOT DP = 30% Downpayment Balance - 7.5% Discount.",
-  "3 Months":
-    "3 Months = 30% Downpayment Balance ÷ 3.",
-  "75%":
-    "75% Balance = TCP × 75%.",
-  "12 Months":
-    "12 Months = 75% Balance ÷ 12.",
-  "18 Months":
-    "18 Months = 75% Balance ÷ 18.",
-  "20 Months":
-    "20 Months = 75% Balance ÷ 20.",
-  Project:
-    "Project name. Value comes from listing.project_name.",
+  "Net Selling Price": "Net Selling Price = Area × Price per SQM.",
+  LMF: "LMF = Legal/Misc Fee rate. LMF Amount = Net Selling Price × LMF%.",
+  TCP: "TCP = Net Selling Price + Legal/Misc Fee Amount.",
+  RS: "RS = Reservation Fee. This is deducted from the 30% downpayment computation.",
+  "30%": "30% Downpayment Balance = (TCP × 30%) - Reservation Fee.",
+  "7.5%": "7.5% Discount = 30% Downpayment Balance × 7.5%.",
+  "SPOT DP": "SPOT DP = 30% Downpayment Balance - 7.5% Discount.",
+  "3 Months": "3 Months = 30% Downpayment Balance ÷ 3.",
+  "75%": "75% Balance = TCP × 75%.",
+  "12 Months": "12 Months = 75% Balance ÷ 12.",
+  "18 Months": "18 Months = 75% Balance ÷ 18.",
+  "20 Months": "20 Months = 75% Balance ÷ 20.",
+  Project: "Project name. Value comes from listing.project_name.",
   Status:
     "Listing status. Example: available, reserved, active, hold, sold, inactive.",
-  Actions:
-    "Row actions: Details, Edit, Delete.",
+  Actions: "Row actions: Details, Edit, Delete.",
 };
 
 const FormulaHeader = ({ label }: { label: string }) => {
@@ -319,12 +302,15 @@ const updateListingDocumentRequirements = async ({
   listingId: number;
   requirements: ListingDocumentRequirement[];
 }) => {
-  const response = await fetch(`${API_URL}/listings/${listingId}/document-requirements`, {
-    method: "PUT",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ document_requirements: requirements }),
-  });
+  const response = await fetch(
+    `${API_URL}/listings/${listingId}/document-requirements`,
+    {
+      method: "PUT",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ document_requirements: requirements }),
+    },
+  );
 
   if (!response.ok) {
     throw new Error(await getErrorMessage(response));
@@ -334,10 +320,13 @@ const updateListingDocumentRequirements = async ({
 };
 
 const resetListingDocumentRequirements = async (listingId: number) => {
-  const response = await fetch(`${API_URL}/listings/${listingId}/document-requirements/reset`, {
-    method: "POST",
-    credentials: "include",
-  });
+  const response = await fetch(
+    `${API_URL}/listings/${listingId}/document-requirements/reset`,
+    {
+      method: "POST",
+      credentials: "include",
+    },
+  );
 
   if (!response.ok) {
     throw new Error(await getErrorMessage(response));
@@ -480,7 +469,9 @@ const didLmfRateChange = (
 };
 
 const getProjectLocationPrefix = (projects: Project[], projectId: number) => {
-  const project = projects.find((item) => Number(item.id) === Number(projectId));
+  const project = projects.find(
+    (item) => Number(item.id) === Number(projectId),
+  );
   const locationCode = (project?.location_code || "").trim().toUpperCase();
 
   return locationCode ? `${locationCode}-` : "";
@@ -496,7 +487,9 @@ const Listings = () => {
 
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [viewListingId, setViewListingId] = useState<number | null>(null);
-  const [documentListingId, setDocumentListingId] = useState<number | null>(null);
+  const [documentListingId, setDocumentListingId] = useState<number | null>(
+    null,
+  );
   const [editListing, setEditListing] = useState<Listing | null>(null);
   const [listingToDelete, setListingToDelete] = useState<Listing | null>(null);
   const [pendingLmfUpdate, setPendingLmfUpdate] = useState<{
@@ -520,6 +513,8 @@ const Listings = () => {
   const [page, setPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [successMessage, setSuccessMessage] = useState("");
+  const [addFormStatusMessage, setAddFormStatusMessage] = useState("");
+  const [editFormStatusMessage, setEditFormStatusMessage] = useState("");
 
   const {
     data: listings = [],
@@ -562,6 +557,7 @@ const Listings = () => {
       queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
       setIsAddOpen(false);
       resetForm();
+      setAddFormStatusMessage("");
       setSuccessMessage("Listing created successfully");
     },
   });
@@ -587,6 +583,7 @@ const Listings = () => {
 
       setEditListing(null);
       setPendingLmfUpdate(null);
+      setEditFormStatusMessage("");
       setSuccessMessage("Listing updated successfully");
     },
   });
@@ -626,12 +623,16 @@ const Listings = () => {
     setLotTypeMode("inner");
     setCustomLotType("");
     setSuccessMessage("");
+    setAddFormStatusMessage("");
+    createListingMutation.reset();
     setIsAddOpen(true);
   };
 
   const openEditModal = (listing: Listing) => {
     setEditListing(listing);
     setEditFormData(listingToFormData(listing));
+    setEditFormStatusMessage("");
+    updateListingMutation.reset();
 
     const lotTypeState = setupLotTypeState(listing.lot_type);
     setEditLotTypeMode(lotTypeState.mode);
@@ -640,6 +641,8 @@ const Listings = () => {
 
   const handleAddListing = (e: { preventDefault: () => void }) => {
     e.preventDefault();
+
+    setAddFormStatusMessage("Saving listing...");
 
     createListingMutation.mutate({
       ...formData,
@@ -652,6 +655,8 @@ const Listings = () => {
 
     if (!editListing) return;
 
+    setEditFormStatusMessage("Saving listing changes...");
+
     const listingData = {
       ...editFormData,
       lot_type: resolveLotType(editLotTypeMode, editCustomLotType),
@@ -661,6 +666,7 @@ const Listings = () => {
       didLmfRateChange(editListing, listingData) &&
       hasAttachedClientUnit(editListing)
     ) {
+      setEditFormStatusMessage("Review the LMF warning before saving.");
       setPendingLmfUpdate({
         id: editListing.id,
         listingData,
@@ -1027,9 +1033,18 @@ const Listings = () => {
           customLotType={customLotType}
           setCustomLotType={setCustomLotType}
           onSubmit={handleAddListing}
-          onClose={() => setIsAddOpen(false)}
+          onClose={() => {
+            setIsAddOpen(false);
+            setAddFormStatusMessage("");
+          }}
           isPending={createListingMutation.isPending}
           submitLabel="Add Listing"
+          statusMessage={
+            createListingMutation.isPending
+              ? addFormStatusMessage || "Saving listing..."
+              : ""
+          }
+          errorMessage={createListingMutation.error?.message || ""}
           autoPrefixUnitId
         />
       ) : null}
@@ -1037,7 +1052,10 @@ const Listings = () => {
       {listingToDelete ? (
         <Modal onClose={() => setListingToDelete(null)} title="Delete Listing">
           {deleteListingMutation.error ? (
-            <Alert variant="error" title={deleteListingMutation.error.message} />
+            <Alert
+              variant="error"
+              title={deleteListingMutation.error.message}
+            />
           ) : null}
           <ConfirmBox
             message={`Are you sure you want to delete listing ${listingToDelete.unit_id}? This cannot be undone.`}
@@ -1064,11 +1082,22 @@ const Listings = () => {
           onClose={() => {
             setEditListing(null);
             setPendingLmfUpdate(null);
+            setEditFormStatusMessage("");
           }}
           isPending={updateListingMutation.isPending}
           submitLabel="Save Changes"
+          statusMessage={
+            updateListingMutation.isPending
+              ? editFormStatusMessage || "Saving listing changes..."
+              : editFormStatusMessage
+          }
+          errorMessage={updateListingMutation.error?.message || ""}
           onEditDocuments={() => setDocumentListingId(editListing.id)}
-          documentSummaryText={Number(editListing.document_count || 0) > 0 ? `${Number(editListing.document_count || 0)} docs / ${Number(editListing.required_document_count || 0)} required` : "No listing docs yet. Click Edit Documents to load project defaults or add documents."}
+          documentSummaryText={
+            Number(editListing.document_count || 0) > 0
+              ? `${Number(editListing.document_count || 0)} docs / ${Number(editListing.required_document_count || 0)} required`
+              : "No listing docs yet. Click Edit Documents to load project defaults or add documents."
+          }
         />
       ) : null}
 
@@ -1132,6 +1161,8 @@ type ListingFormModalProps = {
   autoPrefixUnitId?: boolean;
   onEditDocuments?: () => void;
   documentSummaryText?: string;
+  statusMessage?: string;
+  errorMessage?: string;
 };
 
 const ListingFormModal = ({
@@ -1150,6 +1181,8 @@ const ListingFormModal = ({
   autoPrefixUnitId = false,
   onEditDocuments,
   documentSummaryText,
+  statusMessage = "",
+  errorMessage = "",
 }: ListingFormModalProps) => {
   const formId = `${title.replaceAll(" ", "-").toLowerCase()}-form`;
   const breakdown = calculateListingBreakdown(formData);
@@ -1186,217 +1219,236 @@ const ListingFormModal = ({
         </div>
       }
     >
-      <form
-        id={formId}
-        onSubmit={onSubmit}
-        className="grid grid-cols-1 gap-4 md:grid-cols-2"
-      >
-        <Select
-          label="Project Name"
-          value={formData.project_id}
-          onChange={(e) => {
-            const nextProjectId = Number(e.target.value);
-            const oldPrefix = getProjectLocationPrefix(
-              projects,
-              formData.project_id,
-            );
-            const nextPrefix = getProjectLocationPrefix(projects, nextProjectId);
-            const currentUnitId = formData.unit_id.trim();
-            const shouldReplacePrefix =
-              autoPrefixUnitId &&
-              (currentUnitId === "" ||
-                (oldPrefix !== "" && currentUnitId === oldPrefix));
-
-            setFormData({
-              ...formData,
-              project_id: nextProjectId,
-              unit_id: shouldReplacePrefix ? nextPrefix : formData.unit_id,
-            });
-          }}
-          required
-        >
-          <option value={0}>Select project</option>
-          {projects.map((project) => (
-            <option key={project.id} value={project.id}>
-              {project.location_code
-                ? `${project.location_code} - ${project.name}`
-                : project.name}
-            </option>
-          ))}
-        </Select>
-
-        <Input
-          label="Cadastral Lot No."
-          value={formData.cadastral_lot_no}
-          onChange={(e) =>
-            setFormData({
-              ...formData,
-              cadastral_lot_no: e.target.value,
-            })
-          }
-        />
-
-        <Input
-          label="Unit ID"
-          value={formData.unit_id}
-          onChange={(e) =>
-            setFormData({
-              ...formData,
-              unit_id: e.target.value,
-            })
-          }
-          required
-        />
-
-        <Select
-          label="Lot Type"
-          value={lotTypeMode}
-          onChange={(e) => {
-            setLotTypeMode(e.target.value);
-
-            if (e.target.value !== "custom") {
-              setFormData({
-                ...formData,
-                lot_type: e.target.value,
-              });
-            }
-          }}
-        >
-          <option value="inner">Inner</option>
-          <option value="corner">Corner</option>
-          <option value="end">End</option>
-          <option value="custom">Custom</option>
-        </Select>
-
-        {lotTypeMode === "custom" ? (
-          <Input
-            label="Custom Lot Type"
-            placeholder="Example: commercial, inner-corner, special lot"
-            value={customLotType}
-            onChange={(e) => setCustomLotType(e.target.value)}
-            required
+      <div className="space-y-4">
+        {statusMessage ? <Alert variant="info" title={statusMessage} /> : null}
+        {errorMessage ? (
+          <Alert
+            variant="error"
+            title="Unable to save listing"
+            message={errorMessage}
           />
         ) : null}
 
-        <Input
-          label="Reservation Fee"
-          type="number"
-          min={0}
-          step="0.01"
-          value={formData.reservation_fee}
-          onChange={(e) =>
-            setFormData({
-              ...formData,
-              reservation_fee: Number(e.target.value),
-            })
-          }
-        />
+        <form
+          id={formId}
+          onSubmit={onSubmit}
+          className="grid grid-cols-1 gap-4 md:grid-cols-2"
+        >
+          <Select
+            label="Project Name"
+            value={formData.project_id}
+            onChange={(e) => {
+              const nextProjectId = Number(e.target.value);
+              const oldPrefix = getProjectLocationPrefix(
+                projects,
+                formData.project_id,
+              );
+              const nextPrefix = getProjectLocationPrefix(
+                projects,
+                nextProjectId,
+              );
+              const currentUnitId = formData.unit_id.trim();
+              const shouldReplacePrefix =
+                autoPrefixUnitId &&
+                (currentUnitId === "" ||
+                  (oldPrefix !== "" && currentUnitId === oldPrefix));
 
-        <Input
-          label="Price / SQM"
-          type="number"
-          min={0}
-          step="0.01"
-          value={formData.price_per_sqm}
-          onChange={(e) =>
-            setFormData({
-              ...formData,
-              price_per_sqm: Number(e.target.value),
-            })
-          }
-        />
+              setFormData({
+                ...formData,
+                project_id: nextProjectId,
+                unit_id: shouldReplacePrefix ? nextPrefix : formData.unit_id,
+              });
+            }}
+            required
+          >
+            <option value={0}>Select project</option>
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>
+                {project.location_code
+                  ? `${project.location_code} - ${project.name}`
+                  : project.name}
+              </option>
+            ))}
+          </Select>
 
-        <Input
-          label="Lot Area SQM"
-          type="number"
-          min={0}
-          step="0.01"
-          value={formData.lot_area_sqm}
-          onChange={(e) =>
-            setFormData({
-              ...formData,
-              lot_area_sqm: Number(e.target.value),
-            })
-          }
-        />
-
-        <div>
           <Input
-            label="Legal / Misc Rate (%)"
-            type="number"
-            min={0}
-            step="0.01"
-            value={formData.legal_misc_rate}
+            label="Cadastral Lot No."
+            value={formData.cadastral_lot_no}
             onChange={(e) =>
               setFormData({
                 ...formData,
-                legal_misc_rate: Number(e.target.value),
+                cadastral_lot_no: e.target.value,
               })
             }
           />
-          <p className="mt-1 text-xs text-slate-500">
-            Enter percentage only. Example: 10 means 10%.
-          </p>
-        </div>
 
-        <Select
-          label="Status"
-          value={formData.status}
-          onChange={(e) =>
-            setFormData({
-              ...formData,
-              status: e.target.value,
-            })
-          }
-        >
-          <option value="available">Available</option>
-          <option value="reserved">Reserved</option>
-          <option value="active">Active</option>
-          <option value="hold">Hold</option>
-          <option value="sold">Sold</option>
-          <option value="inactive">Inactive</option>
-        </Select>
+          <Input
+            label="Unit ID"
+            value={formData.unit_id}
+            onChange={(e) =>
+              setFormData({
+                ...formData,
+                unit_id: e.target.value,
+              })
+            }
+            required
+          />
 
-        {onEditDocuments ? (
-          <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 md:col-span-2">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h3 className="text-sm font-bold text-slate-900">
-                  Listing Document Requirements
-                </h3>
-                <p className="text-xs text-slate-600">
-                  {documentSummaryText || "Open a focused modal to customize this listing's documents."}
-                </p>
-              </div>
-              <Button icon={<FiFileText />} onClick={onEditDocuments} variant="primary">
-                Edit Documents
-              </Button>
-            </div>
+          <Select
+            label="Lot Type"
+            value={lotTypeMode}
+            onChange={(e) => {
+              setLotTypeMode(e.target.value);
+
+              if (e.target.value !== "custom") {
+                setFormData({
+                  ...formData,
+                  lot_type: e.target.value,
+                });
+              }
+            }}
+          >
+            <option value="inner">Inner</option>
+            <option value="corner">Corner</option>
+            <option value="end">End</option>
+            <option value="custom">Custom</option>
+          </Select>
+
+          {lotTypeMode === "custom" ? (
+            <Input
+              label="Custom Lot Type"
+              placeholder="Example: commercial, inner-corner, special lot"
+              value={customLotType}
+              onChange={(e) => setCustomLotType(e.target.value)}
+              required
+            />
+          ) : null}
+
+          <Input
+            label="Reservation Fee"
+            type="number"
+            min={0}
+            step="0.01"
+            value={formData.reservation_fee}
+            onChange={(e) =>
+              setFormData({
+                ...formData,
+                reservation_fee: Number(e.target.value),
+              })
+            }
+          />
+
+          <Input
+            label="Price / SQM"
+            type="number"
+            min={0}
+            step="0.01"
+            value={formData.price_per_sqm}
+            onChange={(e) =>
+              setFormData({
+                ...formData,
+                price_per_sqm: Number(e.target.value),
+              })
+            }
+          />
+
+          <Input
+            label="Lot Area SQM"
+            type="number"
+            min={0}
+            step="0.01"
+            value={formData.lot_area_sqm}
+            onChange={(e) =>
+              setFormData({
+                ...formData,
+                lot_area_sqm: Number(e.target.value),
+              })
+            }
+          />
+
+          <div>
+            <Input
+              label="Legal / Misc Rate (%)"
+              type="number"
+              min={0}
+              step="0.01"
+              value={formData.legal_misc_rate}
+              onChange={(e) =>
+                setFormData({
+                  ...formData,
+                  legal_misc_rate: Number(e.target.value),
+                })
+              }
+            />
+            <p className="mt-1 text-xs text-slate-500">
+              Enter percentage only. Example: 10 means 10%.
+            </p>
           </div>
-        ) : null}
 
-        <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 md:col-span-2">
-          <h3 className="mb-3 text-sm font-bold text-slate-900">
-            Live Price Breakdown
-          </h3>
+          <Select
+            label="Status"
+            value={formData.status}
+            onChange={(e) =>
+              setFormData({
+                ...formData,
+                status: e.target.value,
+              })
+            }
+          >
+            <option value="available">Available</option>
+            <option value="reserved">Reserved</option>
+            <option value="active">Active</option>
+            <option value="hold">Hold</option>
+            <option value="sold">Sold</option>
+            <option value="inactive">Inactive</option>
+          </Select>
 
-          <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {breakdownRows.map(([label, value]) => (
-              <div
-                key={label}
-                className="rounded-lg border border-slate-200 bg-white p-3"
-              >
-                <dt className="text-xs font-semibold uppercase text-slate-500">
-                  {label}
-                </dt>
-                <dd className="mt-1 text-sm font-bold text-slate-900">
-                  {formatMoney(value)}
-                </dd>
+          {onEditDocuments ? (
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 md:col-span-2">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">
+                    Listing Document Requirements
+                  </h3>
+                  <p className="text-xs text-slate-600">
+                    {documentSummaryText ||
+                      "Open a focused modal to customize this listing's documents."}
+                  </p>
+                </div>
+                <Button
+                  icon={<FiFileText />}
+                  onClick={onEditDocuments}
+                  variant="primary"
+                >
+                  Edit Documents
+                </Button>
               </div>
-            ))}
-          </dl>
-        </div>
-      </form>
+            </div>
+          ) : null}
+
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 md:col-span-2">
+            <h3 className="mb-3 text-sm font-bold text-slate-900">
+              Live Price Breakdown
+            </h3>
+
+            <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {breakdownRows.map(([label, value]) => (
+                <div
+                  key={label}
+                  className="rounded-lg border border-slate-200 bg-white p-3"
+                >
+                  <dt className="text-xs font-semibold uppercase text-slate-500">
+                    {label}
+                  </dt>
+                  <dd className="mt-1 text-sm font-bold text-slate-900">
+                    {formatMoney(value)}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        </form>
+      </div>
     </Modal>
   );
 };
@@ -1409,13 +1461,15 @@ type ListingDetailsModalProps = {
 };
 
 const getRequirementsFromDetails = (details?: ListingFullDetails) =>
-  (details?.listingDocumentRequirements || details?.documentRequirements || []).map(
-    (requirement, index) => ({
-      ...requirement,
-      is_required: Boolean(requirement.is_required),
-      sort_order: Number(requirement.sort_order || index + 1),
-    }),
-  );
+  (
+    details?.listingDocumentRequirements ||
+    details?.documentRequirements ||
+    []
+  ).map((requirement, index) => ({
+    ...requirement,
+    is_required: Boolean(requirement.is_required),
+    sort_order: Number(requirement.sort_order || index + 1),
+  }));
 
 const ListingDetailsModal = ({
   details,
@@ -1700,7 +1754,9 @@ const ListingDocumentRequirementsModal = ({
   onClose,
 }: ListingDetailsModalProps) => {
   const queryClient = useQueryClient();
-  const [requirements, setRequirements] = useState<ListingDocumentRequirement[]>([]);
+  const [requirements, setRequirements] = useState<
+    ListingDocumentRequirement[]
+  >([]);
   const [successMessage, setSuccessMessage] = useState("");
   const [documentSearch, setDocumentSearch] = useState("");
 
@@ -1717,7 +1773,9 @@ const ListingDocumentRequirementsModal = ({
     mutationFn: updateListingDocumentRequirements,
     onSuccess: () => {
       if (details?.listing.id) {
-        queryClient.invalidateQueries({ queryKey: ["listing-full-details", details.listing.id] });
+        queryClient.invalidateQueries({
+          queryKey: ["listing-full-details", details.listing.id],
+        });
         queryClient.invalidateQueries({ queryKey: ["listings"] });
       }
       setSuccessMessage("Listing document requirements saved");
@@ -1728,14 +1786,21 @@ const ListingDocumentRequirementsModal = ({
     mutationFn: resetListingDocumentRequirements,
     onSuccess: () => {
       if (details?.listing.id) {
-        queryClient.invalidateQueries({ queryKey: ["listing-full-details", details.listing.id] });
+        queryClient.invalidateQueries({
+          queryKey: ["listing-full-details", details.listing.id],
+        });
         queryClient.invalidateQueries({ queryKey: ["listings"] });
       }
-      setSuccessMessage("Listing document requirements reset to project defaults");
+      setSuccessMessage(
+        "Listing document requirements reset to project defaults",
+      );
     },
   });
 
-  const updateRequirement = (index: number, updates: Partial<ListingDocumentRequirement>) => {
+  const updateRequirement = (
+    index: number,
+    updates: Partial<ListingDocumentRequirement>,
+  ) => {
     setRequirements((current) =>
       current.map((requirement, i) =>
         i === index ? { ...requirement, ...updates } : requirement,
@@ -1748,10 +1813,15 @@ const ListingDocumentRequirementsModal = ({
   };
 
   const addLibraryRequirement = (documentId: string) => {
-    const document = documentLibrary.find((item) => String(item.id) === documentId);
+    const document = documentLibrary.find(
+      (item) => String(item.id) === documentId,
+    );
     if (!document) return;
     setRequirements((current) => {
-      if (current.some((requirement) => requirement.document_id === document.id)) return current;
+      if (
+        current.some((requirement) => requirement.document_id === document.id)
+      )
+        return current;
       return [
         ...current,
         {
@@ -1806,7 +1876,9 @@ const ListingDocumentRequirementsModal = ({
             }}
             variant="primary"
           >
-            {saveRequirementsMutation.isPending ? "Saving..." : "Save Requirements"}
+            {saveRequirementsMutation.isPending
+              ? "Saving..."
+              : "Save Requirements"}
           </Button>
         </div>
       }
@@ -1832,7 +1904,9 @@ const ListingDocumentRequirementsModal = ({
                   {details.listing.project_name} / {details.listing.unit_id}
                 </h3>
                 <p className="text-sm text-slate-500">
-                  Edit only this listing's document requirements. Existing client-unit checklists keep their snapshot unless rebuilt intentionally.
+                  Edit only this listing's document requirements. Existing
+                  client-unit checklists keep their snapshot unless rebuilt
+                  intentionally.
                 </p>
               </div>
               <div className="flex flex-wrap gap-2 text-xs">
@@ -1840,7 +1914,13 @@ const ListingDocumentRequirementsModal = ({
                   {requirements.length} docs
                 </span>
                 <span className="rounded-full bg-emerald-50 px-3 py-1 font-semibold text-emerald-700">
-                  {requirements.filter((item) => Boolean(item.is_required) && item.status !== "inactive").length} required
+                  {
+                    requirements.filter(
+                      (item) =>
+                        Boolean(item.is_required) && item.status !== "inactive",
+                    ).length
+                  }{" "}
+                  required
                 </span>
               </div>
             </div>
@@ -1849,14 +1929,19 @@ const ListingDocumentRequirementsModal = ({
           <div className="rounded-xl border border-slate-200 bg-white p-4">
             <div className="mb-3 flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
               <div>
-                <h4 className="font-bold text-slate-900">Add Existing Documents</h4>
+                <h4 className="font-bold text-slate-900">
+                  Add Existing Documents
+                </h4>
                 <p className="text-xs text-slate-500">
-                  Create missing documents in Document Library first, then search and add them here.
+                  Create missing documents in Document Library first, then
+                  search and add them here.
                 </p>
               </div>
               <Button
                 disabled={resetRequirementsMutation.isPending}
-                onClick={() => resetRequirementsMutation.mutate(details.listing.id)}
+                onClick={() =>
+                  resetRequirementsMutation.mutate(details.listing.id)
+                }
               >
                 Reset to Project Defaults
               </Button>
@@ -1871,17 +1956,28 @@ const ListingDocumentRequirementsModal = ({
 
             <div className="mt-3 grid max-h-56 grid-cols-1 gap-2 overflow-y-auto md:grid-cols-2">
               {filteredDocumentLibrary.map((document) => {
-                const alreadySelected = selectedDocumentIds.has(Number(document.id));
+                const alreadySelected = selectedDocumentIds.has(
+                  Number(document.id),
+                );
                 return (
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3" key={document.id}>
+                  <div
+                    className="rounded-lg border border-slate-200 bg-slate-50 p-3"
+                    key={document.id}
+                  >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="text-sm font-semibold text-slate-900">{document.name}</p>
-                        <p className="text-xs text-slate-500">{document.description || "No description"}</p>
+                        <p className="text-sm font-semibold text-slate-900">
+                          {document.name}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          {document.description || "No description"}
+                        </p>
                       </div>
                       <Button
                         disabled={alreadySelected}
-                        onClick={() => addLibraryRequirement(String(document.id))}
+                        onClick={() =>
+                          addLibraryRequirement(String(document.id))
+                        }
                       >
                         {alreadySelected ? "Added" : "Add"}
                       </Button>
@@ -1896,7 +1992,9 @@ const ListingDocumentRequirementsModal = ({
             <Alert type="error">{saveRequirementsMutation.error.message}</Alert>
           ) : null}
           {resetRequirementsMutation.isError ? (
-            <Alert type="error">{resetRequirementsMutation.error.message}</Alert>
+            <Alert type="error">
+              {resetRequirementsMutation.error.message}
+            </Alert>
           ) : null}
 
           {requirements.length === 0 ? (
@@ -1911,12 +2009,16 @@ const ListingDocumentRequirementsModal = ({
                   key={`${requirement.document_id || requirement.name}-${index}`}
                 >
                   <div className="min-w-0">
-                    <p className="font-semibold text-slate-900">{requirement.name}</p>
+                    <p className="font-semibold text-slate-900">
+                      {requirement.name}
+                    </p>
                     <p className="text-xs text-slate-500">
-                      {requirement.description || formatText(requirement.source || "listing_override")}
+                      {requirement.description ||
+                        formatText(requirement.source || "listing_override")}
                     </p>
                     <p className="text-[11px] text-slate-400">
-                      Source: {formatText(requirement.source || "listing_override")}
+                      Source:{" "}
+                      {formatText(requirement.source || "listing_override")}
                     </p>
                   </div>
                   <Select
@@ -1993,4 +2095,3 @@ const Detail = ({
 };
 
 export default Listings;
-

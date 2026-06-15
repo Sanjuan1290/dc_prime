@@ -14,6 +14,38 @@ const nullableValue = (value) => {
   return value
 }
 
+const toDateOnly = (value) => {
+  if (isMissing(value)) return null
+
+  if (typeof value === 'string') {
+    const trimmedValue = value.trim()
+
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmedValue)) {
+      return trimmedValue
+    }
+
+    const matchedDate = trimmedValue.match(/^(\d{4}-\d{2}-\d{2})/)
+
+    if (matchedDate) {
+      return matchedDate[1]
+    }
+  }
+
+  const parsedDate = value instanceof Date ? value : new Date(value)
+
+  if (Number.isNaN(parsedDate.getTime())) return null
+
+  const year = parsedDate.getFullYear()
+  const month = String(parsedDate.getMonth() + 1).padStart(2, '0')
+  const day = String(parsedDate.getDate()).padStart(2, '0')
+
+  return `${year}-${month}-${day}`
+}
+
+const getTodayDateOnly = () => {
+  return toDateOnly(new Date())
+}
+
 const normalizeMoney = (value) => {
   return Number(Number(value || 0).toFixed(2))
 }
@@ -173,13 +205,13 @@ const paymentFields = `
   py.payment_type,
   py.payment_method,
   py.reference_id,
-  py.payment_date,
+  DATE_FORMAT(py.payment_date, '%Y-%m-%d') AS payment_date,
   py.status,
   py.verified_by,
   verifier.full_name AS verified_by_name,
-  py.verified_at,
-  py.created_at,
-  py.updated_at
+  DATE_FORMAT(py.verified_at, '%Y-%m-%d %H:%i:%s') AS verified_at,
+  DATE_FORMAT(py.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+  DATE_FORMAT(py.updated_at, '%Y-%m-%d %H:%i:%s') AS updated_at
 `
 
 const paymentJoins = `
@@ -534,7 +566,7 @@ export const createPayment = async (req, res) => {
         nullableValue(payment_type),
         nullableValue(payment_method),
         nullableValue(reference_id),
-        payment_date || new Date(),
+        toDateOnly(payment_date) || getTodayDateOnly(),
         finalStatus,
         verifiedBy,
         verifiedAt,
@@ -690,7 +722,9 @@ export const updatePayment = async (req, res) => {
         !isMissing(reference_id)
           ? nullableValue(reference_id)
           : existingPayment.reference_id,
-        !isMissing(payment_date) ? payment_date : existingPayment.payment_date,
+        !isMissing(payment_date)
+          ? toDateOnly(payment_date)
+          : existingPayment.payment_date,
         nextStatus,
         verifiedBy,
         verifiedAt,

@@ -18,7 +18,6 @@ import LoadingState from "../components/ui/LoadingState";
 import Modal from "../components/ui/Modal";
 import PageHeader from "../components/ui/PageHeader";
 import Pagination from "../components/ui/Pagination";
-import Select from "../components/ui/Select";
 import StatCard from "../components/ui/StatCard";
 import TableContainer from "../components/ui/TableContainer";
 import { API_URL, getErrorMessage } from "../utils/api";
@@ -159,11 +158,8 @@ const deleteClient = async (id: number) => {
 
 const clientToFormData = (client: Client): ClientFormData => ({
   full_name: client.full_name,
-  spouse_co_owner_name: client.spouse_co_owner_name || "",
-  buyer_type:
-    client.buyer_type === "spouses" || client.buyer_type === "and_account"
-      ? client.buyer_type
-      : "single",
+  spouse_co_owner_name: "",
+  buyer_type: "single",
   email: client.email || "",
   contact_no: client.contact_no || "",
   address: client.address || "",
@@ -521,13 +517,12 @@ type ClientFormProps = {
   error?: string;
 };
 
-
 type SellerComboboxProps = {
-  label: string
-  sellers: AccreditedSeller[]
-  value: number | null
-  onChange: (sellerId: number | null) => void
-}
+  label: string;
+  sellers: AccreditedSeller[];
+  value: number | null;
+  onChange: (sellerId: number | null) => void;
+};
 
 const SellerCombobox = ({
   label,
@@ -536,25 +531,25 @@ const SellerCombobox = ({
   onChange,
 }: SellerComboboxProps) => {
   const selectedSeller = sellers.find(
-    (seller) => Number(seller.id) === Number(value)
-  )
+    (seller) => Number(seller.id) === Number(value),
+  );
   const [search, setSearch] = useState(
     selectedSeller
       ? `${selectedSeller.full_name} - ${formatText(selectedSeller.seller_role)}`
-      : ""
-  )
+      : "",
+  );
 
   const filteredSellers = sellers.filter((seller) => {
-    const keyword = search.toLowerCase().trim()
+    const keyword = search.toLowerCase().trim();
 
-    if (!keyword || Number(seller.id) === Number(value)) return true
+    if (!keyword || Number(seller.id) === Number(value)) return true;
 
     return [seller.full_name, seller.seller_role, seller.status]
       .filter(Boolean)
       .join(" ")
       .toLowerCase()
-      .includes(keyword)
-  })
+      .includes(keyword);
+  });
 
   return (
     <div className="space-y-2">
@@ -562,8 +557,8 @@ const SellerCombobox = ({
         label={label}
         value={search}
         onChange={(event) => {
-          setSearch(event.target.value)
-          onChange(null)
+          setSearch(event.target.value);
+          onChange(null);
         }}
         placeholder="Search seller name or role"
       />
@@ -572,8 +567,8 @@ const SellerCombobox = ({
         <button
           className="block w-full border-b border-slate-100 px-3 py-2 text-left text-sm text-slate-500 hover:bg-slate-50"
           onClick={() => {
-            onChange(null)
-            setSearch("")
+            onChange(null);
+            setSearch("");
           }}
           type="button"
         >
@@ -582,8 +577,8 @@ const SellerCombobox = ({
 
         {filteredSellers.length > 0 ? (
           filteredSellers.map((seller) => {
-            const isSelected = Number(seller.id) === Number(value)
-            const sellerLabel = `${seller.full_name} - ${formatText(seller.seller_role)}`
+            const isSelected = Number(seller.id) === Number(value);
+            const sellerLabel = `${seller.full_name} - ${formatText(seller.seller_role)}`;
 
             return (
               <button
@@ -593,8 +588,8 @@ const SellerCombobox = ({
                 ].join(" ")}
                 key={seller.id}
                 onClick={() => {
-                  onChange(seller.id)
-                  setSearch(sellerLabel)
+                  onChange(seller.id);
+                  setSearch(sellerLabel);
                 }}
                 type="button"
               >
@@ -605,15 +600,15 @@ const SellerCombobox = ({
                   {formatText(seller.seller_role)}
                 </span>
               </button>
-            )
+            );
           })
         ) : (
           <p className="px-3 py-2 text-sm text-slate-500">No sellers found.</p>
         )}
       </div>
     </div>
-  )
-}
+  );
+};
 
 const ClientForm = ({
   clientData,
@@ -639,45 +634,6 @@ const ClientForm = ({
           }
           required
         />
-
-        <Select
-          label="Buyer Type"
-          value={clientData.buyer_type}
-          onChange={(e) => {
-            const buyerType = e.target.value as ClientFormData["buyer_type"]
-            setClientData({
-              ...clientData,
-              buyer_type: buyerType,
-              spouse_co_owner_name:
-                buyerType === "single" ? "" : clientData.spouse_co_owner_name,
-            })
-          }}
-        >
-          <option value="single">Single</option>
-          <option value="spouses">Spouses</option>
-          <option value="and_account">And Account</option>
-        </Select>
-
-        {clientData.buyer_type !== "single" ? (
-          <Input
-            label={
-              clientData.buyer_type === "spouses"
-                ? "Spouse's Name (optional)"
-                : "Second Buyer's Name (optional)"
-            }
-            value={clientData.spouse_co_owner_name}
-            onChange={(e) =>
-              setClientData({
-                ...clientData,
-                spouse_co_owner_name: e.target.value,
-              })
-            }
-          />
-        ) : (
-          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500">
-            No spouse or second buyer for single buyer type.
-          </div>
-        )}
 
         <Input
           label="Email"
@@ -757,6 +713,3 @@ const ClientForm = ({
 };
 
 export default Clients;
-
-
-

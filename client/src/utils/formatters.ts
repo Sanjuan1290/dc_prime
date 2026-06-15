@@ -9,10 +9,36 @@ export const formatNumber = (value: number | string | null | undefined) => {
   return new Intl.NumberFormat("en-PH").format(Number(value || 0))
 }
 
+const toLocalDateParts = (date: Date) => {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, "0")
+  const day = String(date.getDate()).padStart(2, "0")
+
+  return `${year}-${month}-${day}`
+}
+
 export const formatDate = (date: string | null | undefined) => {
   if (!date) return "-"
 
-  return date.slice(0, 10)
+  const rawDate = String(date).trim()
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(rawDate)) {
+    return rawDate
+  }
+
+  const parsedDate = new Date(rawDate)
+
+  if (Number.isNaN(parsedDate.getTime())) {
+    return rawDate.slice(0, 10) || "-"
+  }
+
+  return toLocalDateParts(parsedDate)
+}
+
+export const getDateInputValue = (date: string | null | undefined) => {
+  const formattedDate = formatDate(date)
+
+  return formattedDate === "-" ? getLocalDate() : formattedDate
 }
 
 export const formatTime = (time: string | null | undefined) => {
