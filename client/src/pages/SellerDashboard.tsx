@@ -39,9 +39,19 @@ const fetchSellerDashboard = async () => {
   return res.json() as Promise<SellerDashboardData>
 }
 
+const normalizeSearch = (value: unknown) => String(value ?? "").toLowerCase()
+
+const matchesSearch = (fields: unknown[], searchQuery: string) => {
+  const query = searchQuery.trim().toLowerCase()
+  if (!query) return true
+
+  return fields.some((field) => normalizeSearch(field).includes(query))
+}
+
 const SellerDashboard = () => {
   const [salesPage, setSalesPage] = useState(1)
   const [salesRowsPerPage, setSalesRowsPerPage] = useState(10)
+  const [salesSearch, setSalesSearch] = useState("")
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["seller-dashboard"],
@@ -49,9 +59,34 @@ const SellerDashboard = () => {
   })
 
   const recentSales = data?.recentSales || []
+
+  const filteredRecentSales = useMemo(
+    () =>
+      recentSales.filter((sale) =>
+        matchesSearch(
+          [
+            sale.client_name,
+            sale.unit_id,
+            sale.project_name,
+            sale.seller_name,
+            sale.seller_role,
+            formatText(sale.seller_role),
+            sale.total_contract_price,
+            formatMoney(sale.total_contract_price),
+            sale.status,
+            formatText(sale.status),
+            sale.created_at,
+            formatDate(sale.created_at),
+          ],
+          salesSearch
+        )
+      ),
+    [recentSales, salesSearch]
+  )
+
   const paginatedRecentSales = useMemo(
-    () => paginateRows(recentSales, salesPage, salesRowsPerPage),
-    [recentSales, salesPage, salesRowsPerPage]
+    () => paginateRows(filteredRecentSales, salesPage, salesRowsPerPage),
+    [filteredRecentSales, salesPage, salesRowsPerPage]
   )
 
   if (isLoading) return <LoadingState label="Loading seller dashboard..." />
@@ -99,6 +134,25 @@ const SellerDashboard = () => {
         </div>
       </div>
 
+      <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <label className="block text-sm font-semibold text-slate-700" htmlFor="seller-dashboard-sales-search">
+          Search recent sales
+        </label>
+        <input
+          id="seller-dashboard-sales-search"
+          className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+          placeholder="Search client, unit, project, seller, status, TCP, or date..."
+          value={salesSearch}
+          onChange={(event) => {
+            setSalesSearch(event.target.value)
+            setSalesPage(1)
+          }}
+        />
+        <p className="mt-2 text-xs text-slate-500">
+          Showing {filteredRecentSales.length} of {recentSales.length} sales
+        </p>
+      </div>
+
       <TableContainer>
         <table className="w-full text-sm">
           <thead className="bg-slate-50">
@@ -133,7 +187,7 @@ const SellerDashboard = () => {
       <Pagination
         page={salesPage}
         rowsPerPage={salesRowsPerPage}
-        totalRows={recentSales.length}
+        totalRows={filteredRecentSales.length}
         onPageChange={setSalesPage}
         onRowsPerPageChange={setSalesRowsPerPage}
       />

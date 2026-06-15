@@ -32,14 +32,54 @@ const fetchSales = async () => {
   return (data.sales || data.data || []) as Sale[]
 }
 
+const normalizeSearch = (value: unknown) => String(value ?? "").toLowerCase()
+
+const matchesSearch = (fields: unknown[], searchQuery: string) => {
+  const query = searchQuery.trim().toLowerCase()
+  if (!query) return true
+
+  return fields.some((field) => normalizeSearch(field).includes(query))
+}
+
 const TeamSales = () => {
   const [page, setPage] = useState(1)
   const [rowsPerPage, setRowsPerPage] = useState(10)
+  const [search, setSearch] = useState("")
   const { data = [], isLoading, error } = useQuery({ queryKey: ["seller-sales"], queryFn: fetchSales })
 
+  const filteredSales = useMemo(
+    () =>
+      data.filter((sale) =>
+        matchesSearch(
+          [
+            sale.client_name,
+            sale.unit_id,
+            sale.project_name,
+            sale.seller_name,
+            sale.seller_role,
+            formatText(sale.seller_role),
+            sale.total_contract_price,
+            formatMoney(sale.total_contract_price),
+            sale.status,
+            formatText(sale.status),
+            sale.mode_of_payment,
+            formatText(sale.mode_of_payment),
+            sale.starting_date,
+            sale.starting_date ? formatDate(sale.starting_date) : "",
+            sale.due_date,
+            sale.due_date ? formatDate(sale.due_date) : "",
+            sale.created_at,
+            formatDate(sale.created_at),
+          ],
+          search
+        )
+      ),
+    [data, search]
+  )
+
   const paginatedSales = useMemo(
-    () => paginateRows(data, page, rowsPerPage),
-    [data, page, rowsPerPage]
+    () => paginateRows(filteredSales, page, rowsPerPage),
+    [filteredSales, page, rowsPerPage]
   )
 
   return (
@@ -49,6 +89,25 @@ const TeamSales = () => {
       {isLoading ? <LoadingState label="Loading sales..." /> : null}
       {!isLoading ? (
         <>
+          <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <label className="block text-sm font-semibold text-slate-700" htmlFor="team-sales-search">
+              Search sales
+            </label>
+            <input
+              id="team-sales-search"
+              className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              placeholder="Search client, unit, project, seller, status, payment mode, TCP, or date..."
+              value={search}
+              onChange={(event) => {
+                setSearch(event.target.value)
+                setPage(1)
+              }}
+            />
+            <p className="mt-2 text-xs text-slate-500">
+              Showing {filteredSales.length} of {data.length} sales
+            </p>
+          </div>
+
           <TableContainer>
             <table className="w-full text-sm">
               <thead className="bg-slate-50">
@@ -83,7 +142,7 @@ const TeamSales = () => {
           <Pagination
             page={page}
             rowsPerPage={rowsPerPage}
-            totalRows={data.length}
+            totalRows={filteredSales.length}
             onPageChange={setPage}
             onRowsPerPageChange={setRowsPerPage}
           />
