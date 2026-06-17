@@ -142,10 +142,20 @@ const AccredittedSellers = () => {
     return {
       total: sellers.length,
       active: sellers.filter((seller) => seller.status === "active").length,
+      inactive: sellers.filter((seller) => seller.status !== "active").length,
       bnm: sellers.filter((seller) => seller.seller_role === "broker_network_manager").length,
+      brokers: sellers.filter((seller) => seller.seller_role === "broker").length,
+      managers: sellers.filter((seller) => seller.seller_role === "manager").length,
       agents: sellers.filter((seller) => seller.seller_role === "agent").length,
     }
   }, [sellers])
+
+  const roleStats = [
+    { label: "BNM", value: stats.bnm, role: "Broker Network Manager" },
+    { label: "Brokers", value: stats.brokers, role: "Broker group leaders" },
+    { label: "Managers", value: stats.managers, role: "Unit managers" },
+    { label: "Agents", value: stats.agents, role: "Frontline sellers" },
+  ]
 
   return (
     <div className="p-6">
@@ -162,11 +172,60 @@ const AccredittedSellers = () => {
         />
       ) : null}
 
-      <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-4">
-        <StatCard icon={<FiUserCheck />} label="Total Sellers" value={stats.total} />
-        <StatCard icon={<FiUserCheck />} label="Active" value={stats.active} />
-        <StatCard icon={<FiUserCheck />} label="BNM" value={stats.bnm} />
-        <StatCard icon={<FiUserCheck />} label="Agents" value={stats.agents} />
+      <div className="mb-6 grid grid-cols-1 gap-4 xl:grid-cols-[1fr_1.6fr]">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <StatCard
+            icon={<FiUserCheck />}
+            label="Total Sellers"
+            value={stats.total}
+            description="All accredited seller records"
+          />
+          <StatCard
+            icon={<FiUserCheck />}
+            label="Active"
+            value={stats.active}
+            description="Can be assigned to clients"
+          />
+          <StatCard
+            icon={<FiUserCheck />}
+            label="Inactive"
+            value={stats.inactive}
+            description="Hidden from active assignment"
+          />
+        </div>
+
+        <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-bold uppercase tracking-wide text-slate-500">
+                Role Breakdown
+              </h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Count per commission hierarchy level.
+              </p>
+            </div>
+            <div className="rounded-lg bg-blue-50 px-3 py-2 text-sm font-bold text-blue-700">
+              {formatNumber(stats.total)} total
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {roleStats.map((item) => (
+              <div
+                className="rounded-xl border border-slate-100 bg-slate-50 p-4"
+                key={item.label}
+              >
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                  {item.label}
+                </p>
+                <p className="mt-2 text-2xl font-bold text-slate-900">
+                  {formatNumber(item.value)}
+                </p>
+                <p className="mt-1 text-xs text-slate-500">{item.role}</p>
+              </div>
+            ))}
+          </div>
+        </section>
       </div>
 
       <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-[1fr_220px_220px]">

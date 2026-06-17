@@ -103,25 +103,50 @@ export const getDashboardSummary = async (req, res) => {
       ) AS total_commission_liability,
 
       (
-        SELECT COALESCE(SUM(net_release_amount), 0)
-        FROM commission_releases
-        WHERE status = 'eligible'
+        SELECT COALESCE(SUM(cr.net_release_amount), 0)
+        FROM commission_releases cr
+        INNER JOIN commissions cm ON cm.id = cr.commission_id
+        WHERE cr.status = 'eligible'
+          AND cm.status <> 'cancelled'
       ) AS commission_payable_now,
 
       (
-        SELECT COALESCE(SUM(net_release_amount), 0)
-        FROM commission_releases
-        WHERE status = 'released'
+        SELECT COALESCE(SUM(cr.net_release_amount), 0)
+        FROM commission_releases cr
+        INNER JOIN commissions cm ON cm.id = cr.commission_id
+        WHERE cr.status = 'released'
+          AND cm.status <> 'cancelled'
       ) AS commission_released,
 
       (
-        SELECT COALESCE(SUM(gross_commission), 0)
-        FROM commissions
-        WHERE status <> 'cancelled'
-      ) - (
-        SELECT COALESCE(SUM(net_release_amount), 0)
-        FROM commission_releases
-        WHERE status = 'released'
+        SELECT COALESCE(SUM(cr.cash_advance_deduction), 0)
+        FROM commission_releases cr
+        INNER JOIN commissions cm ON cm.id = cr.commission_id
+        WHERE cm.status <> 'cancelled'
+      ) AS commission_cash_advance_deducted,
+
+      GREATEST(
+        (
+          SELECT COALESCE(SUM(gross_commission), 0)
+          FROM commissions
+          WHERE status <> 'cancelled'
+        )
+        -
+        (
+          SELECT COALESCE(SUM(cr.net_release_amount), 0)
+          FROM commission_releases cr
+          INNER JOIN commissions cm ON cm.id = cr.commission_id
+          WHERE cr.status = 'released'
+            AND cm.status <> 'cancelled'
+        )
+        -
+        (
+          SELECT COALESCE(SUM(cr.cash_advance_deduction), 0)
+          FROM commission_releases cr
+          INNER JOIN commissions cm ON cm.id = cr.commission_id
+          WHERE cm.status <> 'cancelled'
+        ),
+        0
       ) AS commission_unreleased_balance
     `
   )
@@ -135,6 +160,9 @@ export const getDashboardSummary = async (req, res) => {
     totalSales === 0
       ? 0
       : Number(((trackedCollections / totalSales) * 100).toFixed(2))
+
+  const cashAdvanceDeducted = formatDecimal(summaryRow.commission_cash_advance_deducted)
+  const netRemaining = formatDecimal(summaryRow.commission_unreleased_balance)
 
   res.status(200).json({
     summary: {
@@ -150,9 +178,12 @@ export const getDashboardSummary = async (req, res) => {
       totalCommissionLiability: formatDecimal(summaryRow.total_commission_liability),
       commissionPayableNow: formatDecimal(summaryRow.commission_payable_now),
       commissionReleased: formatDecimal(summaryRow.commission_released),
-      commissionUnreleasedBalance: formatDecimal(summaryRow.commission_unreleased_balance),
+      commissionCashAdvanceDeducted: cashAdvanceDeducted,
+      commissionUnreleasedBalance: netRemaining,
       commissionPayable: formatDecimal(summaryRow.commission_payable_now),
-      commissionRemaining: formatDecimal(summaryRow.commission_unreleased_balance),
+      commissionRemaining: netRemaining,
+      cashAdvanceDeducted,
+      netCommissionRemaining: netRemaining,
     },
   })
 }

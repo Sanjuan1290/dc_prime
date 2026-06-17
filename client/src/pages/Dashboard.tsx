@@ -42,9 +42,12 @@ type DashboardSummary = {
   totalCommissionLiability?: number | string
   commissionPayableNow?: number | string
   commissionReleased: number | string
+  commissionCashAdvanceDeducted?: number | string
   commissionUnreleasedBalance?: number | string
   commissionPayable: number | string
   commissionRemaining: number | string
+  cashAdvanceDeducted?: number | string
+  netCommissionRemaining?: number | string
 }
 
 type AgentPerformance = {
@@ -132,8 +135,13 @@ const Dashboard = () => {
     summary?.commissionPayableNow ?? summary?.commissionPayable
   )
   const commissionReleased = safeNum(summary?.commissionReleased)
+  const commissionCashAdvanceDeducted = safeNum(
+    summary?.commissionCashAdvanceDeducted ?? summary?.cashAdvanceDeducted
+  )
   const commissionUnreleasedBalance = safeNum(
-    summary?.commissionUnreleasedBalance ?? summary?.commissionRemaining
+    summary?.netCommissionRemaining ??
+      summary?.commissionUnreleasedBalance ??
+      summary?.commissionRemaining
   )
 
   const stats = [
@@ -201,7 +209,7 @@ const Dashboard = () => {
       icon: <FiDollarSign />,
     },
     {
-      title: "Payable Now",
+      title: "Eligible",
       value: formatMoney(commissionPayableNow),
       description: "Only eligible commission releases ready to pay",
       formula: "SUM(commission_releases.net_release_amount) where release status = eligible.",
@@ -215,17 +223,24 @@ const Dashboard = () => {
       icon: <FiDollarSign />,
     },
     {
-      title: "Unreleased Commission",
+      title: "Cash Advance Deducted",
+      value: formatMoney(commissionCashAdvanceDeducted),
+      description: "Cash advances already deducted from commission releases",
+      formula: "SUM(commission_releases.cash_advance_deduction) for non-cancelled commissions.",
+      icon: <FiCreditCard />,
+    },
+    {
+      title: "Net Remaining",
       value: formatMoney(commissionUnreleasedBalance),
-      description: "Total commission liability minus released releases",
-      formula: "SUM(commissions.gross_commission) minus SUM(released commission release net amounts).",
+      description: "Commission still payable after released amounts and cash advances",
+      formula: "SUM(gross_commission) - SUM(released net_release_amount) - SUM(cash_advance_deduction).",
       icon: <FiDollarSign />,
     },
   ]
 
   const commissionData = [
     {
-      name: "Payable Now",
+      name: "Eligible",
       value: commissionPayableNow,
       color: "#2563eb",
     },
@@ -235,7 +250,12 @@ const Dashboard = () => {
       color: "#10b981",
     },
     {
-      name: "Unreleased",
+      name: "Cash Advance Deducted",
+      value: commissionCashAdvanceDeducted,
+      color: "#ef4444",
+    },
+    {
+      name: "Net Remaining",
       value: commissionUnreleasedBalance,
       color: "#f59e0b",
     },
@@ -290,7 +310,7 @@ const Dashboard = () => {
       <div className="mb-6 grid grid-cols-1 gap-4 xl:grid-cols-3">
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm xl:col-span-1">
           <h2 className="text-base font-bold text-slate-900">
-            Payable Now vs Released vs Unreleased
+            Eligible vs Released vs Net Remaining
           </h2>
           <div className="mt-4 h-72">
             <ResponsiveContainer height="100%" width="100%">

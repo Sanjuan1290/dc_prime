@@ -550,12 +550,7 @@ export const getListingFullDetails = async (req, res) => {
     }
   }
 
-  let listingDocumentRequirements = await loadListingDocumentRequirements(db, id)
-
-  if (listingDocumentRequirements.length === 0 && mappedListing.project_id) {
-    await copyProjectRequirementsToListing(db, id, mappedListing.project_id, { overwrite: false })
-    listingDocumentRequirements = await loadListingDocumentRequirements(db, id)
-  }
+  const listingDocumentRequirements = await loadListingDocumentRequirements(db, id)
 
   if (!clientUnit) {
     const requiredDocuments = listingDocumentRequirements.filter((document) => Boolean(document.is_required)).length
@@ -770,8 +765,6 @@ export const updateListing = async (req, res) => {
       })
     }
 
-    await copyProjectRequirementsToListing(connection, id, project_id, { overwrite: false })
-
     balanceSummaries = await recomputeListingClientUnitBalances(connection, id, {
       actorRole: req.user.role,
     })
@@ -817,12 +810,7 @@ export const getListingDocumentRequirements = async (req, res) => {
     return res.status(404).json({ message: 'Listing not found' })
   }
 
-  let requirements = await loadListingDocumentRequirements(db, id)
-
-  if (requirements.length === 0 && listingRows[0].project_id) {
-    await copyProjectRequirementsToListing(db, id, listingRows[0].project_id, { overwrite: false })
-    requirements = await loadListingDocumentRequirements(db, id)
-  }
+  const requirements = await loadListingDocumentRequirements(db, id)
 
   return res.status(200).json({
     message: 'Listing document requirements fetched successfully',
@@ -937,6 +925,3 @@ export const deleteListing = async (req, res) => {
 
   return res.status(200).json({ message: 'Listing deleted successfully' })
 }
-
-
-

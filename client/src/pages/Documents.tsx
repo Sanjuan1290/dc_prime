@@ -432,6 +432,27 @@ const Documents = () => {
     });
   };
 
+  const undoDocumentFromTemplate = (documentId: number) => {
+    setTemplateForm((current) => ({
+      ...current,
+      items: current.items
+        .filter((item) => Number(item.document_id) !== Number(documentId))
+        .map((item, index) => ({
+          ...item,
+          sort_order: index + 1,
+        })),
+    }));
+  };
+
+  const toggleDocumentInTemplate = (documentId: number) => {
+    if (selectedTemplateDocumentIds.has(Number(documentId))) {
+      undoDocumentFromTemplate(documentId);
+      return;
+    }
+
+    addDocumentToTemplate(String(documentId));
+  };
+
   const selectedTemplateDocumentIds = new Set(
     templateForm.items
       .map((item) => item.document_id)
@@ -883,10 +904,10 @@ const Documents = () => {
                             <p className="text-xs text-slate-500">{document.description || "No description"}</p>
                           </div>
                           <Button
-                            disabled={alreadySelected}
-                            onClick={() => addDocumentToTemplate(String(document.id))}
+                            onClick={() => toggleDocumentInTemplate(Number(document.id))}
+                            variant={alreadySelected ? "secondary" : "primary"}
                           >
-                            {alreadySelected ? "Added" : "Add"}
+                            {alreadySelected ? "Undo" : "Add"}
                           </Button>
                         </div>
                       </div>
