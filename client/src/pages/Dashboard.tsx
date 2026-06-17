@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState, type ReactNode } from "react"
 import { useQuery } from "@tanstack/react-query"
 import {
   Bar,
@@ -7,7 +8,6 @@ import {
   Legend,
   Pie,
   PieChart,
-  ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
@@ -24,6 +24,7 @@ import Alert from "../components/ui/Alert"
 import EmptyState from "../components/ui/EmptyState"
 import LoadingState from "../components/ui/LoadingState"
 import PageHeader from "../components/ui/PageHeader"
+import Pagination from "../components/ui/Pagination"
 import StatCard from "../components/ui/StatCard"
 import TableContainer from "../components/ui/TableContainer"
 import { API_URL, getErrorMessage } from "../utils/api"
@@ -68,6 +69,16 @@ type AgentPerformanceResponse = {
   agents: AgentPerformance[]
 }
 
+type ChartSize = {
+  width: number
+  height: number
+}
+
+type MeasuredChartProps = {
+  children: (size: ChartSize) => ReactNode
+  className?: string
+}
+
 const fetchDashboardSummary = async (): Promise<DashboardSummary> => {
   const res = await fetch(`${API_URL}/dashboard/summary`, {
     credentials: "include",
@@ -94,13 +105,75 @@ const fetchAgentPerformance = async (): Promise<AgentPerformance[]> => {
   return data.agents
 }
 
-
 const safeNum = (value: unknown) => {
   const numberValue = Number(value ?? 0)
   return Number.isNaN(numberValue) ? 0 : numberValue
 }
 
+const MeasuredChart = ({
+  children,
+  className = "mt-4 h-72 min-h-72 min-w-0",
+}: MeasuredChartProps) => {
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  const [size, setSize] = useState<ChartSize>({
+    width: 0,
+    height: 0,
+  })
+
+  useEffect(() => {
+    const element = containerRef.current
+
+    if (!element) return
+
+    const updateSize = () => {
+      const rect = element.getBoundingClientRect()
+      const width = Math.floor(rect.width)
+      const height = Math.floor(rect.height)
+
+      if (width > 0 && height > 0) {
+        setSize((currentSize) => {
+          if (currentSize.width === width && currentSize.height === height) {
+            return currentSize
+          }
+
+          return {
+            width,
+            height,
+          }
+        })
+      }
+    }
+
+    updateSize()
+
+    const resizeObserver = new ResizeObserver(updateSize)
+    resizeObserver.observe(element)
+
+    window.addEventListener("resize", updateSize)
+
+    return () => {
+      resizeObserver.disconnect()
+      window.removeEventListener("resize", updateSize)
+    }
+  }, [])
+
+  return (
+    <div ref={containerRef} className={className}>
+      {size.width > 0 && size.height > 0 ? (
+        children(size)
+      ) : (
+        <div className="flex h-full min-h-72 items-center justify-center rounded-lg border border-slate-100 bg-slate-50 text-sm font-medium text-slate-400">
+          Preparing chart...
+        </div>
+      )}
+    </div>
+  )
+}
+
 const Dashboard = () => {
+  const [agentsPage, setAgentsPage] = useState(1)
+  const [agentsRowsPerPage, setAgentsRowsPerPage] = useState(10)
+
   const {
     data: summary,
     isLoading: isSummaryLoading,
@@ -108,6 +181,7 @@ const Dashboard = () => {
   } = useQuery<DashboardSummary>({
     queryKey: ["dashboard-summary"],
     queryFn: fetchDashboardSummary,
+    retry: false,
   })
 
   const {
@@ -117,6 +191,7 @@ const Dashboard = () => {
   } = useQuery<AgentPerformance[]>({
     queryKey: ["dashboard-agent-performance"],
     queryFn: fetchAgentPerformance,
+    retry: false,
   })
 
   const totalSales = safeNum(summary?.totalSales)
@@ -128,28 +203,35 @@ const Dashboard = () => {
   const availableLotValue = safeNum(summary?.availableLotValue)
   const soldLotValue = safeNum(summary?.soldLotValue)
   const pendingDocuments = safeNum(summary?.pendingDocuments)
+
   const totalCommissionLiability = safeNum(
-    summary?.totalCommissionLiability ?? summary?.commissionPayable
+    summary?.totalCommissionLiability ?? summary?.commissionPayable,
   )
+
   const commissionPayableNow = safeNum(
-    summary?.commissionPayableNow ?? summary?.commissionPayable
+    summary?.commissionPayableNow ?? summary?.commissionPayable,
   )
+
   const commissionReleased = safeNum(summary?.commissionReleased)
+
   const commissionCashAdvanceDeducted = safeNum(
-    summary?.commissionCashAdvanceDeducted ?? summary?.cashAdvanceDeducted
+    summary?.commissionCashAdvanceDeducted ?? summary?.cashAdvanceDeducted,
   )
+
   const commissionUnreleasedBalance = safeNum(
     summary?.netCommissionRemaining ??
       summary?.commissionUnreleasedBalance ??
-      summary?.commissionRemaining
+      summary?.commissionRemaining,
   )
 
   const stats = [
     {
       title: "Total Sales",
       value: formatMoney(totalSales),
-      description: "Contract value from active, reserved, paid, and closed client units",
-      formula: "SUM(TCP) from client units with status active, reserved, fully_paid, or closed.",
+      description:
+        "Contract value from active, reserved, paid, and closed client units",
+      formula:
+        "SUM(TCP) from client units with status active, reserved, fully_paid, or closed.",
       icon: <FiDollarSign />,
     },
     {
@@ -163,7 +245,8 @@ const Dashboard = () => {
       title: "Tracked Collections",
       value: formatMoney(trackedCollections),
       description: `${collectionProgress.toFixed(2)}% collection progress`,
-      formula: "SUM(payments.amount) where payment status = verified. Pending and rejected payments are excluded.",
+      formula:
+        "SUM(payments.amount) where payment status = verified. Pending and rejected payments are excluded.",
       icon: <FiCreditCard />,
     },
     {
@@ -198,42 +281,49 @@ const Dashboard = () => {
       title: "Pending Documents",
       value: formatNumber(pendingDocuments),
       description: "Not submitted or rejected checklist items",
-      formula: "COUNT(*) from client document checklist where status is not_submitted or rejected.",
+      formula:
+        "COUNT(*) from client document checklist where status is not_submitted or rejected.",
       icon: <FiFileText />,
     },
     {
       title: "Total Commission",
       value: formatMoney(totalCommissionLiability),
       description: "Full commission liability, including future releases",
-      formula: "SUM(commissions.gross_commission) where commission status is not cancelled.",
+      formula:
+        "SUM(commissions.gross_commission) where commission status is not cancelled.",
       icon: <FiDollarSign />,
     },
     {
       title: "Eligible",
       value: formatMoney(commissionPayableNow),
       description: "Only eligible commission releases ready to pay",
-      formula: "SUM(commission_releases.net_release_amount) where release status = eligible.",
+      formula:
+        "SUM(commission_releases.net_release_amount) where release status = eligible.",
       icon: <FiDollarSign />,
     },
     {
       title: "Commission Released",
       value: formatMoney(commissionReleased),
       description: "Already released commission value",
-      formula: "SUM(commission_releases.net_release_amount) where release status = released.",
+      formula:
+        "SUM(commission_releases.net_release_amount) where release status = released.",
       icon: <FiDollarSign />,
     },
     {
       title: "Cash Advance Deducted",
       value: formatMoney(commissionCashAdvanceDeducted),
       description: "Cash advances already deducted from commission releases",
-      formula: "SUM(commission_releases.cash_advance_deduction) for non-cancelled commissions.",
+      formula:
+        "SUM(commission_releases.cash_advance_deduction) for non-cancelled commissions.",
       icon: <FiCreditCard />,
     },
     {
       title: "Net Remaining",
       value: formatMoney(commissionUnreleasedBalance),
-      description: "Commission still payable after released amounts and cash advances",
-      formula: "SUM(gross_commission) - SUM(released net_release_amount) - SUM(cash_advance_deduction).",
+      description:
+        "Commission still payable after released amounts and cash advances",
+      formula:
+        "SUM(gross_commission) - SUM(released net_release_amount) - SUM(cash_advance_deduction).",
       icon: <FiDollarSign />,
     },
   ]
@@ -259,7 +349,7 @@ const Dashboard = () => {
       value: commissionUnreleasedBalance,
       color: "#f59e0b",
     },
-  ]
+  ].filter((item) => item.value > 0)
 
   const salesCollectionsData = [
     {
@@ -274,27 +364,47 @@ const Dashboard = () => {
 
   const agentChartData = agents.slice(0, 8).map((agent) => ({
     name: agent.agent,
-    net: Number(agent.net || 0),
-    total: Number(agent.total_sales || 0),
+    net: safeNum(agent.net),
+    total: safeNum(agent.total_sales),
   }))
+
+  const agentTotalPages = Math.max(
+    Math.ceil(agents.length / agentsRowsPerPage),
+    1,
+  )
+
+  const safeAgentsPage = Math.min(Math.max(agentsPage, 1), agentTotalPages)
+
+  const paginatedAgents = agents.slice(
+    (safeAgentsPage - 1) * agentsRowsPerPage,
+    safeAgentsPage * agentsRowsPerPage,
+  )
 
   if (isSummaryLoading) {
     return <LoadingState message="Loading dashboard..." />
   }
 
   if (summaryError) {
-    return <Alert type="error">Failed to load dashboard</Alert>
+    return (
+      <Alert
+        message={
+          summaryError instanceof Error ? summaryError.message : "Request failed"
+        }
+        title="Failed to load dashboard"
+        variant="error"
+      />
+    )
   }
 
   return (
-    <div>
+    <div className="min-w-0">
       <PageHeader
         icon={<FiBarChart2 className="h-5 w-5" />}
         subtitle="Real-time system summary from MySQL"
         title="Dashboard"
       />
 
-      <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="mb-6 grid min-w-0 grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         {stats.map((stat) => (
           <StatCard
             description={stat.description}
@@ -307,72 +417,117 @@ const Dashboard = () => {
         ))}
       </div>
 
-      <div className="mb-6 grid grid-cols-1 gap-4 xl:grid-cols-3">
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm xl:col-span-1">
+      <div className="mb-6 grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-3">
+        <div className="min-w-0 rounded-xl border border-slate-200 bg-white p-4 shadow-sm xl:col-span-1">
           <h2 className="text-base font-bold text-slate-900">
             Eligible vs Released vs Net Remaining
           </h2>
-          <div className="mt-4 h-72">
-            <ResponsiveContainer height="100%" width="100%">
-              <PieChart>
-                <Pie
-                  data={commissionData}
-                  dataKey="value"
-                  innerRadius={62}
-                  nameKey="name"
-                  outerRadius={96}
-                  paddingAngle={3}
-                >
-                  {commissionData.map((entry) => (
-                    <Cell fill={entry.color} key={entry.name} />
-                  ))}
-                </Pie>
-                <Tooltip formatter={(value) => formatMoney(value as number)} />
-                <Legend />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
+
+          {commissionData.length === 0 ? (
+            <div className="mt-4">
+              <EmptyState title="No commission records to chart" />
+            </div>
+          ) : (
+            <MeasuredChart>
+              {({ width, height }) => (
+                <PieChart height={height} width={width}>
+                  <Pie
+                    cx="50%"
+                    cy="45%"
+                    data={commissionData}
+                    dataKey="value"
+                    innerRadius={Math.min(width, height) * 0.18}
+                    nameKey="name"
+                    outerRadius={Math.min(width, height) * 0.3}
+                    paddingAngle={3}
+                  >
+                    {commissionData.map((entry) => (
+                      <Cell fill={entry.color} key={entry.name} />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={(value) => formatMoney(value as number)} />
+                  <Legend />
+                </PieChart>
+              )}
+            </MeasuredChart>
+          )}
         </div>
 
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm xl:col-span-1">
+        <div className="min-w-0 rounded-xl border border-slate-200 bg-white p-4 shadow-sm xl:col-span-1">
           <h2 className="text-base font-bold text-slate-900">
             Sales vs Collections
           </h2>
-          <div className="mt-4 h-72">
-            <ResponsiveContainer height="100%" width="100%">
-              <BarChart data={salesCollectionsData}>
+
+          <MeasuredChart>
+            {({ width, height }) => (
+              <BarChart
+                data={salesCollectionsData}
+                height={height}
+                margin={{
+                  top: 10,
+                  right: 10,
+                  left: 10,
+                  bottom: 10,
+                }}
+                width={width}
+              >
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="name" />
-                <YAxis tickFormatter={(value) => `${Number(value) / 1000000}M`} />
+                <YAxis
+                  tickFormatter={(value) => `${Number(value) / 1000000}M`}
+                />
                 <Tooltip formatter={(value) => formatMoney(value as number)} />
                 <Bar dataKey="value" fill="#2563eb" radius={[8, 8, 0, 0]} />
               </BarChart>
-            </ResponsiveContainer>
-          </div>
+            )}
+          </MeasuredChart>
         </div>
 
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm xl:col-span-1">
+        <div className="min-w-0 rounded-xl border border-slate-200 bg-white p-4 shadow-sm xl:col-span-1">
           <h2 className="text-base font-bold text-slate-900">
             Agent Performance
           </h2>
+
           {isAgentsLoading ? (
             <div className="mt-4">
               <LoadingState message="Loading agent performance..." />
             </div>
           ) : agentsError ? (
             <div className="mt-4">
-              <Alert type="error">Failed to load agent performance</Alert>
+              <Alert
+                message={
+                  agentsError instanceof Error
+                    ? agentsError.message
+                    : "Request failed"
+                }
+                title="Failed to load agent performance"
+                variant="error"
+              />
             </div>
           ) : agentChartData.length === 0 ? (
             <div className="mt-4">
               <EmptyState title="No agent performance records" />
             </div>
           ) : (
-            <div className="mt-4 h-72">
-              <ResponsiveContainer height="100%" width="100%">
-                <BarChart data={agentChartData} layout="vertical">
+            <MeasuredChart>
+              {({ width, height }) => (
+                <BarChart
+                  data={agentChartData}
+                  height={height}
+                  layout="vertical"
+                  margin={{
+                    top: 10,
+                    right: 10,
+                    left: 10,
+                    bottom: 10,
+                  }}
+                  width={width}
+                >
                   <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis tickFormatter={(value) => `${Number(value) / 1000000}M`} type="number" />
+                  <XAxis
+                    tickFormatter={(value) => `${Number(value) / 1000000}M`}
+                    type="number"
+                  />
                   <YAxis dataKey="name" type="category" width={90} />
                   <Tooltip formatter={(value) => formatMoney(value as number)} />
                   <Bar
@@ -382,8 +537,8 @@ const Dashboard = () => {
                     radius={[0, 8, 8, 0]}
                   />
                 </BarChart>
-              </ResponsiveContainer>
-            </div>
+              )}
+            </MeasuredChart>
           )}
         </div>
       </div>
@@ -412,8 +567,9 @@ const Dashboard = () => {
               </th>
             </tr>
           </thead>
+
           <tbody className="divide-y divide-slate-100 bg-white">
-            {agents.map((agent) => (
+            {paginatedAgents.map((agent) => (
               <tr className="transition hover:bg-slate-50" key={agent.seller_id}>
                 <td className="px-4 py-3 font-medium text-slate-900">
                   {agent.agent}
@@ -437,7 +593,21 @@ const Dashboard = () => {
             ))}
           </tbody>
         </table>
+
+        {agents.length === 0 ? (
+          <EmptyState title="No agent performance records" />
+        ) : null}
       </TableContainer>
+
+      {agents.length > 0 ? (
+        <Pagination
+          onPageChange={setAgentsPage}
+          onRowsPerPageChange={setAgentsRowsPerPage}
+          page={safeAgentsPage}
+          rowsPerPage={agentsRowsPerPage}
+          totalRows={agents.length}
+        />
+      ) : null}
     </div>
   )
 }
