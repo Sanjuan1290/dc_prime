@@ -56,6 +56,8 @@ const SellerDashboard = () => {
   const { data, isLoading, error } = useQuery({
     queryKey: ["seller-dashboard"],
     queryFn: fetchSellerDashboard,
+    retry: false,
+    refetchOnWindowFocus: false,
   })
 
   const recentSales = data?.recentSales || []
@@ -92,7 +94,18 @@ const SellerDashboard = () => {
   if (isLoading) return <LoadingState label="Loading seller dashboard..." />
 
   if (error) {
-    return <div className="p-6"><Alert variant="error" title={error instanceof Error ? error.message : "Failed to load dashboard"} /></div>
+    return (
+      <div className="p-6">
+        <Alert
+          variant="error"
+          title={
+            error instanceof Error
+              ? error.message
+              : "Failed to load seller dashboard"
+          }
+        />
+      </div>
+    )
   }
 
   const summary = data?.summary

@@ -76,12 +76,15 @@ const AvailableUnits = () => {
   const { data = [], isLoading, error } = useQuery({
     queryKey: ["seller-available-units"],
     queryFn: fetchAvailableUnits,
+    retry: false,
+    refetchOnWindowFocus: false,
   })
 
   const { data: contactData } = useQuery({
     queryKey: ["seller-reservation-contact"],
     queryFn: fetchReservationContact,
     retry: false,
+    refetchOnWindowFocus: false,
   })
 
   const filteredUnits = useMemo(

@@ -45,7 +45,12 @@ const TeamSales = () => {
   const [page, setPage] = useState(1)
   const [rowsPerPage, setRowsPerPage] = useState(10)
   const [search, setSearch] = useState("")
-  const { data = [], isLoading, error } = useQuery({ queryKey: ["seller-sales"], queryFn: fetchSales })
+  const { data = [], isLoading, error } = useQuery({
+    queryKey: ["seller-sales"],
+    queryFn: fetchSales,
+    retry: false,
+    refetchOnWindowFocus: false,
+  })
 
   const filteredSales = useMemo(
     () =>

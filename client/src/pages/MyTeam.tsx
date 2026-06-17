@@ -124,7 +124,12 @@ const MyTeam = () => {
   const { data: currentUserData } = useCurrentUser()
   const currentRole = (currentUserData as CurrentUserResponse | null)?.user?.role?.toLowerCase().trim()
 
-  const { data = [], isLoading, error } = useQuery({ queryKey: ["seller-team"], queryFn: fetchTeam })
+  const { data = [], isLoading, error } = useQuery({
+    queryKey: ["seller-team"],
+    queryFn: fetchTeam,
+    retry: false,
+    refetchOnWindowFocus: false,
+  })
 
   const filteredTeam = useMemo(
     () =>

@@ -1,11 +1,14 @@
-import 'express-async-errors'
 import express from 'express'
 import cors from 'cors'
 import cookieParser from 'cookie-parser'
 import helmet from 'helmet'
+import 'express-async-errors'
+
 import { db } from './db/connect.js'
 
 import usersRouter from './routers/users.router.js'
+import sellerPortalRouter from './routers/sellerPortal.router.js'
+
 import projectsRouter from './routers/projects.router.js'
 import listingsRouter from './routers/listings.router.js'
 import clientsRouter from './routers/clients.router.js'
@@ -20,11 +23,11 @@ import dashboardRouter from './routers/dashboard.router.js'
 import reportsRouter from './routers/reports.router.js'
 import auditLogsRouter from './routers/auditLogs.router.js'
 import settingsRouter from './routers/settings.router.js'
-import useCurrentUser from './utils/useCurrentUser.js'
 import cashAdvancesRouter from './routers/cashAdvances.router.js'
 import printFormsRouter from './routers/printForms.router.js'
 import usersManagementRouter from './routers/usersManagement.router.js'
-import sellerPortalRouter from './routers/sellerPortal.router.js'
+
+import useCurrentUser from './utils/useCurrentUser.js'
 import { startPaymentReminderJob } from './jobs/paymentReminderJob.js'
 import { startDocumentReminderJob } from './jobs/documentReminderJob.js'
 
@@ -33,13 +36,16 @@ const app = express()
 app.set('trust proxy', 1)
 
 app.use(helmet())
+
 app.use(express.json())
 app.use(cookieParser())
 
-app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
-  credentials: true
-}))
+app.use(
+  cors({
+    origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+    credentials: true,
+  })
+)
 
 app.get('/', (req, res) => {
   res.json({ message: 'Server is running' })
@@ -47,7 +53,27 @@ app.get('/', (req, res) => {
 
 app.get('/api/v1/getCurrentUser', useCurrentUser)
 
+/*
+  IMPORTANT:
+  Mount public/auth routes and seller portal routes BEFORE admin routers.
+
+  Admin routers use router.use(auth, adminOnly).
+  Since all routers are mounted at /api/v1, an admin router mounted earlier
+  will run its adminOnly middleware even for /api/v1/seller/... requests.
+
+  That is why BNM was getting:
+  { "message": "Admin access only." }
+
+  Do not move sellerPortalRouter below admin routers.
+*/
 app.use('/api/v1', usersRouter)
+app.use('/api/v1', sellerPortalRouter)
+
+/*
+  Admin-only routers.
+  These are mounted after sellerPortalRouter so seller routes are not blocked
+  by router-level adminOnly middleware.
+*/
 app.use('/api/v1', projectsRouter)
 app.use('/api/v1', listingsRouter)
 app.use('/api/v1', clientsRouter)
@@ -55,11 +81,6 @@ app.use('/api/v1', clientUnitsRouter)
 app.use('/api/v1', documentsRouter)
 app.use('/api/v1', paymentsRouter)
 app.use('/api/v1', accreditedSellersRouter)
-
-// Seller portal must be mounted before finance/admin routers so seller role pages
-// never accidentally pass through admin-only middleware in future route changes.
-app.use('/api/v1', sellerPortalRouter)
-
 app.use('/api/v1', commissionsRouter)
 app.use('/api/v1', employeesRouter)
 app.use('/api/v1', attendanceRouter)
@@ -73,7 +94,7 @@ app.use('/api/v1', usersManagementRouter)
 
 app.use((req, res) => {
   res.status(404).json({
-    message: 'Route not found'
+    message: 'Route not found',
   })
 })
 
@@ -108,6 +129,7 @@ app.use((err, req, res, _next) => {
   }
 
   const status = err.status || err.statusCode || 500
+
   const response = {
     message: err.message || 'Internal server error',
   }
