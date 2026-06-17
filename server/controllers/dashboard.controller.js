@@ -44,7 +44,7 @@ export const getDashboardSummary = async (req, res) => {
           0
         )
         FROM listings
-        WHERE status <> 'inactive'
+        WHERE status NOT IN ('inactive', 'superseded')
       ) AS listed_lot_value,
 
       (

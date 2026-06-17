@@ -184,6 +184,58 @@ const recomputeListingClientUnitBalances = async (
   return balanceSummaries
 }
 
+
+const normalizeUnitAliasList = (value) => {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => String(item || '').trim())
+      .filter(Boolean)
+  }
+
+  return String(value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+const syncListingUnitAliases = async (connectionOrDb, listingId, aliases = []) => {
+  const uniqueAliases = Array.from(
+    new Set(
+      normalizeUnitAliasList(aliases)
+        .map((alias) => alias.trim())
+        .filter(Boolean)
+    )
+  )
+
+  await connectionOrDb.query(
+    `DELETE FROM listing_unit_aliases WHERE listing_id = ?`,
+    [listingId]
+  )
+
+  if (uniqueAliases.length === 0) return { aliasCount: 0 }
+
+  const values = uniqueAliases.map(() => `(?, ?, 'old_unit_id')`).join(', ')
+  const params = uniqueAliases.flatMap((alias) => [listingId, alias])
+
+  await connectionOrDb.query(
+    `
+    INSERT INTO listing_unit_aliases (
+      listing_id,
+      alias_unit_id,
+      alias_type
+    ) VALUES ${values}
+    `,
+    params
+  )
+
+  return { aliasCount: uniqueAliases.length }
+}
+
+const formatOldUnitIdsForAudit = (oldUnitIds) => {
+  const aliases = normalizeUnitAliasList(oldUnitIds)
+  return aliases.length ? ` | Old Unit IDs: ${aliases.join(', ')}` : ''
+}
+
 const listingFields = `
   l.id,
   l.project_id,
@@ -193,6 +245,23 @@ const listingFields = `
   p.administrator AS project_administrator,
   l.cadastral_lot_no,
   l.unit_id,
+  (
+    SELECT GROUP_CONCAT(DISTINCT lua.alias_unit_id ORDER BY lua.id SEPARATOR ', ')
+    FROM listing_unit_aliases lua
+    WHERE lua.listing_id = l.id
+  ) AS old_unit_ids,
+  (
+    SELECT GROUP_CONCAT(DISTINCT parent_listing.unit_id ORDER BY parent_listing.unit_id SEPARATOR ', ')
+    FROM listing_unit_lineage lul
+    INNER JOIN listings parent_listing ON parent_listing.id = lul.parent_listing_id
+    WHERE lul.child_listing_id = l.id
+  ) AS source_unit_ids,
+  (
+    SELECT GROUP_CONCAT(DISTINCT child_listing.unit_id ORDER BY child_listing.unit_id SEPARATOR ', ')
+    FROM listing_unit_lineage lul
+    INNER JOIN listings child_listing ON child_listing.id = lul.child_listing_id
+    WHERE lul.parent_listing_id = l.id
+  ) AS derived_unit_ids,
   l.lot_type,
   l.reservation_fee,
   l.price_per_sqm,
@@ -271,12 +340,32 @@ export const getListings = async (req, res) => {
         p.name LIKE ?
         OR l.cadastral_lot_no LIKE ?
         OR l.unit_id LIKE ?
+        OR EXISTS (
+          SELECT 1
+          FROM listing_unit_aliases lua
+          WHERE lua.listing_id = l.id
+            AND lua.alias_unit_id LIKE ?
+        )
+        OR EXISTS (
+          SELECT 1
+          FROM listing_unit_lineage lul
+          INNER JOIN listings parent_listing ON parent_listing.id = lul.parent_listing_id
+          WHERE lul.child_listing_id = l.id
+            AND parent_listing.unit_id LIKE ?
+        )
+        OR EXISTS (
+          SELECT 1
+          FROM listing_unit_lineage lul
+          INNER JOIN listings child_listing ON child_listing.id = lul.child_listing_id
+          WHERE lul.parent_listing_id = l.id
+            AND child_listing.unit_id LIKE ?
+        )
         OR l.lot_type LIKE ?
         OR l.status LIKE ?
       )
     `)
 
-    params.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm)
+    params.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, searchTerm)
   }
 
   if (!isMissing(project_id) && project_id !== 'all') {
@@ -580,6 +669,7 @@ export const createListing = async (req, res) => {
     project_id,
     cadastral_lot_no,
     unit_id,
+    old_unit_ids = '',
     lot_type,
     reservation_fee = 50000,
     price_per_sqm = 0,
@@ -658,6 +748,7 @@ export const createListing = async (req, res) => {
     )
 
     listingId = result.insertId
+    await syncListingUnitAliases(connection, listingId, old_unit_ids)
     documentSync = await copyProjectRequirementsToListing(connection, listingId, project_id, { overwrite: true })
 
     await connection.commit()
@@ -672,7 +763,7 @@ export const createListing = async (req, res) => {
     userId: req.user.id,
     action: 'create',
     module: 'Listings',
-    description: `Created listing ${unit_id}`,
+    description: `Created listing ${unit_id}${formatOldUnitIdsForAudit(old_unit_ids)}`,
     ipAddress: getClientIp(req)
   })
 
@@ -695,6 +786,7 @@ export const updateListing = async (req, res) => {
     project_id,
     cadastral_lot_no,
     unit_id,
+    old_unit_ids = '',
     lot_type,
     reservation_fee = 50000,
     price_per_sqm = 0,
@@ -727,6 +819,28 @@ export const updateListing = async (req, res) => {
 
   try {
     await connection.beginTransaction()
+
+    const [existingListingRows] = await connection.query(
+      `SELECT id, unit_id FROM listings WHERE id = ? LIMIT 1`,
+      [id]
+    )
+
+    const existingListing = existingListingRows[0]
+
+    if (!existingListing) {
+      await connection.rollback()
+
+      return res.status(404).json({
+        message: 'Listing not found'
+      })
+    }
+
+    const mergedOldUnitIds = [
+      ...normalizeUnitAliasList(old_unit_ids),
+      ...(existingListing.unit_id && existingListing.unit_id !== unit_id
+        ? [existingListing.unit_id]
+        : []),
+    ]
 
     const [result] = await connection.query(
       `
@@ -765,6 +879,8 @@ export const updateListing = async (req, res) => {
       })
     }
 
+    await syncListingUnitAliases(connection, id, mergedOldUnitIds)
+
     balanceSummaries = await recomputeListingClientUnitBalances(connection, id, {
       actorRole: req.user.role,
     })
@@ -781,7 +897,7 @@ export const updateListing = async (req, res) => {
     userId: req.user.id,
     action: 'update',
     module: 'Listings',
-    description: `Updated listing ${unit_id}`,
+    description: `Updated listing ${unit_id}${formatOldUnitIdsForAudit(old_unit_ids)}`,
     ipAddress: getClientIp(req)
   })
 

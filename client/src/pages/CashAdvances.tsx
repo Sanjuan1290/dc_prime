@@ -10,6 +10,7 @@ import {
 } from "react-icons/fi"
 import Alert from "../components/ui/Alert"
 import Button from "../components/ui/Button"
+import ConfirmBox from "../components/ui/ConfirmBox"
 import EmptyState from "../components/ui/EmptyState"
 import Input from "../components/ui/Input"
 import LoadingState from "../components/ui/LoadingState"
@@ -371,6 +372,10 @@ const CashAdvances = () => {
   const [formData, setFormData] = useState<CashAdvanceFormData>(defaultCashAdvanceFormData)
   const [editFormData, setEditFormData] = useState<CashAdvanceFormData>(defaultCashAdvanceFormData)
   const [successMessage, setSuccessMessage] = useState("")
+  const [confirmCashAdvanceAction, setConfirmCashAdvanceAction] = useState<{
+    action: "approve" | "reject"
+    cashAdvance: CashAdvance
+  } | null>(null)
 
   const { data: cashAdvances = [], isLoading, error } = useQuery({
     queryKey: ["cash-advances"],
@@ -427,6 +432,7 @@ const CashAdvances = () => {
     mutationFn: approveCashAdvance,
     onSuccess: () => {
       invalidateCashAdvanceQueries()
+      setConfirmCashAdvanceAction(null)
       setSuccessMessage("Cash advance approved successfully")
     },
   })
@@ -443,6 +449,7 @@ const CashAdvances = () => {
     mutationFn: rejectCashAdvance,
     onSuccess: () => {
       invalidateCashAdvanceQueries()
+      setConfirmCashAdvanceAction(null)
       setSuccessMessage("Cash advance rejected successfully")
     },
   })
@@ -596,8 +603,32 @@ const CashAdvances = () => {
                       {canEdit ? <Button onClick={() => openEditModal(cashAdvance)}>Edit</Button> : null}
                       {canApproveReject ? (
                         <>
-                          <Button icon={<FiCheckCircle />} disabled={approveMutation.isPending} onClick={() => approveMutation.mutate(cashAdvance.id)} variant="primary">Approve</Button>
-                          <Button icon={<FiXCircle />} disabled={rejectMutation.isPending} onClick={() => rejectMutation.mutate(cashAdvance.id)} variant="danger">Reject</Button>
+                          <Button
+                            icon={<FiCheckCircle />}
+                            disabled={approveMutation.isPending}
+                            onClick={() =>
+                              setConfirmCashAdvanceAction({
+                                action: "approve",
+                                cashAdvance,
+                              })
+                            }
+                            variant="primary"
+                          >
+                            Approve
+                          </Button>
+                          <Button
+                            icon={<FiXCircle />}
+                            disabled={rejectMutation.isPending}
+                            onClick={() =>
+                              setConfirmCashAdvanceAction({
+                                action: "reject",
+                                cashAdvance,
+                              })
+                            }
+                            variant="danger"
+                          >
+                            Reject
+                          </Button>
                         </>
                       ) : null}
                       {canDeduct ? (
@@ -707,6 +738,45 @@ const CashAdvances = () => {
               </section>
             </div>
           ) : null}
+        </Modal>
+      ) : null}
+
+      {confirmCashAdvanceAction ? (
+        <Modal
+          onClose={() => setConfirmCashAdvanceAction(null)}
+          title={
+            confirmCashAdvanceAction.action === "approve"
+              ? "Approve Cash Advance"
+              : "Reject Cash Advance"
+          }
+        >
+          <ConfirmBox
+            title={
+              confirmCashAdvanceAction.action === "approve"
+                ? "Confirm cash advance approval"
+                : "Confirm cash advance rejection"
+            }
+            message={`Are you sure you want to ${confirmCashAdvanceAction.action} this cash advance request for ${confirmCashAdvanceAction.cashAdvance.seller_name} worth ${formatMoney(confirmCashAdvanceAction.cashAdvance.amount)}?`}
+            cancelLabel="Review"
+            confirmLabel={
+              confirmCashAdvanceAction.action === "approve"
+                ? approveMutation.isPending
+                  ? "Approving..."
+                  : "Yes, approve"
+                : rejectMutation.isPending
+                  ? "Rejecting..."
+                  : "Yes, reject"
+            }
+            onCancel={() => setConfirmCashAdvanceAction(null)}
+            onConfirm={() => {
+              if (confirmCashAdvanceAction.action === "approve") {
+                approveMutation.mutate(confirmCashAdvanceAction.cashAdvance.id)
+                return
+              }
+
+              rejectMutation.mutate(confirmCashAdvanceAction.cashAdvance.id)
+            }}
+          />
         </Modal>
       ) : null}
     </div>

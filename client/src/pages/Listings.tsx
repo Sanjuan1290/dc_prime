@@ -39,6 +39,7 @@ type ListingStatus =
   | "hold"
   | "sold"
   | "inactive"
+  | "superseded"
   | string;
 
 type Listing = {
@@ -50,6 +51,9 @@ type Listing = {
   project_administrator?: string | null;
   cadastral_lot_no: string | null;
   unit_id: string;
+  old_unit_ids?: string | null;
+  source_unit_ids?: string | null;
+  derived_unit_ids?: string | null;
   lot_type: string | null;
   reservation_fee: number | string;
   price_per_sqm: number | string;
@@ -162,6 +166,7 @@ type ListingFormData = {
   project_id: number;
   cadastral_lot_no: string;
   unit_id: string;
+  old_unit_ids: string;
   lot_type: string;
   reservation_fee: number;
   price_per_sqm: number;
@@ -182,6 +187,7 @@ const defaultListingFormData: ListingFormData = {
   project_id: 0,
   cadastral_lot_no: "",
   unit_id: "",
+  old_unit_ids: "",
   lot_type: "inner",
   reservation_fee: 50000,
   price_per_sqm: 0,
@@ -198,6 +204,7 @@ const statusFilters = [
   { label: "Hold", value: "hold" },
   { label: "Sold", value: "sold" },
   { label: "Inactive", value: "inactive" },
+  { label: "Superseded", value: "superseded" },
 ];
 
 const normalLotTypes = ["inner", "corner", "end"];
@@ -206,7 +213,8 @@ const chartColors = ["#2563eb", "#f59e0b", "#8b5cf6", "#10b981", "#ef4444"];
 
 const formulaTooltips: Record<string, string> = {
   Installment: "Lot/installment type. Value comes from listing.lot_type.",
-  "Unit ID": "Unit identifier. Value comes from listing.unit_id.",
+  "Unit ID": "Current official unit identifier. Value comes from listing.unit_id.",
+  "Old Unit IDs": "Historical / previous unit identifiers. These are aliases only and do not duplicate dashboard totals.",
   Area: "Area = lot_area_sqm. This is the lot area in square meters.",
   "Price per SQM":
     "Price per SQM = price_per_sqm. This is the selling price per square meter.",
@@ -224,7 +232,7 @@ const formulaTooltips: Record<string, string> = {
   "20 Months": "20 Months = 75% Balance ÷ 20.",
   Project: "Project name. Value comes from listing.project_name.",
   Status:
-    "Listing status. Example: available, reserved, active, hold, sold, inactive.",
+    "Listing status. Example: available, reserved, active, hold, sold, inactive, superseded.",
   Actions: "Row actions: Details, Edit, Delete.",
 };
 
@@ -411,6 +419,7 @@ const listingToFormData = (listing: Listing): ListingFormData => ({
   project_id: listing.project_id,
   cadastral_lot_no: listing.cadastral_lot_no || "",
   unit_id: listing.unit_id,
+  old_unit_ids: listing.old_unit_ids || "",
   lot_type: listing.lot_type || "inner",
   reservation_fee: Number(listing.reservation_fee || 50000),
   price_per_sqm: Number(listing.price_per_sqm || 0),
@@ -689,6 +698,9 @@ const Listings = () => {
       listing.project_name.toLowerCase().includes(search) ||
       (listing.cadastral_lot_no || "").toLowerCase().includes(search) ||
       listing.unit_id.toLowerCase().includes(search) ||
+      (listing.old_unit_ids || "").toLowerCase().includes(search) ||
+      (listing.source_unit_ids || "").toLowerCase().includes(search) ||
+      (listing.derived_unit_ids || "").toLowerCase().includes(search) ||
       (listing.lot_type || "").toLowerCase().includes(search);
 
     const matchesStatus =
@@ -881,6 +893,7 @@ const Listings = () => {
             <tr className="border-b border-slate-200">
               <FormulaHeader label="Unit Type" />
               <FormulaHeader label="Unit ID" />
+              <FormulaHeader label="Old Unit IDs" />
               <FormulaHeader label="Area" />
               <FormulaHeader label="Price per SQM" />
               <FormulaHeader label="Net Selling Price" />
@@ -909,6 +922,10 @@ const Listings = () => {
                 </td>
 
                 <td className="px-4 py-3 font-semibold">{listing.unit_id}</td>
+
+                <td className="px-4 py-3 text-slate-600">
+                  {listing.old_unit_ids || "-"}
+                </td>
 
                 <td className="px-4 py-3 text-slate-600">
                   {formatNumber(listing.lot_area_sqm)}
@@ -1005,7 +1022,7 @@ const Listings = () => {
 
             {paginatedListings.length === 0 ? (
               <tr>
-                <td colSpan={19}>
+                <td colSpan={20}>
                   <EmptyState title="No listings found" />
                 </td>
               </tr>
@@ -1294,6 +1311,18 @@ const ListingFormModal = ({
             required
           />
 
+          <Input
+            label="Old Unit IDs"
+            value={formData.old_unit_ids}
+            onChange={(e) =>
+              setFormData({
+                ...formData,
+                old_unit_ids: e.target.value,
+              })
+            }
+            placeholder="Example: LA-204, Lot 204 old survey ID"
+          />
+
           <Select
             label="Lot Type"
             value={lotTypeMode}
@@ -1401,6 +1430,7 @@ const ListingFormModal = ({
             <option value="hold">Hold</option>
             <option value="sold">Sold</option>
             <option value="inactive">Inactive</option>
+            <option value="superseded">Superseded</option>
           </Select>
 
           {onEditDocuments ? (
@@ -1519,6 +1549,9 @@ const ListingDetailsModal = ({
               value={details.listing.cadastral_lot_no || "-"}
             />
             <Detail label="Unit ID" value={details.listing.unit_id} />
+            <Detail label="Old Unit IDs" value={details.listing.old_unit_ids || "-"} />
+            <Detail label="Source Unit IDs" value={details.listing.source_unit_ids || "-"} />
+            <Detail label="Derived Unit IDs" value={details.listing.derived_unit_ids || "-"} />
             <Detail
               label="Lot Type"
               value={formatText(details.listing.lot_type)}
