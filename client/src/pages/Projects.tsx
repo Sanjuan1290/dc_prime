@@ -631,6 +631,7 @@ const Projects = () => {
               />
               <Input
                 label="Location Code"
+                placeholder="ex. LA, PE"
                 maxLength={10}
                 onChange={(e) =>
                   setData({
@@ -643,11 +644,13 @@ const Projects = () => {
               />
               <Input
                 label="Administrator"
+                placeholder="enter admin name"
                 onChange={(e) => setData({ ...data, administrator: e.target.value })}
                 value={data.administrator}
               />
               <Input
                 label="Tax declaration no."
+                placeholder="AA-06-0005-xxxxx"
                 onChange={(e) =>
                   setData({ ...data, tax_declaration_no: e.target.value })
                 }
@@ -655,6 +658,7 @@ const Projects = () => {
               />
               <Input
                 label="PIN"
+                placeholder="022-06-0005-xxx-xx"
                 onChange={(e) => setData({ ...data, pin: e.target.value })}
                 value={data.pin}
               />
