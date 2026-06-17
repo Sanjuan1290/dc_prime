@@ -23,6 +23,7 @@ import TableContainer from "../components/ui/TableContainer"
 import { API_URL, getErrorMessage } from "../utils/api"
 import {
   formatDate,
+  formatDateOnly,
   formatMoney,
   formatNumber,
   formatText,
@@ -125,7 +126,7 @@ const emptyFormData: PaymentFormData = {
 }
 
 const paymentTypes = [
-  "reservation_fee",
+  "reservation",
   "downpayment",
   "monthly",
   "legal_misc",
@@ -142,7 +143,7 @@ const paymentMethods = [
 ]
 
 const getPaymentDateValue = (date: string | null | undefined) => {
-  const formattedDate = formatDate(date)
+  const formattedDate = formatDateOnly(date)
 
   return formattedDate === "-" ? "" : formattedDate
 }
@@ -286,6 +287,30 @@ const getClientUnitSearchText = (unit: ClientUnit) => {
     .toLowerCase()
 }
 
+const getSuggestionHelpText = (paymentType: string) => {
+  if (paymentType === "reservation") {
+    return "Suggested amount based on unpaid reservation fee"
+  }
+
+  if (paymentType === "downpayment") {
+    return "Suggested amount based on unpaid downpayment schedule"
+  }
+
+  if (paymentType === "monthly") {
+    return "Suggested amount based on unpaid monthly schedule"
+  }
+
+  if (paymentType === "full_payment") {
+    return "Suggested amount based on remaining balance"
+  }
+
+  if (paymentType === "legal_misc") {
+    return "Suggested amount based on legal and miscellaneous fees"
+  }
+
+  return "Other payments are manual"
+}
+
 const Payments = () => {
   const queryClient = useQueryClient()
 
@@ -301,6 +326,7 @@ const Payments = () => {
   const [formData, setFormData] = useState<PaymentFormData>(emptyFormData)
   const [editFormData, setEditFormData] =
     useState<PaymentFormData>(emptyFormData)
+  const [isAmountManuallyEdited, setIsAmountManuallyEdited] = useState(false)
   const [clientUnitSearch, setClientUnitSearch] = useState("")
   const [editClientUnitSearch, setEditClientUnitSearch] = useState("")
   const [paymentToDelete, setPaymentToDelete] = useState<Payment | null>(null)
@@ -445,7 +471,12 @@ const Payments = () => {
   })
 
   useEffect(() => {
-    if (!isAddOpen || !paymentSuggestions || formData.payment_type === "other") {
+    if (
+      !isAddOpen ||
+      !paymentSuggestions ||
+      formData.payment_type === "other" ||
+      isAmountManuallyEdited
+    ) {
       return
     }
 
@@ -475,6 +506,7 @@ const Payments = () => {
     formData.client_unit_id,
     formData.payment_type,
     isAddOpen,
+    isAmountManuallyEdited,
     paymentSuggestions,
   ])
 
@@ -496,6 +528,7 @@ const Payments = () => {
 
   const openAddModal = () => {
     setFormData(emptyFormData)
+    setIsAmountManuallyEdited(false)
     setClientUnitSearch("")
     setSuccessMessage("")
     setIsAddOpen(true)
@@ -695,7 +728,7 @@ const Payments = () => {
                   {payment.reference_id || "-"}
                 </td>
                 <td className="px-4 py-3 text-slate-600">
-                  {formatDate(payment.payment_date)}
+                  {formatDateOnly(payment.payment_date)}
                 </td>
                 <td className="px-4 py-3 text-slate-600">
                   <p>{payment.verified_by_name || "-"}</p>
@@ -760,6 +793,7 @@ const Payments = () => {
           selectedClientUnit={selectedClientUnit}
           paymentSuggestions={paymentSuggestions}
           isSuggestionsLoading={isPaymentSuggestionsLoading}
+          onAmountManualEditChange={setIsAmountManuallyEdited}
           onClose={() => setIsAddOpen(false)}
           onSave={handleCreatePayment}
           isPending={createPaymentMutation.isPending}
@@ -811,6 +845,7 @@ type PaymentModalProps = {
   selectedClientUnit?: ClientUnit
   paymentSuggestions?: PaymentSuggestions | null
   isSuggestionsLoading?: boolean
+  onAmountManualEditChange?: (isEdited: boolean) => void
   onClose: () => void
   onSave: () => void
   isPending: boolean
@@ -827,6 +862,7 @@ const PaymentModal = ({
   selectedClientUnit,
   paymentSuggestions = null,
   isSuggestionsLoading = false,
+  onAmountManualEditChange,
   onClose,
   onSave,
   isPending,
@@ -838,6 +874,7 @@ const PaymentModal = ({
   const nextDueLabel = paymentSuggestions?.next_due
     ? `${paymentSuggestions.next_due.description}: ${formatMoney(paymentSuggestions.next_due.due_amount)}`
     : null
+  const suggestionHelpText = getSuggestionHelpText(formData.payment_type)
 
   return (
     <Modal
@@ -862,9 +899,11 @@ const PaymentModal = ({
             value={clientUnitSearch}
             onChange={(e) => {
               setClientUnitSearch(e.target.value)
+              onAmountManualEditChange?.(false)
               setFormData({
                 ...formData,
                 client_unit_id: "",
+                amount: onAmountManualEditChange ? "" : formData.amount,
               })
             }}
             required
@@ -890,6 +929,7 @@ const PaymentModal = ({
                         client_unit_id: unit.id,
                         amount: "",
                       })
+                      onAmountManualEditChange?.(false)
                       setClientUnitSearch(label)
                     }}
                     type="button"
@@ -946,6 +986,7 @@ const PaymentModal = ({
               const nextType = e.target.value
               const nextSuggestedAmount = paymentSuggestions?.suggestions?.[nextType]
 
+              onAmountManualEditChange?.(false)
               setFormData({
                 ...formData,
                 payment_type: nextType,
@@ -970,12 +1011,13 @@ const PaymentModal = ({
               min={0}
               step="0.01"
               value={formData.amount}
-              onChange={(e) =>
+              onChange={(e) => {
+                onAmountManualEditChange?.(true)
                 setFormData({
                   ...formData,
                   amount: e.target.value,
                 })
-              }
+              }}
               required
             />
             {isSuggestionsLoading ? (
@@ -984,12 +1026,14 @@ const PaymentModal = ({
               </p>
             ) : suggestedAmount && Number(suggestedAmount) > 0 ? (
               <p className="mt-1 text-xs text-slate-500">
-                Suggested from terms: {formatMoney(suggestedAmount)}
-                {nextDueLabel ? ` • Next due: ${nextDueLabel}` : ""}
+                {suggestionHelpText}: {formatMoney(suggestedAmount)}
+                {nextDueLabel ? ` - Next due: ${nextDueLabel}` : ""}
               </p>
             ) : (
               <p className="mt-1 text-xs text-slate-500">
-                Choose a payment type first. Other payments are manual.
+                {formData.payment_type === "other"
+                  ? "Other payments are manual."
+                  : "Select a client unit and payment type to load a suggested amount."}
               </p>
             )}
           </div>

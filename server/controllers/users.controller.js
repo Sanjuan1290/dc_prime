@@ -2,7 +2,7 @@ import bcrypt from 'bcrypt'
 import crypto from 'crypto'
 import jwt from 'jsonwebtoken'
 import { db } from '../db/connect.js'
-import { createAuditLog } from '../utils/createAuditLog.js'
+import { safeCreateAuditLog } from '../utils/createAuditLog.js'
 import { sendSystemEmail } from '../lib/mailer.js'
 
 const allowedRoles = ['super_admin', 'admin', 'broker_network_manager', 'broker', 'manager', 'agent']
@@ -87,7 +87,7 @@ export const login = async (req, res) => {
 
   await db.query(`UPDATE users SET last_login = NOW() WHERE id = ?`, [user.id])
 
-  await createAuditLog({
+  await safeCreateAuditLog({
     userId: user.id,
     action: 'login',
     module: 'Auth',
@@ -160,7 +160,7 @@ export const changePassword = async (req, res) => {
     [passwordHash, req.user.id]
   )
 
-  await createAuditLog({
+  await safeCreateAuditLog({
     userId: req.user.id,
     action: 'change_password',
     module: 'Auth',

@@ -1,6 +1,6 @@
 import bcrypt from 'bcrypt'
 import { db } from '../db/connect.js'
-import { createAuditLog } from '../utils/createAuditLog.js'
+import { safeCreateAuditLog } from '../utils/createAuditLog.js'
 import { getClientIp } from '../utils/getClientIp.js'
 import { generateTemporaryPassword, sendTemporaryPasswordEmail } from './users.controller.js'
 
@@ -464,7 +464,7 @@ export const updateCommissionRoleDefaults = async (req, res) => {
 
     await connection.commit()
 
-    await createAuditLog({
+    await safeCreateAuditLog({
       userId: req.user.id,
       action: 'update',
       module: 'Commission Defaults',
@@ -640,7 +640,7 @@ export const createUser = async (req, res) => {
       )
     }
 
-    await createAuditLog({
+    await safeCreateAuditLog({
       userId: req.user.id,
       action: 'create',
       module: 'Users',
@@ -800,7 +800,7 @@ export const updateUser = async (req, res) => {
 
     await connection.commit()
 
-    await createAuditLog({
+    await safeCreateAuditLog({
       userId: req.user.id,
       action: 'update',
       module: 'Users',
@@ -843,7 +843,7 @@ export const deactivateUser = async (req, res) => {
 
     await connection.commit()
 
-    await createAuditLog({
+    await safeCreateAuditLog({
       userId: req.user.id,
       action: 'deactivate',
       module: 'Users',
@@ -896,7 +896,7 @@ export const resetUserTemporaryPassword = async (req, res) => {
     await db.query(`UPDATE users SET temp_password_sent_at = NOW() WHERE id = ?`, [id])
   }
 
-  await createAuditLog({
+  await safeCreateAuditLog({
     userId: req.user.id,
     action: 'reset_password',
     module: 'Users',
@@ -937,7 +937,7 @@ export const linkUserToSeller = async (req, res) => {
   await db.query(`UPDATE accredited_sellers SET user_id = NULL WHERE user_id = ?`, [id])
   await db.query(`UPDATE accredited_sellers SET user_id = ? WHERE id = ?`, [id, seller_id])
 
-  await createAuditLog({
+  await safeCreateAuditLog({
     userId: req.user.id,
     action: 'link',
     module: 'Users',

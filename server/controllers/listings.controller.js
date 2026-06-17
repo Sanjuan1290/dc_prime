@@ -1,5 +1,5 @@
 import { db } from '../db/connect.js'
-import { createAuditLog } from '../utils/createAuditLog.js'
+import { safeCreateAuditLog } from '../utils/createAuditLog.js'
 import { getClientIp } from '../utils/getClientIp.js'
 import { refreshCommissionEligibility } from './commissions.controller.js'
 import {
@@ -481,9 +481,9 @@ export const getListingFullDetails = async (req, res) => {
       `
       SELECT
         cm.rate,
-        cm.amount,
+        cm.gross_commission,
         cm.released_amount,
-        cm.amount - cm.released_amount AS remaining_amount,
+        cm.gross_commission - cm.released_amount AS remaining_amount,
         cm.status,
         seller.full_name AS seller_name,
         seller.seller_role,
@@ -504,7 +504,7 @@ export const getListingFullDetails = async (req, res) => {
         seller_role: commissionRows[0].seller_role,
         reports_under: commissionRows[0].reports_under,
         rate: formatDecimal(commissionRows[0].rate),
-        amount: formatDecimal(commissionRows[0].amount),
+        amount: formatDecimal(commissionRows[0].gross_commission),
         released_amount: formatDecimal(commissionRows[0].released_amount),
         remaining_amount: formatDecimal(commissionRows[0].remaining_amount),
         status: commissionRows[0].status
@@ -673,7 +673,7 @@ export const createListing = async (req, res) => {
     connection.release()
   }
 
-  await createAuditLog({
+  await safeCreateAuditLog({
     userId: req.user.id,
     action: 'create',
     module: 'Listings',
@@ -784,7 +784,7 @@ export const updateListing = async (req, res) => {
     connection.release()
   }
 
-  await createAuditLog({
+  await safeCreateAuditLog({
     userId: req.user.id,
     action: 'update',
     module: 'Listings',
@@ -850,7 +850,7 @@ export const updateListingDocumentRequirements = async (req, res) => {
   const requirements = document_requirements || documentRequirements || []
   const result = await replaceListingDocumentRequirements(db, id, requirements, 'listing_override')
 
-  await createAuditLog({
+  await safeCreateAuditLog({
     userId: req.user.id,
     action: 'update',
     module: 'Listing Documents',
@@ -880,7 +880,7 @@ export const resetListingDocumentRequirements = async (req, res) => {
 
   const result = await copyProjectRequirementsToListing(db, id, listing.project_id, { overwrite: true })
 
-  await createAuditLog({
+  await safeCreateAuditLog({
     userId: req.user.id,
     action: 'reset',
     module: 'Listing Documents',
@@ -927,7 +927,7 @@ export const deleteListing = async (req, res) => {
 
   await db.query(`DELETE FROM listings WHERE id = ?`, [id])
 
-  await createAuditLog({
+  await safeCreateAuditLog({
     userId: req.user.id,
     action: 'delete',
     module: 'Listings',
@@ -937,7 +937,6 @@ export const deleteListing = async (req, res) => {
 
   return res.status(200).json({ message: 'Listing deleted successfully' })
 }
-
 
 
 

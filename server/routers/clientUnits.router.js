@@ -11,19 +11,21 @@ import {
   reserveListing,
   searchClientUnits
 } from '../controllers/clientUnits.controller.js'
-import { auth } from '../middlewares/auth.middleware.js'
+import { auth, adminOnly } from '../middlewares/auth.middleware.js'
 
 const router = express.Router()
 
-router.get('/client-units', auth, getClientUnits)
-router.get('/client-units/search', auth, searchClientUnits)
-router.get('/client-units/:id', auth, getClientUnit)
-router.patch('/client-units/:id', auth, updateClientUnit)
-router.patch('/client-units/:id/change-listing', auth, changeClientUnitListing)
-router.patch('/client-units/:id/cancel', auth, cancelClientUnit)
-router.delete('/client-units/:id', auth, deleteClientUnit)
-router.get('/clients/:clientId/units', auth, getClientUnitsByClient)
-router.get('/available-listings', auth, getAvailableListings)
-router.post('/clients/:clientId/reserve-listing', auth, reserveListing)
+router.use(auth, adminOnly)
+
+router.get('/client-units', getClientUnits)
+router.get('/client-units/search', searchClientUnits)
+router.get('/client-units/:id', getClientUnit)
+router.patch('/client-units/:id', updateClientUnit)
+router.patch('/client-units/:id/change-listing', changeClientUnitListing)
+router.patch('/client-units/:id/cancel', cancelClientUnit)
+router.delete('/client-units/:id', deleteClientUnit)
+router.get('/clients/:clientId/units', getClientUnitsByClient)
+router.get('/available-listings', getAvailableListings)
+router.post('/clients/:clientId/reserve-listing', reserveListing)
 
 export default router

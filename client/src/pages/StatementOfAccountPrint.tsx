@@ -2,7 +2,7 @@ import { useEffect } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { useParams } from "react-router-dom"
 import { API_URL } from "../utils/api"
-import { formatDate, formatMoney } from "../utils/formatters"
+import { formatDate, formatDateOnly, formatMoney } from "../utils/formatters"
 
 type ScheduleRow = {
   due_date: string | null
@@ -113,7 +113,7 @@ const StatementOfAccountPrint = () => {
                 </tr>
                 <tr>
                   <td>Statement Date</td>
-                  <td>{formatDate(data.statement_date)}</td>
+                  <td>{formatDateOnly(data.statement_date)}</td>
                 </tr>
                 <tr>
                   <td>Property Address</td>
@@ -172,7 +172,7 @@ const StatementOfAccountPrint = () => {
                 <td>{row.description}</td>
                 <td className="money strong">{amount(row.due_amount)}</td>
                 <td className="money">{Number(row.penalty || 0).toFixed(2)}</td>
-                <td>{formatDate(row.date_paid)}</td>
+                <td>{formatDateOnly(row.date_paid)}</td>
                 <td className="money">{row.amount_paid ? amount(row.amount_paid) : ""}</td>
                 <td>{display(row.reference)}</td>
                 <td className="money strong">{amount(row.running_balance)}</td>
@@ -240,4 +240,3 @@ const printStyles = `
 `
 
 export default StatementOfAccountPrint
-

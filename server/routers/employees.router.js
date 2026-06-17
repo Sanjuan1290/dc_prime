@@ -7,15 +7,17 @@ import {
   getEmployeeRestDays,
   updateEmployeeRestDays
 } from '../controllers/employees.controller.js'
-import { auth } from '../middlewares/auth.middleware.js'
+import { auth, adminOnly } from '../middlewares/auth.middleware.js'
 
 const router = express.Router()
 
-router.get('/employees', auth, getEmployees)
-router.get('/employees/:id', auth, getEmployee)
-router.post('/employees', auth, createEmployee)
-router.patch('/employees/:id', auth, updateEmployee)
-router.get('/employees/:id/rest-days', auth, getEmployeeRestDays)
-router.patch('/employees/:id/rest-days', auth, updateEmployeeRestDays)
+router.use(auth, adminOnly)
+
+router.get('/employees', getEmployees)
+router.get('/employees/:id', getEmployee)
+router.post('/employees', createEmployee)
+router.patch('/employees/:id', updateEmployee)
+router.get('/employees/:id/rest-days', getEmployeeRestDays)
+router.patch('/employees/:id/rest-days', updateEmployeeRestDays)
 
 export default router

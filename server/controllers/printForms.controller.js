@@ -1,5 +1,5 @@
 import { db } from '../db/connect.js'
-import { createAuditLog } from '../utils/createAuditLog.js'
+import { safeCreateAuditLog } from '../utils/createAuditLog.js'
 import { getClientIp } from '../utils/getClientIp.js'
 
 const toNumber = (value) => Number(value || 0)
@@ -14,6 +14,11 @@ const addMonths = (date, months) => {
 
 const formatDateOnly = (date) => {
   if (!date) return null
+  if (typeof date === 'string') {
+    const matchedDate = date.trim().match(/^(\d{4}-\d{2}-\d{2})/)
+    if (matchedDate) return matchedDate[1]
+  }
+
   const parsed = date instanceof Date ? date : new Date(date)
   if (Number.isNaN(parsed.getTime())) return null
 
@@ -151,7 +156,7 @@ const fetchPrintData = async (clientUnitId) => {
       payment_type,
       payment_method,
       reference_id,
-      payment_date,
+      DATE_FORMAT(payment_date, '%Y-%m-%d') AS payment_date,
       status,
       verified_at,
       created_at
@@ -363,7 +368,7 @@ export const logClientUnitFormPrint = async (req, res) => {
     [clientUnitId, form_type, req.user?.id || null, notes]
   )
 
-  await createAuditLog({
+  await safeCreateAuditLog({
     userId: req.user?.id || null,
     action: 'print',
     module: 'Client Forms',

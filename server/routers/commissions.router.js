@@ -15,6 +15,7 @@ import {
   holdRelease,
   unholdRelease,
   restoreCancelledRelease,
+  deductCashAdvanceManual,
   getApprovedCashAdvancesBySeller,
   markClientUnitRetentionEligible,
 } from '../controllers/commissions.controller.js'
@@ -36,6 +37,7 @@ router.patch('/commission-releases/:id/cancel', cancelRelease)
 router.patch('/commission-releases/:id/hold', holdRelease)
 router.patch('/commission-releases/:id/unhold', unholdRelease)
 router.patch('/commission-releases/:id/restore-cancelled', restoreCancelledRelease)
+router.patch('/commission-releases/:id/deduct-advance', deductCashAdvanceManual)
 
 router.get('/sellers/:sellerId/approved-cash-advances', getApprovedCashAdvancesBySeller)
 
@@ -51,4 +53,3 @@ router.post(
 )
 
 export default router
-

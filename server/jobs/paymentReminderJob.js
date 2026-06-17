@@ -32,24 +32,50 @@ export const runPaymentReminderJob = async () => {
     HAVING days_until_due = 7
   `)
 
-  for (const unit of units) {
-    await sendSystemEmail({
-      to: unit.client_email,
-      subject: `Payment Reminder — Unit ${unit.unit_id}`,
-      text: `Dear ${unit.client_name},\n\nThis is a reminder that your monthly payment for Unit ${unit.unit_id} (${unit.project_name}) is due in 7 days.\n\nIf you already paid, please disregard this email.\n\nD&C Prime Realty`,
-    })
-
-    await db.query(`UPDATE client_units SET last_payment_reminder_at = NOW() WHERE id = ?`, [unit.id])
+  const counts = {
+    sent: 0,
+    failed: 0,
+    skipped: 0,
   }
 
-  return units.length
+  for (const unit of units) {
+    if (!unit.client_email) {
+      counts.skipped += 1
+      continue
+    }
+
+    try {
+      await sendSystemEmail({
+        to: unit.client_email,
+        subject: `Payment Reminder - Unit ${unit.unit_id}`,
+        text: `Dear ${unit.client_name},\n\nThis is a reminder that your monthly payment for Unit ${unit.unit_id} (${unit.project_name}) is due in 7 days.\n\nIf you already paid, please disregard this email.\n\nD&C Prime Realty`,
+      })
+
+      await db.query(
+        `UPDATE client_units SET last_payment_reminder_at = NOW() WHERE id = ?`,
+        [unit.id]
+      )
+      counts.sent += 1
+    } catch (error) {
+      counts.failed += 1
+      console.error('[paymentReminderJob] email failed:', {
+        clientUnitId: unit.id,
+        unitId: unit.unit_id,
+        error: error.message,
+      })
+    }
+  }
+
+  return counts
 }
 
 export const startPaymentReminderJob = () => {
   cron.schedule('0 8 * * *', async () => {
     try {
-      const count = await runPaymentReminderJob()
-      console.log(`[paymentReminderJob] sent ${count} reminder(s)`)
+      const counts = await runPaymentReminderJob()
+      console.log(
+        `[paymentReminderJob] sent ${counts.sent}, failed ${counts.failed}, skipped ${counts.skipped}`
+      )
     } catch (error) {
       console.error('[paymentReminderJob]', error.message)
     }

@@ -3,11 +3,13 @@ import {
   getClientUnitPrintData,
   logClientUnitFormPrint,
 } from '../controllers/printForms.controller.js'
-import { auth } from '../middlewares/auth.middleware.js'
+import { auth, adminOnly } from '../middlewares/auth.middleware.js'
 
 const router = express.Router()
 
-router.get('/client-units/:clientUnitId/print-data', auth, getClientUnitPrintData)
-router.post('/client-units/:clientUnitId/form-prints', auth, logClientUnitFormPrint)
+router.use(auth, adminOnly)
+
+router.get('/client-units/:clientUnitId/print-data', getClientUnitPrintData)
+router.post('/client-units/:clientUnitId/form-prints', logClientUnitFormPrint)
 
 export default router

@@ -3,11 +3,13 @@ import {
   getDashboardSummary,
   getAgentPerformance
 } from '../controllers/dashboard.controller.js'
-import { auth } from '../middlewares/auth.middleware.js'
+import { auth, adminOnly } from '../middlewares/auth.middleware.js'
 
 const router = express.Router()
 
-router.get('/dashboard/summary', auth, getDashboardSummary)
-router.get('/dashboard/agent-performance', auth, getAgentPerformance)
+router.use(auth, adminOnly)
+
+router.get('/dashboard/summary', getDashboardSummary)
+router.get('/dashboard/agent-performance', getAgentPerformance)
 
 export default router

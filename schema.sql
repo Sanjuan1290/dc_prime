@@ -604,7 +604,6 @@ CREATE TABLE `commissions` (
   `cash_kaliwaan_date` date DEFAULT NULL,
   `cash_kaliwaan_notes` text,
   `override_notes` text,
-  `amount` decimal(15,2) NOT NULL DEFAULT '0.00',
   `released_amount` decimal(15,2) NOT NULL DEFAULT '0.00',
   `status` enum('active','partially_released','released','cancelled','on_hold') NOT NULL DEFAULT 'active',
   `notes` text,
@@ -630,7 +629,7 @@ CREATE TABLE `commissions` (
 
 LOCK TABLES `commissions` WRITE;
 /*!40000 ALTER TABLE `commissions` DISABLE KEYS */;
-INSERT INTO `commissions` VALUES (1,1,4,'agent',5.00,780000.00,39000.00,'main',NULL,'distributed',0.00,NULL,NULL,NULL,39000.00,0.00,'active','Auto-generated hierarchy commission from reservation of LA-1001','2026-06-15 08:21:13','2026-06-15 08:21:13'),(2,1,3,'manager',1.00,780000.00,7800.00,'override',1,'distributed',0.00,NULL,NULL,'Manager residual release milestone',7800.00,0.00,'active','Auto-generated hierarchy commission from reservation of LA-1001','2026-06-15 08:21:13','2026-06-15 08:21:13'),(3,1,2,'broker',1.00,780000.00,7800.00,'override',1,'distributed',0.00,NULL,NULL,'Broker residual release milestone',7800.00,0.00,'active','Auto-generated hierarchy commission from reservation of LA-1001','2026-06-15 08:21:13','2026-06-15 08:21:13'),(4,1,1,'broker_network_manager',1.00,780000.00,7800.00,'override',1,'distributed',0.00,NULL,NULL,'Broker Network Manager residual release milestone',7800.00,0.00,'active','Auto-generated hierarchy commission from reservation of LA-1001','2026-06-15 08:21:13','2026-06-15 08:21:13');
+INSERT INTO `commissions` VALUES (1,1,4,'agent',5.00,780000.00,39000.00,'main',NULL,'distributed',0.00,NULL,NULL,NULL,0.00,'active','Auto-generated hierarchy commission from reservation of LA-1001','2026-06-15 08:21:13','2026-06-15 08:21:13'),(2,1,3,'manager',1.00,780000.00,7800.00,'override',1,'distributed',0.00,NULL,NULL,'Manager residual release milestone',0.00,'active','Auto-generated hierarchy commission from reservation of LA-1001','2026-06-15 08:21:13','2026-06-15 08:21:13'),(3,1,2,'broker',1.00,780000.00,7800.00,'override',1,'distributed',0.00,NULL,NULL,'Broker residual release milestone',0.00,'active','Auto-generated hierarchy commission from reservation of LA-1001','2026-06-15 08:21:13','2026-06-15 08:21:13'),(4,1,1,'broker_network_manager',1.00,780000.00,7800.00,'override',1,'distributed',0.00,NULL,NULL,'Broker Network Manager residual release milestone',0.00,'active','Auto-generated hierarchy commission from reservation of LA-1001','2026-06-15 08:21:13','2026-06-15 08:21:13');
 /*!40000 ALTER TABLE `commissions` ENABLE KEYS */;
 UNLOCK TABLES;
 

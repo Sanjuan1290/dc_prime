@@ -1,53 +1,35 @@
 import dotenv from 'dotenv'
-import { google } from 'googleapis'
-import { Readable } from 'stream'
+import {
+  GOOGLE_DRIVE_NOT_CONFIGURED_MESSAGE,
+  isGoogleDriveConfigured,
+  uploadFileToDrive,
+} from './lib/googleDrive.js'
 
 dotenv.config()
 
-const privateKey = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY?.replace(/\\n/g, '\n')
-
-const auth = new google.auth.JWT({
-  email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-  key: privateKey,
-  scopes: ['https://www.googleapis.com/auth/drive'],
-})
-
-const drive = google.drive({
-  version: 'v3',
-  auth,
-})
-
-const bufferToStream = (buffer) => {
-  const readable = new Readable()
-  readable.push(buffer)
-  readable.push(null)
-  return readable
-}
-
 const run = async () => {
+  if (!isGoogleDriveConfigured()) {
+    console.log(GOOGLE_DRIVE_NOT_CONFIGURED_MESSAGE)
+    return
+  }
+
   try {
     const fileContent = Buffer.from(
       `Google Drive upload test from localhost.\nCreated at: ${new Date().toISOString()}`
     )
 
-    const response = await drive.files.create({
-      requestBody: {
-        name: `dc-prime-drive-test-${Date.now()}.txt`,
-        parents: [process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID],
-        mimeType: 'text/plain',
-      },
-      media: {
-        mimeType: 'text/plain',
-        body: bufferToStream(fileContent),
-      },
-      fields: 'id, name, webViewLink',
+    const file = await uploadFileToDrive({
+      buffer: fileContent,
+      fileName: `dc-prime-drive-test-${Date.now()}.txt`,
+      mimeType: 'text/plain',
+      parentFolderId: process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID,
     })
 
     console.log('Google Drive working.')
-    console.log('File:', response.data)
+    console.log('File:', file)
   } catch (error) {
     console.error('Google Drive test failed:')
-    console.error(error.response?.data || error)
+    console.error(error.response?.data || error.message || error)
   }
 }
 

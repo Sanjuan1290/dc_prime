@@ -1,5 +1,5 @@
 import { db } from '../db/connect.js'
-import { createAuditLog } from '../utils/createAuditLog.js'
+import { safeCreateAuditLog } from '../utils/createAuditLog.js'
 import { getClientIp } from '../utils/getClientIp.js'
 
 const allowedSellerRoles = ['broker_network_manager', 'broker', 'manager', 'agent']
@@ -460,7 +460,7 @@ export const createAccreditedSeller = async (req, res) => {
 
     await connection.commit()
 
-    await createAuditLog({
+    await safeCreateAuditLog({
       userId: req.user.id,
       action: 'create',
       module: 'Accredited Sellers',
@@ -657,7 +657,7 @@ export const updateAccreditedSeller = async (req, res) => {
 
     await connection.commit()
 
-    await createAuditLog({
+    await safeCreateAuditLog({
       userId: req.user.id,
       action: 'update',
       module: 'Accredited Sellers',
@@ -833,7 +833,7 @@ export const deleteAccreditedSeller = async (req, res) => {
 
   await db.query(`DELETE FROM accredited_sellers WHERE id = ?`, [id])
 
-  await createAuditLog({
+  await safeCreateAuditLog({
     userId: req.user.id,
     action: 'delete',
     module: 'Accredited Sellers',

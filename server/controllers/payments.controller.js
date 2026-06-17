@@ -1,5 +1,5 @@
 import { db } from '../db/connect.js'
-import { createAuditLog } from '../utils/createAuditLog.js'
+import { safeCreateAuditLog } from '../utils/createAuditLog.js'
 import { getClientIp } from '../utils/getClientIp.js'
 import { refreshCommissionEligibility } from './commissions.controller.js'
 
@@ -145,6 +145,7 @@ const buildPaymentSuggestions = async (connectionOrDb, clientUnitId) => {
   const fullPaymentSuggestion = balance
 
   const suggestions = {
+    reservation: reservationSuggestion,
     reservation_fee: reservationSuggestion,
     downpayment: downpaymentSuggestion,
     monthly: monthlySuggestion,
@@ -252,7 +253,7 @@ const getPaymentById = async (id) => {
   return rows[0] || null
 }
 
-const recomputeClientUnitBalance = async (
+export const recomputeClientUnitBalance = async (
   connectionOrDb,
   clientUnitId,
   options = {}
@@ -587,7 +588,7 @@ export const createPayment = async (req, res) => {
 
     await connection.commit()
 
-    await createAuditLog({
+    await safeCreateAuditLog({
       userId: req.user.id,
       action: 'payment',
       module: 'Payments',
@@ -766,7 +767,7 @@ export const updatePayment = async (req, res) => {
 
     await connection.commit()
 
-    await createAuditLog({
+    await safeCreateAuditLog({
       userId: req.user.id,
       action: 'update',
       module: 'Payments',
@@ -836,7 +837,7 @@ export const deletePayment = async (req, res) => {
 
     await connection.commit()
 
-    await createAuditLog({
+    await safeCreateAuditLog({
       userId: req.user.id,
       action: 'delete',
       module: 'Payments',

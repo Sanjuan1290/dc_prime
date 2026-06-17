@@ -1,5 +1,29 @@
 import { google } from 'googleapis'
 
+export const GOOGLE_DRIVE_NOT_CONFIGURED_MESSAGE =
+  'Google Drive storage is not configured yet. Add Google Drive credentials in .env.'
+
+export const isGoogleDriveConfigured = () => {
+  return Boolean(
+    process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL &&
+    process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY &&
+    process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID
+  )
+}
+
+export const createGoogleDriveNotConfiguredError = () => {
+  const error = new Error(GOOGLE_DRIVE_NOT_CONFIGURED_MESSAGE)
+  error.status = 503
+  error.code = 'GOOGLE_DRIVE_NOT_CONFIGURED'
+  return error
+}
+
+const assertGoogleDriveConfigured = () => {
+  if (!isGoogleDriveConfigured()) {
+    throw createGoogleDriveNotConfiguredError()
+  }
+}
+
 const requiredEnv = (name) => {
   const value = process.env[name]
   if (!value) throw new Error(`${name} is missing in .env`)
@@ -12,6 +36,8 @@ const getPrivateKey = () => {
 }
 
 export const getDriveClient = () => {
+  assertGoogleDriveConfigured()
+
   const auth = new google.auth.JWT({
     email: requiredEnv('GOOGLE_SERVICE_ACCOUNT_EMAIL'),
     key: getPrivateKey(),

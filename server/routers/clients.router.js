@@ -9,18 +9,20 @@ import {
   replaceClientEmploymentDetails,
   deleteClient
 } from '../controllers/clients.controller.js'
-import { auth } from '../middlewares/auth.middleware.js'
+import { auth, adminOnly } from '../middlewares/auth.middleware.js'
 
 const router = express.Router()
 
-router.get('/clients', auth, getClients)
-router.get('/clients/:id', auth, getClient)
-router.post('/clients', auth, createClient)
-router.patch('/clients/:id', auth, updateClient)
-router.patch('/clients/:id/profile', auth, updateClientProfile)
-router.put('/clients/:id/co-buyers', auth, replaceClientCoBuyers)
-router.put('/clients/:id/employment-details', auth, replaceClientEmploymentDetails)
+router.use(auth, adminOnly)
 
-router.delete('/clients/:id', auth, deleteClient)
+router.get('/clients', getClients)
+router.get('/clients/:id', getClient)
+router.post('/clients', createClient)
+router.patch('/clients/:id', updateClient)
+router.patch('/clients/:id/profile', updateClientProfile)
+router.put('/clients/:id/co-buyers', replaceClientCoBuyers)
+router.put('/clients/:id/employment-details', replaceClientEmploymentDetails)
+
+router.delete('/clients/:id', deleteClient)
 
 export default router

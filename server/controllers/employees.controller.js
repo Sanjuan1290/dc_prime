@@ -1,5 +1,5 @@
 import { db } from '../db/connect.js'
-import { createAuditLog } from '../utils/createAuditLog.js'
+import { safeCreateAuditLog } from '../utils/createAuditLog.js'
 
 const allowedStatuses = ['active', 'inactive']
 
@@ -297,7 +297,7 @@ export const createEmployee = async (req, res) => {
     connection.release()
   }
 
-  await createAuditLog({
+  await safeCreateAuditLog({
     userId: req.user.id,
     action: 'create',
     module: 'Employees',
@@ -409,7 +409,7 @@ export const updateEmployee = async (req, res) => {
     connection.release()
   }
 
-  await createAuditLog({
+  await safeCreateAuditLog({
     userId: req.user.id,
     action: 'update',
     module: 'Employees',
@@ -501,7 +501,7 @@ export const updateEmployeeRestDays = async (req, res) => {
     connection.release()
   }
 
-  await createAuditLog({
+  await safeCreateAuditLog({
     userId: req.user.id,
     action: 'update',
     module: 'Employees',

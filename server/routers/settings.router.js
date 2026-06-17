@@ -12,9 +12,11 @@ import {
 
 const router = express.Router()
 
-router.get('/settings', auth, getSettings)
-router.get('/settings/:key', auth, getSetting)
-router.patch('/settings', auth, adminOnly, updateSettings)
-router.patch('/settings/:key', auth, adminOnly, updateSetting)
+router.use(auth, adminOnly)
+
+router.get('/settings', getSettings)
+router.get('/settings/:key', getSetting)
+router.patch('/settings', updateSettings)
+router.patch('/settings/:key', updateSetting)
 
 export default router

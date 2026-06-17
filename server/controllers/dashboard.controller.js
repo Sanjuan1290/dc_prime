@@ -97,7 +97,7 @@ export const getDashboardSummary = async (req, res) => {
       ) AS pending_documents,
 
       (
-        SELECT COALESCE(SUM(amount), 0)
+        SELECT COALESCE(SUM(gross_commission), 0)
         FROM commissions
         WHERE status <> 'cancelled'
       ) AS total_commission_liability,
@@ -115,7 +115,7 @@ export const getDashboardSummary = async (req, res) => {
       ) AS commission_released,
 
       (
-        SELECT COALESCE(SUM(amount), 0)
+        SELECT COALESCE(SUM(gross_commission), 0)
         FROM commissions
         WHERE status <> 'cancelled'
       ) - (
@@ -207,10 +207,7 @@ export const getAgentPerformance = async (req, res) => {
     LEFT JOIN (
       SELECT
         seller_id,
-        COALESCE(
-          SUM(COALESCE(NULLIF(gross_commission, 0), amount, 0)),
-          0
-        ) AS commission_earned
+        COALESCE(SUM(gross_commission), 0) AS commission_earned
       FROM commissions
       WHERE status <> 'cancelled'
       GROUP BY seller_id

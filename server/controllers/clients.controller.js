@@ -1,5 +1,5 @@
 import { db } from '../db/connect.js'
-import { createAuditLog } from '../utils/createAuditLog.js'
+import { safeCreateAuditLog } from '../utils/createAuditLog.js'
 import { getClientIp } from '../utils/getClientIp.js'
 
 const isMissing = (value) => {
@@ -811,7 +811,7 @@ export const createClient = async (req, res) => {
     ]
   )
 
-  await createAuditLog({
+  await safeCreateAuditLog({
     userId: req.user.id,
     action: 'create',
     module: 'Clients',
@@ -901,7 +901,7 @@ export const updateClient = async (req, res) => {
     ]
   )
 
-  await createAuditLog({
+  await safeCreateAuditLog({
     userId: req.user.id,
     action: 'update',
     module: 'Clients',
@@ -1014,7 +1014,7 @@ export const updateClientProfile = async (req, res) => {
     ]
   )
 
-  await createAuditLog({
+  await safeCreateAuditLog({
     userId: req.user.id,
     action: 'update',
     module: 'Buyer Profile',
@@ -1130,7 +1130,7 @@ export const replaceClientCoBuyers = async (req, res) => {
     connection.release()
   }
 
-  await createAuditLog({
+  await safeCreateAuditLog({
     userId: req.user.id,
     action: 'update',
     module: 'Buyer Profile',
@@ -1247,7 +1247,7 @@ export const replaceClientEmploymentDetails = async (req, res) => {
     connection.release()
   }
 
-  await createAuditLog({
+  await safeCreateAuditLog({
     userId: req.user.id,
     action: 'update',
     module: 'Buyer Profile',
@@ -1293,7 +1293,7 @@ export const deleteClient = async (req, res) => {
 
   await db.query(`DELETE FROM clients WHERE id = ?`, [id])
 
-  await createAuditLog({
+  await safeCreateAuditLog({
     userId: req.user.id,
     action: 'delete',
     module: 'Clients',

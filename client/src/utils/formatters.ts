@@ -35,8 +35,17 @@ export const formatDate = (date: string | null | undefined) => {
   return toLocalDateParts(parsedDate)
 }
 
+export const formatDateOnly = (value?: string | null) => {
+  if (!value) return "-"
+
+  const rawValue = String(value).trim()
+  const matchedDate = rawValue.match(/^(\d{4}-\d{2}-\d{2})/)
+
+  return matchedDate?.[1] || rawValue.slice(0, 10) || "-"
+}
+
 export const getDateInputValue = (date: string | null | undefined) => {
-  const formattedDate = formatDate(date)
+  const formattedDate = formatDateOnly(date)
 
   return formattedDate === "-" ? getLocalDate() : formattedDate
 }

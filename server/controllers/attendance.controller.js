@@ -1,5 +1,5 @@
 import { db } from '../db/connect.js'
-import { createAuditLog } from '../utils/createAuditLog.js'
+import { safeCreateAuditLog } from '../utils/createAuditLog.js'
 import { getClientIp } from '../utils/getClientIp.js'
 
 const allowedDayStatuses = ['present', 'absent', 'rest_day', 'offset']
@@ -652,7 +652,7 @@ export const createAttendance = async (req, res) => {
     ]
   )
 
-  await createAuditLog({
+  await safeCreateAuditLog({
     userId: req.user.id,
     action: 'create',
     module: 'Attendance',
@@ -723,7 +723,7 @@ export const createDefaultAttendance = async (req, res) => {
     ]
   )
 
-  await createAuditLog({
+  await safeCreateAuditLog({
     userId: req.user.id,
     action: 'create',
     module: 'Attendance',
@@ -750,7 +750,7 @@ export const generateTodayAttendance = async (req, res) => {
     forceAbsent: true
   })
 
-  await createAuditLog({
+  await safeCreateAuditLog({
     userId: req.user.id,
     action: 'create',
     module: 'Attendance',
@@ -789,7 +789,7 @@ export const createBulkDefaultAttendance = async (req, res) => {
     forceAbsent: false
   })
 
-  await createAuditLog({
+  await safeCreateAuditLog({
     userId: req.user.id,
     action: 'create',
     module: 'Attendance',
@@ -916,7 +916,7 @@ export const updateAttendance = async (req, res) => {
     ]
   )
 
-  await createAuditLog({
+  await safeCreateAuditLog({
     userId: req.user.id,
     action: 'update',
     module: 'Attendance',

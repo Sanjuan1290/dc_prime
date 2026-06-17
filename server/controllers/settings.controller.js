@@ -1,5 +1,5 @@
 import { db } from '../db/connect.js'
-import { createAuditLog } from '../utils/createAuditLog.js'
+import { safeCreateAuditLog } from '../utils/createAuditLog.js'
 import { getClientIp } from '../utils/getClientIp.js'
 
 
@@ -163,7 +163,7 @@ export const updateSettings = async (req, res) => {
 
   await upsertSettings(settingsEntries)
 
-  await createAuditLog({
+  await safeCreateAuditLog({
     userId: req.user.id,
     action: 'update',
     module: 'Settings',
@@ -197,7 +197,7 @@ export const updateSetting = async (req, res) => {
     [key, req.body.setting_value]
   ])
 
-  await createAuditLog({
+  await safeCreateAuditLog({
     userId: req.user.id,
     action: 'update',
     module: 'Settings',

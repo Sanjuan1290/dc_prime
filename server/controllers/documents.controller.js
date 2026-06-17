@@ -1,9 +1,18 @@
 import { db } from '../db/connect.js'
-import { createAuditLog } from '../utils/createAuditLog.js'
+import { safeCreateAuditLog } from '../utils/createAuditLog.js'
 import { getClientIp } from '../utils/getClientIp.js'
 import { refreshCommissionEligibility } from './commissions.controller.js'
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
-import { createDriveFolderIfMissing, deleteDriveFile, getDriveFileBuffer, safeDriveName, uploadFileToDrive } from '../lib/googleDrive.js'
+import {
+  GOOGLE_DRIVE_NOT_CONFIGURED_MESSAGE,
+  createDriveFolderIfMissing,
+  createGoogleDriveNotConfiguredError,
+  deleteDriveFile,
+  getDriveFileBuffer,
+  isGoogleDriveConfigured,
+  safeDriveName,
+  uploadFileToDrive,
+} from '../lib/googleDrive.js'
 import {
   createClientDocumentChecklistFromListing,
   getDocumentTemplates as loadDocumentTemplates,
@@ -23,6 +32,12 @@ const allowedClientDocumentStatusTransitions = {
   submitted: ['approved', 'rejected'],
   rejected: ['submitted'],
   approved: ['submitted', 'not_submitted'],
+}
+
+const sendGoogleDriveNotConfigured = (res) => {
+  return res.status(503).json({
+    message: GOOGLE_DRIVE_NOT_CONFIGURED_MESSAGE,
+  })
 }
 
 const canTransitionClientDocumentStatus = (currentStatus, nextStatus) => {
@@ -175,7 +190,7 @@ export const createDocumentTemplate = async (req, res) => {
 
     await connection.commit()
 
-    await createAuditLog({
+    await safeCreateAuditLog({
       userId: req.user.id,
       action: 'create',
       module: 'Document Templates',
@@ -238,7 +253,7 @@ export const updateDocumentTemplate = async (req, res) => {
 
     await connection.commit()
 
-    await createAuditLog({
+    await safeCreateAuditLog({
       userId: req.user.id,
       action: 'update',
       module: 'Document Templates',
@@ -300,7 +315,7 @@ export const deleteDocumentTemplate = async (req, res) => {
     connection.release()
   }
 
-  await createAuditLog({
+  await safeCreateAuditLog({
     userId: req.user.id,
     action: 'delete',
     module: 'Document Templates',
@@ -435,7 +450,7 @@ export const createDocument = async (req, res) => {
     ]
   )
 
-  await createAuditLog({
+  await safeCreateAuditLog({
     userId: req.user.id,
     action: 'create',
     module: 'Documents',
@@ -495,7 +510,7 @@ export const updateDocument = async (req, res) => {
     })
   }
 
-  await createAuditLog({
+  await safeCreateAuditLog({
     userId: req.user.id,
     action: 'update',
     module: 'Documents',
@@ -578,7 +593,7 @@ export const createChecklistForClientUnit = async (req, res) => {
 
   const result = await createClientDocumentChecklistFromListing(db, clientUnit)
 
-  await createAuditLog({
+  await safeCreateAuditLog({
     userId: req.user.id,
     action: 'create',
     module: 'Client Documents',
@@ -689,7 +704,7 @@ export const updateClientDocumentStatus = async (req, res) => {
 
     await connection.commit()
 
-    await createAuditLog({
+    await safeCreateAuditLog({
       userId: req.user.id,
       action: 'document_check',
       module: 'Client Documents',
@@ -781,7 +796,7 @@ export const applyExistingReusableDocuments = async (req, res) => {
 
     await connection.commit()
 
-    await createAuditLog({
+    await safeCreateAuditLog({
       userId: req.user.id,
       action: 'document_check',
       module: 'Client Documents',
@@ -806,7 +821,14 @@ export const applyExistingReusableDocuments = async (req, res) => {
 }
 
 
-const allowedUploadMimeTypes = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
+const allowedUploadMimeTypes = new Set([
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+])
 
 const getClientDocumentForFile = async (id, connectionOrDb = db) => {
   const [rows] = await connectionOrDb.query(
@@ -834,8 +856,11 @@ const getClientDocumentForFile = async (id, connectionOrDb = db) => {
 }
 
 const getOrCreateClientDocumentFolder = async (documentRow) => {
+  if (!isGoogleDriveConfigured()) {
+    throw createGoogleDriveNotConfiguredError()
+  }
+
   const rootFolderId = process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID
-  if (!rootFolderId) throw new Error('GOOGLE_DRIVE_ROOT_FOLDER_ID is missing in .env')
 
   const clientsFolder = await createDriveFolderIfMissing({
     name: 'clients',
@@ -866,8 +891,14 @@ export const uploadClientDocumentFile = async (req, res) => {
     return res.status(400).json({ message: 'File is required' })
   }
 
-  if (!allowedUploadMimeTypes.includes(file.mimetype)) {
-    return res.status(400).json({ message: 'Only JPG, PNG, WEBP, and PDF files are allowed' })
+  if (!allowedUploadMimeTypes.has(file.mimetype)) {
+    return res.status(400).json({
+      message: 'Unsupported file type. Upload PDF, JPG, PNG, WEBP, DOC, or DOCX only.',
+    })
+  }
+
+  if (!isGoogleDriveConfigured()) {
+    return sendGoogleDriveNotConfigured(res)
   }
 
   const documentRow = await getClientDocumentForFile(id)
@@ -930,7 +961,7 @@ export const uploadClientDocumentFile = async (req, res) => {
     ]
   )
 
-  await createAuditLog({
+  await safeCreateAuditLog({
     userId: req.user.id,
     action: 'upload',
     module: 'Client Documents',
@@ -953,6 +984,10 @@ export const openClientDocumentFile = async (req, res) => {
 
   if (!documentRow || !documentRow.drive_file_id) {
     return res.status(404).json({ message: 'Uploaded file not found' })
+  }
+
+  if (!isGoogleDriveConfigured()) {
+    return sendGoogleDriveNotConfigured(res)
   }
 
   const buffer = await getDriveFileBuffer(documentRow.drive_file_id)
@@ -987,6 +1022,10 @@ export const downloadClientUnitDocumentsPdf = async (req, res) => {
 
   if (rows.length === 0) {
     return res.status(400).json({ message: 'No uploaded document images found for this client unit.' })
+  }
+
+  if (!isGoogleDriveConfigured()) {
+    return sendGoogleDriveNotConfigured(res)
   }
 
   const pdf = await PDFDocument.create()
@@ -1140,7 +1179,7 @@ export const deleteDocument = async (req, res) => {
 
     await connection.commit()
 
-    await createAuditLog({
+    await safeCreateAuditLog({
       userId: req.user.id,
       action,
       module: 'Documents',

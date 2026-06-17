@@ -1,5 +1,5 @@
 import { db } from '../db/connect.js'
-import { createAuditLog } from '../utils/createAuditLog.js'
+import { safeCreateAuditLog } from '../utils/createAuditLog.js'
 import { getClientIp } from '../utils/getClientIp.js'
 import { createClientDocumentChecklistFromListing } from '../utils/documentRequirements.js'
 import {
@@ -7,6 +7,7 @@ import {
   createHierarchyCommissionsForClientUnit,
   refreshCommissionEligibility,
 } from './commissions.controller.js'
+import { recomputeClientUnitBalance } from './payments.controller.js'
 
 const allowedClientUnitStatuses = [
   'reserved',
@@ -247,91 +248,228 @@ const replaceClientUnitCoBuyer = async ({
   coBuyer,
   coBuyerEmployment = null,
 }) => {
-  await connection.query(
-    `DELETE FROM client_buyers WHERE client_id = ? AND client_unit_id = ?`,
+  const [existingRows] = await connection.query(
+    `
+    SELECT id
+    FROM client_buyers
+    WHERE client_id = ?
+      AND client_unit_id = ?
+    ORDER BY id ASC
+    LIMIT 1
+    FOR UPDATE
+    `,
     [clientId, clientUnitId]
   )
 
-  if (buyerType === 'single') return null
+  const existingCoBuyer = existingRows[0] || null
+
+  if (buyerType === 'single') {
+    await connection.query(
+      `DELETE FROM client_buyers WHERE client_id = ? AND client_unit_id = ?`,
+      [clientId, clientUnitId]
+    )
+
+    return null
+  }
 
   const normalizedCoBuyer = normalizeCoBuyerPayload(coBuyer, buyerType)
+  let clientBuyerId = existingCoBuyer?.id || null
 
-  const [result] = await connection.query(
-    `
-    INSERT INTO client_buyers (
-      client_id,
-      client_unit_id,
-      buyer_role,
-      full_name,
-      birth_date,
-      place_of_birth,
-      citizenship,
-      gender,
-      civil_status,
-      present_address,
-      present_zip_code,
-      permanent_address,
-      permanent_zip_code,
-      mobile_no,
-      residence_phone_no,
-      email,
-      tin
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `,
-    [
-      clientId,
-      clientUnitId,
-      normalizedCoBuyer.buyer_role,
-      normalizedCoBuyer.full_name,
-      normalizedCoBuyer.birth_date,
-      normalizedCoBuyer.place_of_birth,
-      normalizedCoBuyer.citizenship,
-      normalizedCoBuyer.gender,
-      normalizedCoBuyer.civil_status,
-      normalizedCoBuyer.present_address,
-      normalizedCoBuyer.present_zip_code,
-      normalizedCoBuyer.permanent_address,
-      normalizedCoBuyer.permanent_zip_code,
-      normalizedCoBuyer.mobile_no,
-      normalizedCoBuyer.residence_phone_no,
-      normalizedCoBuyer.email,
-      normalizedCoBuyer.tin,
-    ]
-  )
-
-  const clientBuyerId = result.insertId
-
-  if (hasEmploymentPayload(coBuyerEmployment)) {
-    const normalizedEmployment = normalizeEmploymentPayload(coBuyerEmployment)
-
+  if (clientBuyerId) {
     await connection.query(
       `
-      INSERT INTO client_employment_details (
+      UPDATE client_buyers
+      SET
+        buyer_role = ?,
+        full_name = ?,
+        birth_date = ?,
+        place_of_birth = ?,
+        citizenship = ?,
+        gender = ?,
+        civil_status = ?,
+        present_address = ?,
+        present_zip_code = ?,
+        permanent_address = ?,
+        permanent_zip_code = ?,
+        mobile_no = ?,
+        residence_phone_no = ?,
+        email = ?,
+        tin = ?
+      WHERE id = ?
+      `,
+      [
+        normalizedCoBuyer.buyer_role,
+        normalizedCoBuyer.full_name,
+        normalizedCoBuyer.birth_date,
+        normalizedCoBuyer.place_of_birth,
+        normalizedCoBuyer.citizenship,
+        normalizedCoBuyer.gender,
+        normalizedCoBuyer.civil_status,
+        normalizedCoBuyer.present_address,
+        normalizedCoBuyer.present_zip_code,
+        normalizedCoBuyer.permanent_address,
+        normalizedCoBuyer.permanent_zip_code,
+        normalizedCoBuyer.mobile_no,
+        normalizedCoBuyer.residence_phone_no,
+        normalizedCoBuyer.email,
+        normalizedCoBuyer.tin,
+        clientBuyerId,
+      ]
+    )
+  } else {
+    const [result] = await connection.query(
+      `
+      INSERT INTO client_buyers (
         client_id,
-        client_buyer_id,
-        person_type,
-        employment_status,
-        employment_status_other,
-        employer_business_name,
-        employer_business_address,
-        employer_zip_code,
-        nature_of_work_business,
-        occupation_position_title,
-        monthly_income
-      ) VALUES (?, ?, 'co_buyer', ?, ?, ?, ?, ?, ?, ?, ?)
+        client_unit_id,
+        buyer_role,
+        full_name,
+        birth_date,
+        place_of_birth,
+        citizenship,
+        gender,
+        civil_status,
+        present_address,
+        present_zip_code,
+        permanent_address,
+        permanent_zip_code,
+        mobile_no,
+        residence_phone_no,
+        email,
+        tin
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         clientId,
-        clientBuyerId,
-        normalizedEmployment.employment_status,
-        normalizedEmployment.employment_status_other,
-        normalizedEmployment.employer_business_name,
-        normalizedEmployment.employer_business_address,
-        normalizedEmployment.employer_zip_code,
-        normalizedEmployment.nature_of_work_business,
-        normalizedEmployment.occupation_position_title,
-        normalizedEmployment.monthly_income,
+        clientUnitId,
+        normalizedCoBuyer.buyer_role,
+        normalizedCoBuyer.full_name,
+        normalizedCoBuyer.birth_date,
+        normalizedCoBuyer.place_of_birth,
+        normalizedCoBuyer.citizenship,
+        normalizedCoBuyer.gender,
+        normalizedCoBuyer.civil_status,
+        normalizedCoBuyer.present_address,
+        normalizedCoBuyer.present_zip_code,
+        normalizedCoBuyer.permanent_address,
+        normalizedCoBuyer.permanent_zip_code,
+        normalizedCoBuyer.mobile_no,
+        normalizedCoBuyer.residence_phone_no,
+        normalizedCoBuyer.email,
+        normalizedCoBuyer.tin,
       ]
+    )
+
+    clientBuyerId = result.insertId
+  }
+
+  await connection.query(
+    `
+    DELETE FROM client_buyers
+    WHERE client_id = ?
+      AND client_unit_id = ?
+      AND id <> ?
+    `,
+    [clientId, clientUnitId, clientBuyerId]
+  )
+
+  if (hasEmploymentPayload(coBuyerEmployment)) {
+    const normalizedEmployment = normalizeEmploymentPayload(coBuyerEmployment)
+    const [employmentRows] = await connection.query(
+      `
+      SELECT id
+      FROM client_employment_details
+      WHERE client_id = ?
+        AND client_buyer_id = ?
+        AND person_type = 'co_buyer'
+      ORDER BY id ASC
+      LIMIT 1
+      FOR UPDATE
+      `,
+      [clientId, clientBuyerId]
+    )
+    let employmentId = employmentRows[0]?.id || null
+
+    if (employmentId) {
+      await connection.query(
+        `
+        UPDATE client_employment_details
+        SET
+          employment_status = ?,
+          employment_status_other = ?,
+          employer_business_name = ?,
+          employer_business_address = ?,
+          employer_zip_code = ?,
+          nature_of_work_business = ?,
+          occupation_position_title = ?,
+          monthly_income = ?
+        WHERE id = ?
+        `,
+        [
+          normalizedEmployment.employment_status,
+          normalizedEmployment.employment_status_other,
+          normalizedEmployment.employer_business_name,
+          normalizedEmployment.employer_business_address,
+          normalizedEmployment.employer_zip_code,
+          normalizedEmployment.nature_of_work_business,
+          normalizedEmployment.occupation_position_title,
+          normalizedEmployment.monthly_income,
+          employmentId,
+        ]
+      )
+    } else {
+      const [employmentResult] = await connection.query(
+        `
+        INSERT INTO client_employment_details (
+          client_id,
+          client_buyer_id,
+          person_type,
+          employment_status,
+          employment_status_other,
+          employer_business_name,
+          employer_business_address,
+          employer_zip_code,
+          nature_of_work_business,
+          occupation_position_title,
+          monthly_income
+        ) VALUES (?, ?, 'co_buyer', ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        [
+          clientId,
+          clientBuyerId,
+          normalizedEmployment.employment_status,
+          normalizedEmployment.employment_status_other,
+          normalizedEmployment.employer_business_name,
+          normalizedEmployment.employer_business_address,
+          normalizedEmployment.employer_zip_code,
+          normalizedEmployment.nature_of_work_business,
+          normalizedEmployment.occupation_position_title,
+          normalizedEmployment.monthly_income,
+        ]
+      )
+
+      employmentId = employmentResult.insertId
+    }
+
+    await connection.query(
+      `
+      DELETE FROM client_employment_details
+      WHERE client_id = ?
+        AND client_buyer_id = ?
+        AND person_type = 'co_buyer'
+        AND id <> ?
+      `,
+      [clientId, clientBuyerId, employmentId]
+    )
+  } else if (clientBuyerId) {
+    await connection.query(
+      `
+      DELETE FROM client_employment_details
+      WHERE client_id = ?
+        AND client_buyer_id = ?
+        AND person_type = 'co_buyer'
+      `,
+      [clientId, clientBuyerId]
     )
   }
 
@@ -1445,7 +1583,7 @@ export const reserveListing = async (req, res) => {
 
     await connection.commit()
 
-    await createAuditLog({
+    await safeCreateAuditLog({
       userId: req.user.id,
       action: 'reserve',
       module: 'Client Units',
@@ -1527,6 +1665,12 @@ export const updateClientUnit = async (req, res) => {
   }
 
   const dueDayValidation = validateDueDay(due_day)
+
+  if (!isMissing(due_day) && isMissing(due_date)) {
+    return res.status(400).json({
+      message: 'due_date is required when changing due_day.',
+    })
+  }
 
   if (!dueDayValidation.isValid) {
     return res.status(400).json({
@@ -1744,7 +1888,7 @@ export const updateClientUnit = async (req, res) => {
 
     await connection.commit()
 
-    await createAuditLog({
+    await safeCreateAuditLog({
       userId: req.user.id,
       action: 'update',
       module: 'Client Units',
@@ -1877,11 +2021,10 @@ export const changeClientUnitListing = async (req, res) => {
       UPDATE client_units
       SET
         listing_id = ?,
-        status = ?,
-        balance = ?
+        status = ?
       WHERE id = ?
       `,
-      [new_listing_id, finalStatus, normalizeMoney(newListing.total_contract_price), id]
+      [new_listing_id, finalStatus, id]
     )
 
     let regeneratedCommission = null
@@ -1941,13 +2084,13 @@ export const changeClientUnitListing = async (req, res) => {
       })
     }
 
-    await refreshCommissionEligibility(id, connection, {
+    const balanceSummary = await recomputeClientUnitBalance(connection, id, {
       actorRole: req.user.role,
     })
 
     await connection.commit()
 
-    await createAuditLog({
+    await safeCreateAuditLog({
       userId: req.user.id,
       action: 'change_unit',
       module: 'Client Units',
@@ -1961,6 +2104,8 @@ export const changeClientUnitListing = async (req, res) => {
         clientUnitId: Number(id),
         old_listing_id: Number(existingClientUnit.listing_id),
         new_listing_id: Number(new_listing_id),
+        balance: balanceSummary?.balance,
+        balanceSummary,
         regeneratedCommission,
       },
     })
@@ -2036,7 +2181,7 @@ export const cancelClientUnit = async (req, res) => {
 
     await connection.commit()
 
-    await createAuditLog({
+    await safeCreateAuditLog({
       userId: req.user.id,
       action: 'cancel',
       module: 'Client Units',
@@ -2123,7 +2268,7 @@ export const deleteClientUnit = async (req, res) => {
 
     await connection.commit()
 
-    await createAuditLog({
+    await safeCreateAuditLog({
       userId: req.user.id,
       action: 'delete',
       module: 'Client Units',

@@ -20,3 +20,11 @@ export const createAuditLog = async ({
     [userId, action, module, description, ipAddress]
   )
 }
+
+export const safeCreateAuditLog = async (payload) => {
+  try {
+    await createAuditLog(payload)
+  } catch (error) {
+    console.error('Audit log failed:', error.message)
+  }
+}

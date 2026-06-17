@@ -319,9 +319,9 @@ export const getCommissionsReport = async (req, res) => {
       l.net_selling_price,
       ${contractValueExpression} AS total_contract_price,
       cm.rate,
-      cm.amount,
+      cm.gross_commission,
       cm.released_amount,
-      GREATEST(cm.amount - cm.released_amount, 0) AS remaining_amount,
+      GREATEST(cm.gross_commission - cm.released_amount, 0) AS remaining_amount,
       cm.status,
       cm.created_at
     FROM commissions cm
@@ -343,7 +343,7 @@ export const getCommissionsReport = async (req, res) => {
       net_selling_price: formatDecimal(row.net_selling_price),
       total_contract_price: formatDecimal(row.total_contract_price),
       rate: formatDecimal(row.rate),
-      amount: formatDecimal(row.amount),
+      gross_commission: formatDecimal(row.gross_commission),
       released_amount: formatDecimal(row.released_amount),
       remaining_amount: formatDecimal(row.remaining_amount),
     })),
@@ -486,4 +486,3 @@ export const getClientsReport = async (req, res) => {
     })),
   })
 }
-

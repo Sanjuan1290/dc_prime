@@ -1,7 +1,7 @@
-  import { db } from '../db/connect.js'
-  import { createAuditLog } from '../utils/createAuditLog.js'
-  import { getClientIp } from '../utils/getClientIp.js'
-  import { getVisibleSellerIdsForUser, isOfficeRole } from '../utils/sellerVisibility.js'
+import { db } from '../db/connect.js'
+import { safeCreateAuditLog } from '../utils/createAuditLog.js'
+import { getClientIp } from '../utils/getClientIp.js'
+import { getVisibleSellerIdsForUser, isOfficeRole } from '../utils/sellerVisibility.js'
 
   const isMissing = (value) => {
     return value === undefined || value === null || value === ''
@@ -431,7 +431,6 @@
       SELECT
         cm.id,
         cm.gross_commission,
-        cm.amount,
         cm.status AS current_status,
         COUNT(cr.id) AS total_releases,
         COALESCE(SUM(CASE WHEN cr.status = 'released' THEN 1 ELSE 0 END), 0) AS released_count,
@@ -451,9 +450,7 @@
       return null
     }
 
-    const totalAmount = normalizeMoney(
-      commission.gross_commission || commission.amount
-    )
+    const totalAmount = normalizeMoney(commission.gross_commission)
     const releasedAmount = normalizeMoney(commission.released_amount)
     const remainingAmount = normalizeMoney(
       Math.max(totalAmount - releasedAmount, 0)
@@ -877,7 +874,6 @@
       FROM commissions
       WHERE client_unit_id = ?
         AND status <> 'cancelled'
-        AND status <> 'cancelled'
       ORDER BY
         CASE source_type WHEN 'main' THEN 1 WHEN 'override' THEN 2 ELSE 99 END,
         id ASC
@@ -919,7 +915,6 @@
             rate = ?,
             commission_base = ?,
             gross_commission = ?,
-            amount = ?,
             source_type = ?,
             parent_commission_id = ?,
             sale_type = ?,
@@ -936,7 +931,6 @@
             row.commissionRole,
             rate,
             commissionBase,
-            grossCommission,
             grossCommission,
             row.sourceType,
             nullableValue(finalParentCommissionId),
@@ -977,14 +971,13 @@
             rate,
             commission_base,
             gross_commission,
-            amount,
             source_type,
             parent_commission_id,
             sale_type,
             override_notes,
             status,
             notes
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
           `,
           [
             clientUnitId,
@@ -992,7 +985,6 @@
             row.commissionRole,
             rate,
             commissionBase,
-            grossCommission,
             grossCommission,
             row.sourceType,
             nullableValue(finalParentCommissionId),
@@ -1571,7 +1563,6 @@
         rate,
         commission_base,
         gross_commission,
-        amount,
         source_type,
         parent_commission_id,
         sale_type,
@@ -1581,7 +1572,7 @@
         override_notes,
         status,
         notes
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
       `,
       [
         clientUnitId,
@@ -1589,7 +1580,6 @@
         finalCommissionRole,
         finalRate,
         commissionBase,
-        grossCommission,
         grossCommission,
         finalSourceType,
         nullableValue(parentCommissionId),
@@ -1850,7 +1840,7 @@
 
       await connection.commit()
 
-      await createAuditLog({
+      await safeCreateAuditLog({
         userId: req.user.id,
         action: 'create',
         module: 'Commissions',
@@ -2063,7 +2053,6 @@
         commission_role = ?,
         rate = ?,
         gross_commission = ?,
-        amount = ?,
         source_type = ?,
         parent_commission_id = ?,
         sale_type = ?,
@@ -2079,7 +2068,6 @@
         finalSellerId,
         nullableValue(finalCommissionRole),
         finalRate,
-        grossCommission,
         grossCommission,
         finalSourceType,
         !isMissing(parent_commission_id)
@@ -2170,7 +2158,6 @@
             commission_role = ?,
             rate = ?,
             gross_commission = ?,
-            amount = ?,
             sale_type = ?,
             override_notes = ?,
             status = CASE
@@ -2183,7 +2170,6 @@
             override_seller_id,
             overrideSeller.seller_role || 'agent',
             finalOverrideRate,
-            overrideGrossCommission,
             overrideGrossCommission,
             finalSaleType,
             nullableValue(override_notes_for_child),
@@ -2255,7 +2241,7 @@
       await refreshCommissionStatus(db, existingOverrideCommission.id)
     }
 
-    await createAuditLog({
+    await safeCreateAuditLog({
       userId: req.user.id,
       action: 'update',
       module: 'Commissions',
@@ -2431,7 +2417,7 @@ export const addMissingOverrideCommission = async (req, res) => {
 
     await connection.commit()
 
-    await createAuditLog({
+    await safeCreateAuditLog({
       userId: req.user.id,
       action: 'create',
       module: 'Commissions',
@@ -2533,7 +2519,7 @@ export const addMissingOverrideCommission = async (req, res) => {
 
       await connection.commit()
 
-      await createAuditLog({
+      await safeCreateAuditLog({
         userId: req.user.id,
         action: 'retention_eligible',
         module: 'Commission Releases',
@@ -2654,7 +2640,7 @@ export const addMissingOverrideCommission = async (req, res) => {
       actorRole: req.user.role,
     })
 
-    await createAuditLog({
+    await safeCreateAuditLog({
       userId: req.user.id,
       action: 'create',
       module: 'Commission Releases',
@@ -2753,7 +2739,7 @@ export const addMissingOverrideCommission = async (req, res) => {
 
       await connection.commit()
 
-      await createAuditLog({
+      await safeCreateAuditLog({
         userId: req.user.id,
         action: 'release',
         module: 'Commission Releases',
@@ -2776,13 +2762,13 @@ export const addMissingOverrideCommission = async (req, res) => {
     }
   }
 
-  export const deductCashAdvance = async (req, res) => {
+  export const deductCashAdvanceManual = async (req, res) => {
     const { id: releaseId } = req.params
     const { cash_advance_id, amount, notes } = req.body
 
     if (isMissing(cash_advance_id)) {
       return res.status(400).json({
-        message: 'Select an approved cash advance before deducting. Manual deductions are disabled to avoid untracked deductions.',
+        message: 'Select an approved cash advance before deducting.',
       })
     }
 
@@ -2953,7 +2939,7 @@ export const addMissingOverrideCommission = async (req, res) => {
 
       await connection.commit()
 
-      await createAuditLog({
+      await safeCreateAuditLog({
         userId: req.user.id,
         action: 'deduct',
         module: 'Commission Releases',
@@ -3023,7 +3009,7 @@ export const addMissingOverrideCommission = async (req, res) => {
 
       await connection.commit()
 
-      await createAuditLog({
+      await safeCreateAuditLog({
         userId: req.user.id,
         action: 'cancel',
         module: 'Commission Releases',
@@ -3082,7 +3068,7 @@ export const addMissingOverrideCommission = async (req, res) => {
 
     await recalculateCommissionReleaseTotals(db, release.commission_id)
 
-    await createAuditLog({
+    await safeCreateAuditLog({
       userId: req.user.id,
       action: 'hold',
       module: 'Commission Releases',
@@ -3138,7 +3124,7 @@ export const addMissingOverrideCommission = async (req, res) => {
     })
     await recalculateCommissionReleaseTotals(db, release.commission_id)
 
-    await createAuditLog({
+    await safeCreateAuditLog({
       userId: req.user.id,
       action: 'unhold',
       module: 'Commission Releases',
@@ -3206,7 +3192,7 @@ export const addMissingOverrideCommission = async (req, res) => {
 
       await connection.commit()
 
-      await createAuditLog({
+      await safeCreateAuditLog({
         userId: req.user.id,
         action: 'restore',
         module: 'Commission Releases',
@@ -3248,4 +3234,3 @@ export const addMissingOverrideCommission = async (req, res) => {
       data: rows,
     })
   }
-

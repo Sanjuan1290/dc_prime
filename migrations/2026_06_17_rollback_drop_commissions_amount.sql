@@ -1,0 +1,2 @@
+ALTER TABLE commissions
+ADD COLUMN amount DECIMAL(15,2) DEFAULT NULL;

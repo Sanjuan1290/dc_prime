@@ -2,6 +2,8 @@ import cron from 'node-cron'
 import { db } from '../db/connect.js'
 import { sendSystemEmail } from '../lib/mailer.js'
 
+export const DOC_REMINDER_COOLDOWN_DAYS = 7
+
 export const runDocumentReminderJob = async () => {
   const [units] = await db.query(`
     SELECT
@@ -22,28 +24,57 @@ export const runDocumentReminderJob = async () => {
       AND cdl.status = 'not_submitted'
       AND c.email IS NOT NULL
       AND c.email <> ''
-      AND (cu.last_doc_reminder_at IS NULL OR DATE(cu.last_doc_reminder_at) < CURDATE())
+      AND (
+        cu.last_doc_reminder_at IS NULL
+        OR cu.last_doc_reminder_at < DATE_SUB(NOW(), INTERVAL ? DAY)
+      )
     GROUP BY cu.id, c.full_name, c.email, l.unit_id
-  `)
+  `, [DOC_REMINDER_COOLDOWN_DAYS])
 
-  for (const unit of units) {
-    await sendSystemEmail({
-      to: unit.client_email,
-      subject: `Required Documents Needed — Unit ${unit.unit_id}`,
-      text: `Dear ${unit.client_name},\n\nIt has been more than 30 days since your reservation of Unit ${unit.unit_id}. Please submit these required documents:\n\n${unit.missing_docs}\n\nD&C Prime Realty`,
-    })
-
-    await db.query(`UPDATE client_units SET last_doc_reminder_at = NOW() WHERE id = ?`, [unit.id])
+  const counts = {
+    sent: 0,
+    failed: 0,
+    skipped: 0,
   }
 
-  return units.length
+  for (const unit of units) {
+    if (!unit.client_email || !unit.missing_docs) {
+      counts.skipped += 1
+      continue
+    }
+
+    try {
+      await sendSystemEmail({
+        to: unit.client_email,
+        subject: `Required Documents Needed - Unit ${unit.unit_id}`,
+        text: `Dear ${unit.client_name},\n\nIt has been more than 30 days since your reservation of Unit ${unit.unit_id}. Please submit these required documents:\n\n${unit.missing_docs}\n\nD&C Prime Realty`,
+      })
+
+      await db.query(
+        `UPDATE client_units SET last_doc_reminder_at = NOW() WHERE id = ?`,
+        [unit.id]
+      )
+      counts.sent += 1
+    } catch (error) {
+      counts.failed += 1
+      console.error('[documentReminderJob] email failed:', {
+        clientUnitId: unit.id,
+        unitId: unit.unit_id,
+        error: error.message,
+      })
+    }
+  }
+
+  return counts
 }
 
 export const startDocumentReminderJob = () => {
   cron.schedule('30 8 * * *', async () => {
     try {
-      const count = await runDocumentReminderJob()
-      console.log(`[documentReminderJob] sent ${count} reminder(s)`)
+      const counts = await runDocumentReminderJob()
+      console.log(
+        `[documentReminderJob] sent ${counts.sent}, failed ${counts.failed}, skipped ${counts.skipped}`
+      )
     } catch (error) {
       console.error('[documentReminderJob]', error.message)
     }

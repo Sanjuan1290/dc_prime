@@ -197,7 +197,7 @@ const Dashboard = () => {
       title: "Total Commission",
       value: formatMoney(totalCommissionLiability),
       description: "Full commission liability, including future releases",
-      formula: "SUM(commissions.amount) where commission status is not cancelled.",
+      formula: "SUM(commissions.gross_commission) where commission status is not cancelled.",
       icon: <FiDollarSign />,
     },
     {
@@ -218,7 +218,7 @@ const Dashboard = () => {
       title: "Unreleased Commission",
       value: formatMoney(commissionUnreleasedBalance),
       description: "Total commission liability minus released releases",
-      formula: "SUM(commissions.amount) minus SUM(released commission release net amounts).",
+      formula: "SUM(commissions.gross_commission) minus SUM(released commission release net amounts).",
       icon: <FiDollarSign />,
     },
   ]

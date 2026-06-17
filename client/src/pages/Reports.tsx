@@ -91,7 +91,7 @@ type CommissionsReport = {
   net_selling_price: number | string
   total_contract_price: number | string
   rate: number | string
-  amount: number | string
+  gross_commission: number | string
   released_amount: number | string
   remaining_amount: number | string
   status: string
@@ -221,7 +221,7 @@ const getReportTotalAmount = (reportType: ReportType, rows: AnyReportRow[]) => {
 
   if (reportType === "commissions") {
     return (rows as CommissionsReport[]).reduce(
-      (sum, row) => sum + Number(row.amount || 0),
+      (sum, row) => sum + Number(row.gross_commission || 0),
       0
     )
   }
@@ -623,7 +623,7 @@ const ReportTable = ({
                   {formatMoney(item.total_contract_price)}
                 </td>
                 <td className={cellClass}>{formatNumber(item.rate)}%</td>
-                <td className={cellClass}>{formatMoney(item.amount)}</td>
+                <td className={cellClass}>{formatMoney(item.gross_commission)}</td>
                 <td className={cellClass}>
                   {formatMoney(item.released_amount)}
                 </td>

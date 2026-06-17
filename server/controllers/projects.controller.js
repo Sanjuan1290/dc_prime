@@ -1,5 +1,5 @@
 import { db } from '../db/connect.js'
-import { createAuditLog } from '../utils/createAuditLog.js'
+import { safeCreateAuditLog } from '../utils/createAuditLog.js'
 import { getClientIp } from '../utils/getClientIp.js'
 import {
   getProjectDocumentRequirements as loadProjectDocumentRequirements,
@@ -178,7 +178,7 @@ export const updateProjectDocumentRequirements = async (req, res) => {
   const requirements = document_requirements || documentRequirements || []
   const result = await replaceProjectDocumentRequirements(db, id, requirements)
 
-  await createAuditLog({
+  await safeCreateAuditLog({
     userId: req.user.id,
     action: 'update',
     module: 'Project Documents',
@@ -263,7 +263,7 @@ export const createProject = async (req, res) => {
 
     await connection.commit()
 
-    await createAuditLog({
+    await safeCreateAuditLog({
       userId: req.user.id,
       action: 'create',
       module: 'Projects',
@@ -402,7 +402,7 @@ export const updateProject = async (req, res) => {
 
     await connection.commit()
 
-    await createAuditLog({
+    await safeCreateAuditLog({
       userId: req.user.id,
       action: 'update',
       module: 'Projects',
@@ -460,7 +460,7 @@ export const deleteProject = async (req, res) => {
     connection.release()
   }
 
-  await createAuditLog({
+  await safeCreateAuditLog({
     userId: req.user.id,
     action: 'delete',
     module: 'Projects',

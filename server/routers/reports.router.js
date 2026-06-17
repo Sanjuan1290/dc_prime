@@ -7,15 +7,17 @@ import {
   getDocumentsReport,
   getClientsReport
 } from '../controllers/reports.controller.js'
-import { auth } from '../middlewares/auth.middleware.js'
+import { auth, adminOnly } from '../middlewares/auth.middleware.js'
 
 const router = express.Router()
 
-router.get('/reports/sales', auth, getSalesReport)
-router.get('/reports/collections', auth, getCollectionsReport)
-router.get('/reports/inventory', auth, getInventoryReport)
-router.get('/reports/commissions', auth, getCommissionsReport)
-router.get('/reports/documents', auth, getDocumentsReport)
-router.get('/reports/clients', auth, getClientsReport)
+router.use(auth, adminOnly)
+
+router.get('/reports/sales', getSalesReport)
+router.get('/reports/collections', getCollectionsReport)
+router.get('/reports/inventory', getInventoryReport)
+router.get('/reports/commissions', getCommissionsReport)
+router.get('/reports/documents', getDocumentsReport)
+router.get('/reports/clients', getClientsReport)
 
 export default router

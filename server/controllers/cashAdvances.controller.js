@@ -1,5 +1,5 @@
 import { db } from '../db/connect.js'
-import { createAuditLog } from '../utils/createAuditLog.js'
+import { safeCreateAuditLog } from '../utils/createAuditLog.js'
 import { getClientIp } from '../utils/getClientIp.js'
 import { getVisibleSellerIdsForUser, isOfficeRole } from '../utils/sellerVisibility.js'
 
@@ -250,7 +250,6 @@ const recalculateCommissionFromReleases = async (connectionOrDb, commissionId) =
     SELECT
       cm.id,
       cm.gross_commission,
-      cm.amount,
       cm.status AS current_status,
       COUNT(cr.id) AS total_releases,
       COALESCE(SUM(CASE WHEN cr.status = 'released' THEN 1 ELSE 0 END), 0) AS released_count,
@@ -267,7 +266,7 @@ const recalculateCommissionFromReleases = async (connectionOrDb, commissionId) =
   const commission = rows[0]
   if (!commission) return null
 
-  const totalAmount = normalizeMoney(commission.gross_commission || commission.amount)
+  const totalAmount = normalizeMoney(commission.gross_commission)
   const releasedAmount = normalizeMoney(commission.released_amount)
   const totalReleases = Number(commission.total_releases || 0)
   const cancelledCount = Number(commission.cancelled_count || 0)
@@ -566,7 +565,7 @@ export const createCashAdvance = async (req, res) => {
 
     await connection.commit()
 
-    await createAuditLog({
+    await safeCreateAuditLog({
       userId: req.user.id,
       action: 'create',
       module: 'Cash Advances',
@@ -744,7 +743,7 @@ export const updateCashAdvance = async (req, res) => {
 
     await connection.commit()
 
-    await createAuditLog({
+    await safeCreateAuditLog({
       userId: req.user.id,
       action: 'update',
       module: 'Cash Advances',
@@ -801,7 +800,7 @@ export const approveCashAdvance = async (req, res) => {
     [req.user.id, id]
   )
 
-  await createAuditLog({
+  await safeCreateAuditLog({
     userId: req.user.id,
     action: 'approve',
     module: 'Cash Advances',
@@ -852,7 +851,7 @@ export const rejectCashAdvance = async (req, res) => {
     [nullableValue(notes) || existing.notes, id]
   )
 
-  await createAuditLog({
+  await safeCreateAuditLog({
     userId: req.user.id,
     action: 'reject',
     module: 'Cash Advances',
@@ -911,7 +910,7 @@ export const cancelCashAdvance = async (req, res) => {
     [nullableValue(notes) || existing.notes, id]
   )
 
-  await createAuditLog({
+  await safeCreateAuditLog({
     userId: req.user.id,
     action: 'cancel',
     module: 'Cash Advances',
@@ -1082,7 +1081,7 @@ export const deductCashAdvance = async (req, res) => {
 
     await connection.commit()
 
-    await createAuditLog({
+    await safeCreateAuditLog({
       userId: req.user.id,
       action: 'deduct',
       module: 'Cash Advances',

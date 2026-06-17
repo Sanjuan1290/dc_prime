@@ -8,16 +8,18 @@ import {
   updatePayment,
   deletePayment,
 } from '../controllers/payments.controller.js'
-import { auth } from '../middlewares/auth.middleware.js'
+import { auth, adminOnly } from '../middlewares/auth.middleware.js'
 
 const router = express.Router()
 
-router.get('/payments', auth, getPayments)
-router.get('/payments/:id', auth, getPayment)
-router.post('/payments', auth, createPayment)
-router.patch('/payments/:id', auth, updatePayment)
-router.delete('/payments/:id', auth, deletePayment)
-router.get('/client-units/:clientUnitId/payments', auth, getPaymentsByClientUnit)
-router.get('/client-units/:clientUnitId/payment-suggestions', auth, getPaymentSuggestions)
+router.use(auth, adminOnly)
+
+router.get('/payments', getPayments)
+router.get('/payments/:id', getPayment)
+router.post('/payments', createPayment)
+router.patch('/payments/:id', updatePayment)
+router.delete('/payments/:id', deletePayment)
+router.get('/client-units/:clientUnitId/payments', getPaymentsByClientUnit)
+router.get('/client-units/:clientUnitId/payment-suggestions', getPaymentSuggestions)
 
 export default router
