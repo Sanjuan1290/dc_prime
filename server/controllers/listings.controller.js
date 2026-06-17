@@ -236,6 +236,177 @@ const formatOldUnitIdsForAudit = (oldUnitIds) => {
   return aliases.length ? ` | Old Unit IDs: ${aliases.join(', ')}` : ''
 }
 
+
+const booleanDocumentValue = (value, fallback = true) => {
+  if (value === undefined || value === null || value === '') return fallback
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'number') return value === 1
+  const normalized = String(value).trim().toLowerCase()
+  if (['1', 'true', 'yes', 'required'].includes(normalized)) return true
+  if (['0', 'false', 'no', 'optional'].includes(normalized)) return false
+  return fallback
+}
+
+const normalizeDocumentRequirementsPayload = (requirements = []) => {
+  if (!Array.isArray(requirements)) return []
+
+  const seen = new Set()
+
+  return requirements
+    .map((requirement, index) => ({
+      document_id: Number(requirement.document_id),
+      is_required: booleanDocumentValue(requirement.is_required, true),
+      status: requirement.status === 'inactive' ? 'inactive' : 'active',
+      sort_order: Number(requirement.sort_order || index + 1),
+      source: requirement.source || 'listing_override',
+    }))
+    .filter((requirement) => {
+      if (!Number.isInteger(requirement.document_id) || requirement.document_id < 1) {
+        return false
+      }
+      if (seen.has(requirement.document_id)) return false
+      seen.add(requirement.document_id)
+      return true
+    })
+}
+
+const syncClientUnitChecklistsFromListingRequirements = async (
+  connectionOrDb,
+  listingId,
+  requirements = [],
+  options = {}
+) => {
+  const activeRequirements = normalizeDocumentRequirementsPayload(requirements).filter(
+    (requirement) => requirement.status === 'active'
+  )
+
+  const [clientUnits] = await connectionOrDb.query(
+    `
+    SELECT id
+    FROM client_units
+    WHERE listing_id = ?
+      AND status IN ('reserved', 'active', 'fully_paid', 'closed')
+    `,
+    [listingId]
+  )
+
+  if (clientUnits.length === 0 || activeRequirements.length === 0) {
+    return {
+      affectedClientUnits: clientUnits.length,
+      syncedDocuments: 0,
+    }
+  }
+
+  let syncedDocuments = 0
+
+  for (const clientUnit of clientUnits) {
+    const values = activeRequirements.map((requirement) => [
+      clientUnit.id,
+      requirement.document_id,
+      requirement.is_required ? 1 : 0,
+      requirement.source || 'listing_override',
+      'not_submitted',
+    ])
+
+    const [result] = await connectionOrDb.query(
+      `
+      INSERT INTO client_document_list (
+        client_unit_id,
+        document_id,
+        is_required,
+        requirement_source,
+        status
+      ) VALUES ?
+      ON DUPLICATE KEY UPDATE
+        is_required = VALUES(is_required),
+        requirement_source = VALUES(requirement_source),
+        status = CASE
+          WHEN client_document_list.status = 'not_submitted' THEN VALUES(status)
+          ELSE client_document_list.status
+        END
+      `,
+      [values]
+    )
+
+    syncedDocuments += Number(result.affectedRows || 0)
+
+    await refreshCommissionEligibility(clientUnit.id, connectionOrDb, {
+      actorRole: options.actorRole,
+    })
+  }
+
+  return {
+    affectedClientUnits: clientUnits.length,
+    syncedDocuments,
+  }
+}
+
+const getRiskyClientDocumentsForListingRemoval = async (
+  connectionOrDb,
+  listingId,
+  removedDocumentIds = []
+) => {
+  if (!removedDocumentIds.length) return []
+
+  const [rows] = await connectionOrDb.query(
+    `
+    SELECT
+      cdl.id,
+      cdl.client_unit_id,
+      cdl.document_id,
+      d.name AS document_name,
+      c.full_name AS client_name,
+      l.unit_id,
+      cdl.status,
+      cdl.file_name,
+      cdl.file_url,
+      cdl.drive_file_id,
+      cdl.uploaded_at
+    FROM client_document_list cdl
+    INNER JOIN client_units cu ON cu.id = cdl.client_unit_id
+    INNER JOIN clients c ON c.id = cu.client_id
+    INNER JOIN listings l ON l.id = cu.listing_id
+    INNER JOIN documents d ON d.id = cdl.document_id
+    WHERE cu.listing_id = ?
+      AND cu.status IN ('reserved', 'active', 'fully_paid', 'closed')
+      AND cdl.document_id IN (?)
+      AND (
+        cdl.status <> 'not_submitted'
+        OR cdl.file_url IS NOT NULL
+        OR cdl.drive_file_id IS NOT NULL
+        OR cdl.uploaded_at IS NOT NULL
+        OR cdl.file_name IS NOT NULL
+      )
+    ORDER BY c.full_name ASC, d.name ASC
+    `,
+    [listingId, removedDocumentIds]
+  )
+
+  return rows
+}
+
+const removeClientDocumentsForListingRequirements = async (
+  connectionOrDb,
+  listingId,
+  removedDocumentIds = []
+) => {
+  if (!removedDocumentIds.length) return { removedClientDocuments: 0 }
+
+  const [result] = await connectionOrDb.query(
+    `
+    DELETE cdl
+    FROM client_document_list cdl
+    INNER JOIN client_units cu ON cu.id = cdl.client_unit_id
+    WHERE cu.listing_id = ?
+      AND cu.status IN ('reserved', 'active', 'fully_paid', 'closed')
+      AND cdl.document_id IN (?)
+    `,
+    [listingId, removedDocumentIds]
+  )
+
+  return { removedClientDocuments: Number(result.affectedRows || 0) }
+}
+
 const listingFields = `
   l.id,
   l.project_id,
@@ -675,7 +846,9 @@ export const createListing = async (req, res) => {
     price_per_sqm = 0,
     lot_area_sqm = 0,
     legal_misc_rate = 10,
-    status = 'available'
+    status = 'available',
+    document_requirements,
+    documentRequirements
   } = req.body
 
   if (isMissing(project_id)) {
@@ -749,7 +922,22 @@ export const createListing = async (req, res) => {
 
     listingId = result.insertId
     await syncListingUnitAliases(connection, listingId, old_unit_ids)
-    documentSync = await copyProjectRequirementsToListing(connection, listingId, project_id, { overwrite: true })
+
+    const suppliedDocumentRequirements =
+      Array.isArray(document_requirements) || Array.isArray(documentRequirements)
+        ? document_requirements || documentRequirements || []
+        : null
+
+    if (suppliedDocumentRequirements) {
+      documentSync = await replaceListingDocumentRequirements(
+        connection,
+        listingId,
+        suppliedDocumentRequirements,
+        'listing_override'
+      )
+    } else {
+      documentSync = await copyProjectRequirementsToListing(connection, listingId, project_id, { overwrite: true })
+    }
 
     await connection.commit()
   } catch (error) {
@@ -792,7 +980,9 @@ export const updateListing = async (req, res) => {
     price_per_sqm = 0,
     lot_area_sqm = 0,
     legal_misc_rate = 10,
-    status = 'available'
+    status = 'available',
+    document_requirements,
+    documentRequirements
   } = req.body
 
   if (isMissing(project_id)) {
@@ -938,34 +1128,113 @@ export const getListingDocumentRequirements = async (req, res) => {
 
 export const updateListingDocumentRequirements = async (req, res) => {
   const { id } = req.params
-  const { document_requirements, documentRequirements } = req.body
+  const {
+    document_requirements,
+    documentRequirements,
+    confirm_remove_used_documents = false,
+  } = req.body
 
-  const [listingRows] = await db.query(
-    `SELECT id, unit_id FROM listings WHERE id = ? LIMIT 1`,
-    [id]
+  const requirements = normalizeDocumentRequirementsPayload(
+    document_requirements || documentRequirements || []
   )
 
-  const listing = listingRows[0]
+  const connection = await db.getConnection()
 
-  if (!listing) {
-    return res.status(404).json({ message: 'Listing not found' })
+  try {
+    await connection.beginTransaction()
+
+    const [listingRows] = await connection.query(
+      `SELECT id, unit_id FROM listings WHERE id = ? LIMIT 1`,
+      [id]
+    )
+
+    const listing = listingRows[0]
+
+    if (!listing) {
+      await connection.rollback()
+      return res.status(404).json({ message: 'Listing not found' })
+    }
+
+    const [currentRequirementRows] = await connection.query(
+      `
+      SELECT document_id
+      FROM listing_document_requirements
+      WHERE listing_id = ?
+        AND status = 'active'
+      `,
+      [id]
+    )
+
+    const nextActiveDocumentIds = new Set(
+      requirements
+        .filter((requirement) => requirement.status === 'active')
+        .map((requirement) => Number(requirement.document_id))
+    )
+
+    const removedDocumentIds = currentRequirementRows
+      .map((row) => Number(row.document_id))
+      .filter((documentId) => !nextActiveDocumentIds.has(documentId))
+
+    const riskyDocuments = await getRiskyClientDocumentsForListingRemoval(
+      connection,
+      id,
+      removedDocumentIds
+    )
+
+    if (riskyDocuments.length > 0 && !confirm_remove_used_documents) {
+      await connection.rollback()
+      return res.status(409).json({
+        message:
+          'Some removed documents already have submitted status or uploaded files in existing client checklists. Confirm removal to remove/unlink those checklist files.',
+        requiresConfirmation: true,
+        riskyDocuments,
+      })
+    }
+
+    const removeSummary = await removeClientDocumentsForListingRequirements(
+      connection,
+      id,
+      removedDocumentIds
+    )
+
+    const result = await replaceListingDocumentRequirements(
+      connection,
+      id,
+      requirements,
+      'listing_override'
+    )
+
+    const syncSummary = await syncClientUnitChecklistsFromListingRequirements(
+      connection,
+      id,
+      requirements,
+      { actorRole: req.user.role }
+    )
+
+    await connection.commit()
+
+    await safeCreateAuditLog({
+      userId: req.user.id,
+      action: 'update',
+      module: 'Listing Documents',
+      description: `Updated listing document requirements for ${listing.unit_id}`,
+      ipAddress: getClientIp(req)
+    })
+
+    return res.status(200).json({
+      message: 'Listing document requirements updated successfully',
+      data: {
+        ...result,
+        ...removeSummary,
+        ...syncSummary,
+      }
+    })
+  } catch (error) {
+    await connection.rollback()
+    throw error
+  } finally {
+    connection.release()
   }
-
-  const requirements = document_requirements || documentRequirements || []
-  const result = await replaceListingDocumentRequirements(db, id, requirements, 'listing_override')
-
-  await safeCreateAuditLog({
-    userId: req.user.id,
-    action: 'update',
-    module: 'Listing Documents',
-    description: `Updated listing document requirements for ${listing.unit_id}`,
-    ipAddress: getClientIp(req)
-  })
-
-  return res.status(200).json({
-    message: 'Listing document requirements updated successfully',
-    data: result
-  })
 }
 
 export const resetListingDocumentRequirements = async (req, res) => {
@@ -982,7 +1251,29 @@ export const resetListingDocumentRequirements = async (req, res) => {
     return res.status(404).json({ message: 'Listing not found' })
   }
 
-  const result = await copyProjectRequirementsToListing(db, id, listing.project_id, { overwrite: true })
+  const connection = await db.getConnection()
+  let result = null
+  let syncSummary = null
+
+  try {
+    await connection.beginTransaction()
+
+    result = await copyProjectRequirementsToListing(connection, id, listing.project_id, { overwrite: true })
+    const requirements = await loadListingDocumentRequirements(connection, id)
+    syncSummary = await syncClientUnitChecklistsFromListingRequirements(
+      connection,
+      id,
+      requirements,
+      { actorRole: req.user.role }
+    )
+
+    await connection.commit()
+  } catch (error) {
+    await connection.rollback()
+    throw error
+  } finally {
+    connection.release()
+  }
 
   await safeCreateAuditLog({
     userId: req.user.id,
@@ -994,7 +1285,10 @@ export const resetListingDocumentRequirements = async (req, res) => {
 
   return res.status(200).json({
     message: 'Listing document requirements reset to project defaults',
-    data: result
+    data: {
+      ...result,
+      ...syncSummary,
+    }
   })
 }
 

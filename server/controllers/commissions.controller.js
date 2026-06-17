@@ -883,9 +883,10 @@ const getExpectedCommissionRowsForClientUnit = async ({
 
   const finalSellerId = isMissing(sellerId) ? clientUnit.seller_id : sellerId;
   const rawSaleType = isMissing(saleType) ? clientUnit.sale_type : saleType;
+  const isDirectToDeveloperSale = rawSaleType === "direct_to_developer";
   const finalSaleType =
-    rawSaleType === "direct_to_developer"
-      ? "direct"
+    isDirectToDeveloperSale
+      ? "direct_to_developer"
       : rawSaleType === "direct"
         ? "direct"
         : "distributed";
@@ -898,7 +899,7 @@ const getExpectedCommissionRowsForClientUnit = async ({
     };
   }
 
-  if (finalSaleType === "direct") {
+  if (finalSaleType === "direct" || finalSaleType === "direct_to_developer") {
     const seller = await getSeller(connectionOrDb, finalSellerId);
     if (!seller) {
       return {
@@ -908,13 +909,18 @@ const getExpectedCommissionRowsForClientUnit = async ({
       };
     }
 
-    const rate =
-      getAssignedSaleRate(seller) ??
-      (await getFinalRate({
-        connectionOrDb,
-        seller,
-        rateType: "personal",
-      }));
+    const rate = isDirectToDeveloperSale
+      ? await getFinalRate({
+          connectionOrDb,
+          seller,
+          rateType: "direct_to_developer",
+        })
+      : getAssignedSaleRate(seller) ??
+        (await getFinalRate({
+          connectionOrDb,
+          seller,
+          rateType: "personal",
+        }));
 
     return {
       clientUnit,
@@ -924,8 +930,10 @@ const getExpectedCommissionRowsForClientUnit = async ({
           rate: normalizeRate(rate),
           sourceType: "main",
           commissionRole: seller.seller_role,
-          saleType: "direct",
-          label: "Direct main commission",
+          saleType: finalSaleType,
+          label: isDirectToDeveloperSale
+            ? "Direct-to-developer main commission"
+            : "Direct main commission",
         },
       ],
       warnings: [],
@@ -1609,23 +1617,25 @@ export const createHierarchyCommissionsForClientUnit = async ({
 
   if (saleType === "direct" || saleType === "direct_to_developer") {
     const seller = await getSeller(connectionOrDb, sellerId);
-    const personalRate =
-      getAssignedSaleRate(seller) ??
-      (saleType === "direct_to_developer"
+    const finalRate =
+      saleType === "direct_to_developer"
         ? await getFinalRate({
             connectionOrDb,
             seller,
             rateType: "direct_to_developer",
           })
-        : !isMissing(seller?.personal_commission_rate)
-          ? normalizeRate(seller.personal_commission_rate)
-          : null);
+        : getAssignedSaleRate(seller) ??
+          (await getFinalRate({
+            connectionOrDb,
+            seller,
+            rateType: "personal",
+          }));
 
     const mainCommission = await createAutoCommissionForClientUnit({
       connection: connectionOrDb,
       clientUnitId,
       sellerId,
-      rateOverride: personalRate,
+      rateOverride: finalRate,
       commissionRole: seller?.seller_role || null,
       sourceType: "main",
       parentCommissionId: null,

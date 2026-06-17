@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
+import { Cell, Pie, PieChart, Tooltip } from "recharts";
 import {
   FiEdit2,
   FiEye,
@@ -211,6 +211,72 @@ const normalLotTypes = ["inner", "corner", "end"];
 
 const chartColors = ["#2563eb", "#f59e0b", "#8b5cf6", "#10b981", "#ef4444"];
 
+type ChartSize = {
+  width: number;
+  height: number;
+};
+
+type MeasuredChartProps = {
+  children: (size: ChartSize) => ReactNode;
+  className?: string;
+};
+
+const MeasuredChart = ({
+  children,
+  className = "h-64 min-h-64 min-w-0",
+}: MeasuredChartProps) => {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [size, setSize] = useState<ChartSize>({
+    width: 0,
+    height: 0,
+  });
+
+  useEffect(() => {
+    const element = containerRef.current;
+
+    if (!element) return;
+
+    const updateSize = () => {
+      const rect = element.getBoundingClientRect();
+      const width = Math.floor(rect.width);
+      const height = Math.floor(rect.height);
+
+      if (width > 0 && height > 0) {
+        setSize((currentSize) => {
+          if (currentSize.width === width && currentSize.height === height) {
+            return currentSize;
+          }
+
+          return { width, height };
+        });
+      }
+    };
+
+    updateSize();
+
+    const resizeObserver = new ResizeObserver(updateSize);
+    resizeObserver.observe(element);
+    window.addEventListener("resize", updateSize);
+
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener("resize", updateSize);
+    };
+  }, []);
+
+  return (
+    <div ref={containerRef} className={className}>
+      {size.width > 0 && size.height > 0 ? (
+        children(size)
+      ) : (
+        <div className="flex h-full min-h-64 items-center justify-center rounded-lg border border-slate-100 bg-slate-50 text-sm font-medium text-slate-400">
+          Preparing chart...
+        </div>
+      )}
+    </div>
+  );
+};
+
 const formulaTooltips: Record<string, string> = {
   Installment: "Lot/installment type. Value comes from listing.lot_type.",
   "Unit ID": "Current official unit identifier. Value comes from listing.unit_id.",
@@ -303,20 +369,16 @@ const fetchDocumentLibrary = async (): Promise<LibraryDocument[]> => {
   return data.documents || [];
 };
 
-const updateListingDocumentRequirements = async ({
-  listingId,
-  requirements,
-}: {
-  listingId: number;
-  requirements: ListingDocumentRequirement[];
-}) => {
+
+const fetchProjectDocumentRequirements = async (
+  projectId: number,
+): Promise<ListingDocumentRequirement[]> => {
+  if (!projectId) return [];
+
   const response = await fetch(
-    `${API_URL}/listings/${listingId}/document-requirements`,
+    `${API_URL}/projects/${projectId}/document-requirements`,
     {
-      method: "PUT",
       credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ document_requirements: requirements }),
     },
   );
 
@@ -324,7 +386,50 @@ const updateListingDocumentRequirements = async ({
     throw new Error(await getErrorMessage(response));
   }
 
-  return response.json();
+  const data = (await response.json()) as {
+    requirements?: ListingDocumentRequirement[];
+    documentRequirements?: ListingDocumentRequirement[];
+    data?: ListingDocumentRequirement[];
+  };
+
+  return data.requirements || data.documentRequirements || data.data || [];
+};
+
+const updateListingDocumentRequirements = async ({
+  listingId,
+  requirements,
+  confirmRemoveUsedDocuments = false,
+}: {
+  listingId: number;
+  requirements: ListingDocumentRequirement[];
+  confirmRemoveUsedDocuments?: boolean;
+}) => {
+  const response = await fetch(
+    `${API_URL}/listings/${listingId}/document-requirements`,
+    {
+      method: "PUT",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        document_requirements: requirements,
+        confirm_remove_used_documents: confirmRemoveUsedDocuments,
+      }),
+    },
+  );
+
+  const data = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    const error = new Error(data?.message || "Request failed") as Error & {
+      status?: number;
+      data?: unknown;
+    };
+    error.status = response.status;
+    error.data = data;
+    throw error;
+  }
+
+  return data;
 };
 
 const resetListingDocumentRequirements = async (listingId: number) => {
@@ -343,7 +448,7 @@ const resetListingDocumentRequirements = async (listingId: number) => {
   return response.json();
 };
 
-const createListing = async (listingData: ListingFormData) => {
+const createListing = async (listingData: ListingFormData & { document_requirements?: ListingDocumentRequirement[] }) => {
   const response = await fetch(`${API_URL}/listings`, {
     method: "POST",
     credentials: "include",
@@ -514,6 +619,11 @@ const Listings = () => {
     defaultListingFormData,
   );
 
+  const [isAddDocumentsOpen, setIsAddDocumentsOpen] = useState(false);
+  const [addDocumentRequirements, setAddDocumentRequirements] = useState<
+    ListingDocumentRequirement[]
+  >([]);
+
   const [lotTypeMode, setLotTypeMode] = useState("inner");
   const [customLotType, setCustomLotType] = useState("");
   const [editLotTypeMode, setEditLotTypeMode] = useState("inner");
@@ -619,6 +729,7 @@ const Listings = () => {
     });
     setLotTypeMode("inner");
     setCustomLotType("");
+    setAddDocumentRequirements([]);
   };
 
   const openAddModal = () => {
@@ -633,6 +744,8 @@ const Listings = () => {
     setCustomLotType("");
     setSuccessMessage("");
     setAddFormStatusMessage("");
+    setAddDocumentRequirements([]);
+    setIsAddDocumentsOpen(false);
     createListingMutation.reset();
     setIsAddOpen(true);
   };
@@ -656,6 +769,9 @@ const Listings = () => {
     createListingMutation.mutate({
       ...formData,
       lot_type: resolveLotType(lotTypeMode, customLotType),
+      ...(addDocumentRequirements.length > 0
+        ? { document_requirements: addDocumentRequirements }
+        : {}),
     });
   };
 
@@ -727,6 +843,15 @@ const Listings = () => {
     ];
   }, [listings]);
 
+  const inventoryListings = listings.filter((listing) => {
+    const status = String(listing.status || "").toLowerCase();
+    return status !== "inactive" && status !== "superseded";
+  });
+
+  const supersededCount = listings.filter(
+    (listing) => String(listing.status || "").toLowerCase() === "superseded",
+  ).length;
+
   const listingStatusData = statusFilters
     .filter((status) => status.value !== "all")
     .map((status) => ({
@@ -735,8 +860,8 @@ const Listings = () => {
         .length,
     }));
 
-  const totalValue = listings.reduce(
-    (sum, listing) => sum + Number(listing.net_selling_price || 0),
+  const totalValue = inventoryListings.reduce(
+    (sum, listing) => sum + Number(listing.total_contract_price || 0),
     0,
   );
 
@@ -770,8 +895,8 @@ const Listings = () => {
       ) : null}
       {mutationError ? <Alert variant="error" title={mutationError} /> : null}
 
-      <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3 xl:grid-cols-6">
-        <StatCard label="All Listings" value={listings.length} />
+      <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3 xl:grid-cols-7">
+        <StatCard label="All Listings" value={inventoryListings.length} />
         <StatCard
           label="Available"
           value={listings.filter((item) => item.status === "available").length}
@@ -788,6 +913,7 @@ const Listings = () => {
           label="Hold"
           value={listings.filter((item) => item.status === "hold").length}
         />
+        <StatCard label="Superseded" value={supersededCount} />
         <StatCard label="Total Value" value={formatMoney(totalValue)} />
       </div>
 
@@ -796,27 +922,29 @@ const Listings = () => {
           Inventory Status
         </h2>
 
-        <div className="h-64">
-          <ResponsiveContainer width="100%" height="100%">
-            <PieChart>
+        <MeasuredChart>
+          {({ width, height }) => (
+            <PieChart height={height} width={width}>
               <Pie
+                cx="50%"
+                cy="50%"
                 data={listingStatusData}
                 dataKey="value"
                 nameKey="name"
-                outerRadius={90}
+                outerRadius={Math.min(width, height) * 0.34}
                 label
               >
-                {listingStatusData.map((_, index) => (
+                {listingStatusData.map((entry, index) => (
                   <Cell
-                    key={chartColors[index]}
+                    key={`${entry.name}-${index}`}
                     fill={chartColors[index % chartColors.length]}
                   />
                 ))}
               </Pie>
               <Tooltip />
             </PieChart>
-          </ResponsiveContainer>
-        </div>
+          )}
+        </MeasuredChart>
       </div>
 
       <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-5">
@@ -1052,6 +1180,7 @@ const Listings = () => {
           onSubmit={handleAddListing}
           onClose={() => {
             setIsAddOpen(false);
+            setIsAddDocumentsOpen(false);
             setAddFormStatusMessage("");
           }}
           isPending={createListingMutation.isPending}
@@ -1062,7 +1191,22 @@ const Listings = () => {
               : ""
           }
           errorMessage={createListingMutation.error?.message || ""}
+          onEditDocuments={() => setIsAddDocumentsOpen(true)}
+          documentSummaryText={
+            addDocumentRequirements.length > 0
+              ? `${addDocumentRequirements.length} docs / ${addDocumentRequirements.filter((item) => Boolean(item.is_required) && item.status !== "inactive").length} required`
+              : "Click Edit Documents to set this listing's checklist before saving. Leave empty to use project defaults."
+          }
           autoPrefixUnitId
+        />
+      ) : null}
+
+      {isAddDocumentsOpen ? (
+        <DraftListingDocumentRequirementsModal
+          projectId={Number(formData.project_id || 0)}
+          requirements={addDocumentRequirements}
+          setRequirements={setAddDocumentRequirements}
+          onClose={() => setIsAddDocumentsOpen(false)}
         />
       ) : null}
 
@@ -1792,6 +1936,10 @@ const ListingDocumentRequirementsModal = ({
   >([]);
   const [successMessage, setSuccessMessage] = useState("");
   const [documentSearch, setDocumentSearch] = useState("");
+  const [confirmRiskyRemoval, setConfirmRiskyRemoval] = useState<{
+    message: string;
+    riskyDocuments: unknown[];
+  } | null>(null);
 
   const { data: documentLibrary = [] } = useQuery({
     queryKey: ["documents", "library", "active"],
@@ -1810,8 +1958,28 @@ const ListingDocumentRequirementsModal = ({
           queryKey: ["listing-full-details", details.listing.id],
         });
         queryClient.invalidateQueries({ queryKey: ["listings"] });
+        queryClient.invalidateQueries({ queryKey: ["client-units"] });
+        queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
       }
-      setSuccessMessage("Listing document requirements saved");
+      setConfirmRiskyRemoval(null);
+      setSuccessMessage("Listing document requirements saved and affected client checklists synced");
+    },
+    onError: (error) => {
+      const apiError = error as Error & {
+        status?: number;
+        data?: {
+          message?: string;
+          requiresConfirmation?: boolean;
+          riskyDocuments?: unknown[];
+        };
+      };
+
+      if (apiError.status === 409 && apiError.data?.requiresConfirmation) {
+        setConfirmRiskyRemoval({
+          message: apiError.data.message || apiError.message,
+          riskyDocuments: apiError.data.riskyDocuments || [],
+        });
+      }
     },
   });
 
@@ -1937,9 +2105,7 @@ const ListingDocumentRequirementsModal = ({
                   {details.listing.project_name} / {details.listing.unit_id}
                 </h3>
                 <p className="text-sm text-slate-500">
-                  Edit only this listing's document requirements. Existing
-                  client-unit checklists keep their snapshot unless rebuilt
-                  intentionally.
+                  Edit this listing's document requirements. Existing client-unit checklists for this listing will be synced after saving. Removing submitted/uploaded checklist documents requires confirmation.
                 </p>
               </div>
               <div className="flex flex-wrap gap-2 text-xs">
@@ -2021,7 +2187,39 @@ const ListingDocumentRequirementsModal = ({
             </div>
           </div>
 
-          {saveRequirementsMutation.isError ? (
+          {confirmRiskyRemoval ? (
+            <ConfirmBox
+              title="Remove submitted/uploaded checklist documents?"
+              message={
+                <div className="space-y-2">
+                  <p>{confirmRiskyRemoval.message}</p>
+                  <p>
+                    This will remove those document rows from existing client-unit checklists. Uploaded file links on those removed rows will also be removed from the checklist.
+                  </p>
+                  <p className="font-semibold">
+                    Affected checklist rows: {confirmRiskyRemoval.riskyDocuments.length}
+                  </p>
+                </div>
+              }
+              cancelLabel="Keep Documents"
+              confirmLabel={
+                saveRequirementsMutation.isPending
+                  ? "Removing..."
+                  : "Confirm Remove"
+              }
+              onCancel={() => setConfirmRiskyRemoval(null)}
+              onConfirm={() => {
+                if (!details) return;
+                saveRequirementsMutation.mutate({
+                  listingId: details.listing.id,
+                  requirements,
+                  confirmRemoveUsedDocuments: true,
+                });
+              }}
+            />
+          ) : null}
+
+          {saveRequirementsMutation.isError && !confirmRiskyRemoval ? (
             <Alert type="error">{saveRequirementsMutation.error.message}</Alert>
           ) : null}
           {resetRequirementsMutation.isError ? (
@@ -2088,6 +2286,255 @@ const ListingDocumentRequirementsModal = ({
           )}
         </div>
       ) : null}
+    </Modal>
+  );
+};
+
+
+
+type DraftListingDocumentRequirementsModalProps = {
+  projectId: number;
+  requirements: ListingDocumentRequirement[];
+  setRequirements: (requirements: ListingDocumentRequirement[]) => void;
+  onClose: () => void;
+};
+
+const DraftListingDocumentRequirementsModal = ({
+  projectId,
+  requirements,
+  setRequirements,
+  onClose,
+}: DraftListingDocumentRequirementsModalProps) => {
+  const [documentSearch, setDocumentSearch] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
+
+  const { data: documentLibrary = [] } = useQuery({
+    queryKey: ["documents", "library", "active"],
+    queryFn: fetchDocumentLibrary,
+  });
+
+  const loadProjectDefaultsMutation = useMutation({
+    mutationFn: () => fetchProjectDocumentRequirements(projectId),
+    onSuccess: (projectRequirements) => {
+      setRequirements(
+        projectRequirements.map((requirement, index) => ({
+          ...requirement,
+          is_required: Boolean(requirement.is_required),
+          status: requirement.status || "active",
+          sort_order: Number(requirement.sort_order || index + 1),
+          source: requirement.source || "project_default",
+        })),
+      );
+      setSuccessMessage("Project default documents loaded");
+    },
+  });
+
+  const updateRequirement = (
+    index: number,
+    updates: Partial<ListingDocumentRequirement>,
+  ) => {
+    setRequirements(
+      requirements.map((requirement, i) =>
+        i === index ? { ...requirement, ...updates } : requirement,
+      ),
+    );
+  };
+
+  const removeRequirement = (index: number) => {
+    setRequirements(requirements.filter((_, i) => i !== index));
+  };
+
+  const addLibraryRequirement = (documentId: number) => {
+    const document = documentLibrary.find(
+      (item) => Number(item.id) === Number(documentId),
+    );
+
+    if (!document) return;
+
+    if (
+      requirements.some(
+        (requirement) => Number(requirement.document_id) === Number(document.id),
+      )
+    ) {
+      return;
+    }
+
+    setRequirements([
+      ...requirements,
+      {
+        document_id: document.id,
+        name: document.name,
+        description: document.description,
+        can_reuse: document.can_reuse,
+        is_required: true,
+        status: "active",
+        sort_order: requirements.length + 1,
+        source: "listing_override",
+      },
+    ]);
+  };
+
+  const selectedDocumentIds = new Set(
+    requirements
+      .map((requirement) => requirement.document_id)
+      .filter(Boolean)
+      .map(Number),
+  );
+
+  const filteredDocumentLibrary = documentLibrary.filter((document) =>
+    [document.name, document.description]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+      .includes(documentSearch.toLowerCase().trim()),
+  );
+
+  return (
+    <Modal
+      title="Edit Documents Before Adding Listing"
+      onClose={onClose}
+      size="xl"
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button onClick={onClose}>Done</Button>
+        </div>
+      }
+    >
+      <div className="space-y-4">
+        {successMessage ? <Alert variant="success" title={successMessage} /> : null}
+
+        {loadProjectDefaultsMutation.error instanceof Error ? (
+          <Alert variant="error" title={loadProjectDefaultsMutation.error.message} />
+        ) : null}
+
+        <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h3 className="text-base font-bold text-slate-900">
+                Draft Listing Document Requirements
+              </h3>
+              <p className="text-sm text-slate-500">
+                These requirements will be saved together with the new listing. Leave empty to use project defaults when saving.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
+                {requirements.length} docs
+              </span>
+              <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+                {requirements.filter((item) => Boolean(item.is_required) && item.status !== "inactive").length} required
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-slate-200 bg-white p-4">
+          <div className="mb-3 flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h4 className="font-bold text-slate-900">Add Existing Documents</h4>
+              <p className="text-xs text-slate-500">
+                Create missing documents in Document Library first, then search and add them here.
+              </p>
+            </div>
+            <Button
+              disabled={!projectId || loadProjectDefaultsMutation.isPending}
+              onClick={() => loadProjectDefaultsMutation.mutate()}
+            >
+              {loadProjectDefaultsMutation.isPending
+                ? "Loading..."
+                : "Load Project Defaults"}
+            </Button>
+          </div>
+
+          <Input
+            onChange={(e) => setDocumentSearch(e.target.value)}
+            placeholder="Search document library..."
+            value={documentSearch}
+          />
+
+          <div className="mt-3 grid max-h-56 grid-cols-1 gap-2 overflow-y-auto md:grid-cols-2">
+            {filteredDocumentLibrary.map((document) => {
+              const alreadySelected = selectedDocumentIds.has(Number(document.id));
+
+              return (
+                <div
+                  className="rounded-lg border border-slate-200 bg-slate-50 p-3"
+                  key={document.id}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-slate-900">
+                        {document.name}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        {document.description || "No description"}
+                      </p>
+                    </div>
+                    <Button
+                      disabled={alreadySelected}
+                      onClick={() => addLibraryRequirement(document.id)}
+                    >
+                      {alreadySelected ? "Added" : "Add"}
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {requirements.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-slate-300 bg-white p-4 text-sm text-slate-500">
+            No custom document requirements selected. Saving the listing will use project defaults.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {requirements.map((requirement, index) => (
+              <div
+                className="grid grid-cols-1 items-center gap-2 rounded-lg border border-slate-200 bg-white p-3 md:grid-cols-[1fr_150px_120px_auto]"
+                key={`${requirement.document_id || requirement.name}-${index}`}
+              >
+                <div className="min-w-0">
+                  <p className="font-semibold text-slate-900">
+                    {requirement.name}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    {requirement.description || formatText(requirement.source || "listing_override")}
+                  </p>
+                  <p className="text-[11px] text-slate-400">
+                    Source: {formatText(requirement.source || "listing_override")}
+                  </p>
+                </div>
+                <Select
+                  label="Requirement"
+                  onChange={(e) =>
+                    updateRequirement(index, {
+                      is_required: e.target.value === "true",
+                    })
+                  }
+                  value={String(Boolean(requirement.is_required))}
+                >
+                  <option value="true">Required</option>
+                  <option value="false">Optional</option>
+                </Select>
+                <Select
+                  label="Status"
+                  onChange={(e) =>
+                    updateRequirement(index, { status: e.target.value })
+                  }
+                  value={requirement.status || "active"}
+                >
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                </Select>
+                <Button onClick={() => removeRequirement(index)} variant="danger">
+                  Remove
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </Modal>
   );
 };

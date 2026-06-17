@@ -88,6 +88,7 @@ const sellerFields = `
   seller.commission_pool_rate,
   seller.personal_commission_rate,
   seller.override_commission_rate,
+  seller.direct_to_developer_rate,
   seller.residual_commission_rate,
   seller.max_downline_rate,
   seller.rate_set_by,
@@ -843,4 +844,3 @@ export const deleteAccreditedSeller = async (req, res) => {
 
   res.status(200).json({ message: 'Accredited seller deleted successfully' })
 }
-

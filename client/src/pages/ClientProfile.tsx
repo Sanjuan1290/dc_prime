@@ -25,6 +25,7 @@ import StatCard from "../components/ui/StatCard";
 import StatusBadge from "../components/ui/StatusBadge";
 import TableContainer from "../components/ui/TableContainer";
 import { API_URL, getErrorMessage } from "../utils/api";
+import useCurrentUser from "../utils/useCurrentUser";
 import {
   formatDate,
   formatMoney,
@@ -244,6 +245,7 @@ type ClientUnit = {
   seller_role: string | null;
   seller_commission_rate?: number | string | null;
   sale_type?: "distributed" | "direct_to_developer" | string | null;
+  direct_to_developer_rate?: number | string | null;
   reports_under: string | null;
   document_total_count?: number | string;
   document_checklist_count?: number | string;
@@ -286,6 +288,7 @@ type Seller = {
   commission_pool_rate?: number | string | null;
   personal_commission_rate?: number | string | null;
   override_commission_rate?: number | string | null;
+  direct_to_developer_rate?: number | string | null;
   max_downline_rate?: number | string | null;
   reports_under_display?: string | null;
 };
@@ -344,10 +347,50 @@ type SellersResponse = {
   data?: Seller[];
 };
 
+type CurrentUserResponse = {
+  user?: {
+    id: number;
+    full_name: string;
+    email: string;
+    role: string;
+    status: string;
+  };
+  role?: string;
+  isLoggedIn?: boolean;
+};
+
 type ClientDocumentsResponse = {
   documents?: ClientDocument[];
   clientDocuments?: ClientDocument[];
   data?: ClientDocument[];
+};
+
+
+type ReserveDocumentRequirement = {
+  id?: number;
+  document_id: number | null;
+  name: string;
+  description?: string | null;
+  can_reuse?: boolean | number;
+  is_required: boolean | number;
+  status: string;
+  sort_order: number;
+  source?: string;
+};
+
+type LibraryDocument = {
+  id: number;
+  name: string;
+  description: string | null;
+  can_reuse: boolean | number;
+  status: string;
+};
+
+type ListingDocumentDefaultsResponse = {
+  listingDocumentRequirements?: ReserveDocumentRequirement[];
+  documentRequirements?: ReserveDocumentRequirement[];
+  requirements?: ReserveDocumentRequirement[];
+  data?: ReserveDocumentRequirement[];
 };
 
 type ReserveListingData = {
@@ -378,12 +421,14 @@ type ReserveListingData = {
   interest_rate: string;
   monthly_amortization: string;
   sale_type: "distributed" | "direct_to_developer";
+  direct_to_developer_rate: string;
   override_seller_id: number | "";
   override_rate: string;
   override_notes: string;
   cash_kaliwaan_amount: string;
   cash_kaliwaan_date: string;
   cash_kaliwaan_notes: string;
+  document_requirements?: ReserveDocumentRequirement[];
 };
 
 type EditUnitData = {
@@ -396,6 +441,7 @@ type EditUnitData = {
   co_buyer_employment: EmploymentFormData;
   regenerate_commission: boolean;
   sale_type: "distributed" | "direct_to_developer";
+  direct_to_developer_rate: string;
   override_seller_id: string;
   override_rate: string;
   override_notes: string;
@@ -475,12 +521,14 @@ const createDefaultReserveData = (): ReserveListingData => ({
   interest_rate: "0",
   monthly_amortization: "",
   sale_type: "distributed",
+  direct_to_developer_rate: "",
   override_seller_id: "",
   override_rate: "",
   override_notes: "",
   cash_kaliwaan_amount: "",
   cash_kaliwaan_date: "",
   cash_kaliwaan_notes: "",
+  document_requirements: [],
 });
 
 const getSelectedNumber = (
@@ -515,6 +563,19 @@ const getValidDiscountOption = (
   );
 };
 
+
+const getSellerDirectToDeveloperRate = (seller?: Seller | null) => {
+  const rate = seller?.direct_to_developer_rate ?? seller?.commission_rate ?? "";
+
+  if (rate === null || rate === undefined || String(rate).trim() === "") {
+    return "";
+  }
+
+  const numericRate = Number(rate);
+
+  return Number.isFinite(numericRate) ? String(numericRate) : "";
+};
+
 const defaultEditUnitData: EditUnitData = {
   seller_id: "",
   due_date: "",
@@ -525,6 +586,7 @@ const defaultEditUnitData: EditUnitData = {
   co_buyer_employment: createBlankEmploymentData("co_buyer"),
   regenerate_commission: false,
   sale_type: "distributed",
+  direct_to_developer_rate: "",
   override_seller_id: "",
   override_rate: "",
   override_notes: "",
@@ -850,6 +912,45 @@ const fetchClientDocuments = async (clientUnitId: number | null) => {
   return data.documents || data.clientDocuments || data.data || [];
 };
 
+
+const fetchDocumentLibrary = async (): Promise<LibraryDocument[]> => {
+  const res = await fetch(`${API_URL}/documents?status=active`, {
+    credentials: "include",
+  });
+
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+
+  const data = (await res.json()) as { documents?: LibraryDocument[]; data?: LibraryDocument[] };
+  return data.documents || data.data || [];
+};
+
+const fetchListingDocumentDefaults = async (
+  listingId: number | "",
+): Promise<ReserveDocumentRequirement[]> => {
+  if (!listingId) return [];
+
+  const res = await fetch(`${API_URL}/listings/${listingId}/full-details`, {
+    credentials: "include",
+  });
+
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+
+  const data = (await res.json()) as ListingDocumentDefaultsResponse;
+  return (
+    data.listingDocumentRequirements ||
+    data.documentRequirements ||
+    data.requirements ||
+    data.data ||
+    []
+  ).map((requirement, index) => ({
+    ...requirement,
+    is_required: Boolean(requirement.is_required),
+    status: requirement.status || "active",
+    sort_order: Number(requirement.sort_order || index + 1),
+    source: requirement.source || "listing_snapshot",
+  }));
+};
+
 const reserveListing = async ({
   clientId,
   reserveData,
@@ -931,12 +1032,18 @@ const reserveListing = async ({
           ? Number(reserveData.monthly_amortization)
           : null,
       sale_type: reserveData.sale_type,
+      direct_to_developer_rate:
+        reserveData.sale_type === "direct_to_developer" &&
+        reserveData.direct_to_developer_rate !== ""
+          ? Number(reserveData.direct_to_developer_rate)
+          : null,
       cash_kaliwaan_amount:
         reserveData.cash_kaliwaan_amount === ""
           ? 0
           : Number(reserveData.cash_kaliwaan_amount),
       cash_kaliwaan_date: reserveData.cash_kaliwaan_date || null,
       cash_kaliwaan_notes: reserveData.cash_kaliwaan_notes || null,
+      document_requirements: reserveData.document_requirements || [],
     }),
   });
 
@@ -1095,6 +1202,11 @@ const updateClientUnit = async ({
             },
       regenerate_commission: unitData.regenerate_commission,
       sale_type: unitData.sale_type,
+      direct_to_developer_rate:
+        unitData.sale_type === "direct_to_developer" &&
+        unitData.direct_to_developer_rate !== ""
+          ? Number(unitData.direct_to_developer_rate)
+          : null,
     }),
   });
 
@@ -1348,6 +1460,13 @@ const ClientProfile = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { id: clientId } = useParams();
+  const { data: currentUserResponse } = useCurrentUser() as {
+    data?: CurrentUserResponse | null;
+  };
+  const currentUserRole =
+    currentUserResponse?.user?.role || currentUserResponse?.role || "";
+  const isSuperAdmin =
+    String(currentUserRole).trim().toLowerCase() === "super_admin";
 
   const [isReserveOpen, setIsReserveOpen] = useState(false);
   const [reserveData, setReserveData] = useState<ReserveListingData>(() =>
@@ -1373,6 +1492,12 @@ const ClientProfile = () => {
   const [reserveValidationMessage, setReserveValidationMessage] = useState("");
   const [reserveFormulaKey, setReserveFormulaKey] = useState<
     ReserveFormulaKey | ""
+  >("");
+  const [reserveDocumentRequirements, setReserveDocumentRequirements] = useState<
+    ReserveDocumentRequirement[]
+  >([]);
+  const [reserveDocumentListingId, setReserveDocumentListingId] = useState<
+    number | ""
   >("");
   const [isBuyerProfileEditing, setIsBuyerProfileEditing] = useState(false);
   const [principalProfileData, setPrincipalProfileData] =
@@ -1429,6 +1554,21 @@ const ClientProfile = () => {
     queryFn: fetchSellers,
   });
 
+
+  const { data: documentLibrary = [] } = useQuery({
+    queryKey: ["documents", "library", "active"],
+    queryFn: fetchDocumentLibrary,
+  });
+
+  const {
+    data: reserveListingDocumentDefaults = [],
+    isLoading: isReserveDocumentsLoading,
+  } = useQuery({
+    queryKey: ["reserve-listing-documents", reserveData.listing_id || null],
+    queryFn: () => fetchListingDocumentDefaults(reserveData.listing_id),
+    enabled: Boolean(reserveData.listing_id),
+  });
+
   const {
     data: clientDocuments = [],
     isLoading: areDocumentsLoading,
@@ -1472,6 +1612,35 @@ const ClientProfile = () => {
 
     return () => window.clearTimeout(timeoutId);
   }, [client, coBuyers, employmentDetails]);
+
+
+  useEffect(() => {
+    if (!reserveData.listing_id) {
+      setReserveDocumentRequirements((currentRequirements) =>
+        currentRequirements.length > 0 ? [] : currentRequirements,
+      );
+      setReserveDocumentListingId((currentListingId) =>
+        currentListingId === "" ? currentListingId : "",
+      );
+      return;
+    }
+
+    if (isReserveDocumentsLoading) return;
+
+    const nextListingId = Number(reserveData.listing_id);
+
+    if (Number(reserveDocumentListingId || 0) === nextListingId) {
+      return;
+    }
+
+    setReserveDocumentRequirements(reserveListingDocumentDefaults);
+    setReserveDocumentListingId(nextListingId);
+  }, [
+    reserveData.listing_id,
+    reserveDocumentListingId,
+    reserveListingDocumentDefaults,
+    isReserveDocumentsLoading,
+  ]);
 
   const invalidateClientProfile = () => {
     queryClient.invalidateQueries({ queryKey: ["client", clientId] });
@@ -1592,6 +1761,19 @@ const ClientProfile = () => {
   const selectedMainSeller = sellers.find(
     (seller) => Number(seller.id) === Number(reserveData.seller_id),
   );
+  const selectedDirectToDeveloperRate = getSellerDirectToDeveloperRate(selectedMainSeller);
+  const displayedDirectToDeveloperRate = isSuperAdmin
+    ? reserveData.direct_to_developer_rate
+    : reserveData.direct_to_developer_rate || selectedDirectToDeveloperRate;
+
+  const selectedEditSeller = sellers.find(
+    (seller) => Number(seller.id) === Number(editUnitData.seller_id),
+  );
+  const selectedEditDirectToDeveloperRate =
+    getSellerDirectToDeveloperRate(selectedEditSeller);
+  const displayedEditDirectToDeveloperRate = isSuperAdmin
+    ? editUnitData.direct_to_developer_rate
+    : editUnitData.direct_to_developer_rate || selectedEditDirectToDeveloperRate;
 
   const sellerById = useMemo(() => {
     return new Map(sellers.map((seller) => [Number(seller.id), seller]));
@@ -2002,14 +2184,21 @@ const ClientProfile = () => {
   };
 
   const openReserveModal = () => {
+    const defaultSeller = sellers.find(
+      (seller) => Number(seller.id) === Number(client?.default_seller_id),
+    );
+
     setReserveData({
       ...createDefaultReserveData(),
       seller_id: client?.default_seller_id || "",
+      direct_to_developer_rate: getSellerDirectToDeveloperRate(defaultSeller),
     });
     setListingSearch("");
     setSuccessMessage("");
     setReserveValidationMessage("");
     setReserveFormulaKey("");
+    setReserveDocumentRequirements([]);
+    setReserveDocumentListingId("");
     setIsReserveOpen(true);
   };
 
@@ -2028,6 +2217,14 @@ const ClientProfile = () => {
         unit.sale_type === "direct_to_developer" || unit.sale_type === "direct"
           ? "direct_to_developer"
           : "distributed",
+      direct_to_developer_rate:
+        unit.direct_to_developer_rate === null ||
+        unit.direct_to_developer_rate === undefined ||
+        String(unit.direct_to_developer_rate).trim() === ""
+          ? getSellerDirectToDeveloperRate(
+              sellers.find((seller) => Number(seller.id) === Number(unit.seller_id)),
+            )
+          : String(unit.direct_to_developer_rate),
       override_seller_id: "",
       override_rate: "",
       override_notes: "",
@@ -2092,6 +2289,7 @@ const ClientProfile = () => {
           reserveData.mode_of_payment === "installment"
             ? displayedMonthlyAmortization
             : "",
+        document_requirements: reserveDocumentRequirements,
       },
     });
   };
@@ -2239,11 +2437,18 @@ const ClientProfile = () => {
       ) : null}
 
       {clientUnits
-        .filter(
-          (unit) =>
+        .filter((unit) => {
+          const balance = Number(unit.balance || 0);
+          const status = String(unit.status || "").toLowerCase();
+          const isClosedAccount = ["cancelled", "fully_paid", "closed"].includes(status);
+
+          return (
+            balance > 0 &&
+            !isClosedAccount &&
             Number(unit.days_until_due ?? 999) >= 0 &&
-            Number(unit.days_until_due ?? 999) <= 7,
-        )
+            Number(unit.days_until_due ?? 999) <= 7
+          );
+        })
         .slice(0, 1)
         .map((unit) => (
           <Alert
@@ -2335,11 +2540,6 @@ const ClientProfile = () => {
           title="Balance"
           value={formatMoney(totals.totalBalance)}
           icon={<FiFileText />}
-        />
-        <StatCard
-          title="Gross Commission"
-          value={formatMoney(totals.totalCommission)}
-          icon={<FiUser />}
         />
       </div>
 
@@ -3127,6 +3327,8 @@ const ClientProfile = () => {
                     reservation_fee_amount: "",
                     monthly_amortization: "",
                   });
+                  setReserveDocumentRequirements([]);
+                  setReserveDocumentListingId("");
                   setReserveValidationMessage("");
                   setReserveFormulaKey("");
                 }}
@@ -3157,7 +3359,10 @@ const ClientProfile = () => {
                               Number(listing.reservation_fee || 0),
                             ),
                             monthly_amortization: "",
+                            document_requirements: [],
                           });
+                          setReserveDocumentRequirements([]);
+                          setReserveDocumentListingId("");
                           setReserveValidationMessage("");
                           setReserveFormulaKey("");
                           setListingSearch(label);
@@ -3236,16 +3441,33 @@ const ClientProfile = () => {
               }
             />
 
+            <ReserveDocumentRequirementsSection
+              documents={reserveDocumentRequirements}
+              setDocuments={setReserveDocumentRequirements}
+              documentLibrary={documentLibrary}
+              isLoading={isReserveDocumentsLoading}
+              buyerType={reserveData.buyer_type}
+            />
+
             <div className="grid gap-4 md:grid-cols-2">
               <Select
                 label="Assigned Seller / Unit Manager"
                 value={reserveData.seller_id}
-                onChange={(e) =>
+                onChange={(e) => {
+                  const nextSellerId = e.target.value ? Number(e.target.value) : "";
+                  const nextSeller = sellers.find(
+                    (seller) => Number(seller.id) === Number(nextSellerId),
+                  );
+
                   setReserveData({
                     ...reserveData,
-                    seller_id: e.target.value ? Number(e.target.value) : "",
-                  })
-                }
+                    seller_id: nextSellerId,
+                    direct_to_developer_rate:
+                      reserveData.sale_type === "direct_to_developer"
+                        ? getSellerDirectToDeveloperRate(nextSeller)
+                        : reserveData.direct_to_developer_rate,
+                  });
+                }}
               >
                 <option value="">No seller selected</option>
                 {sellers.map((seller) => (
@@ -3361,6 +3583,11 @@ const ClientProfile = () => {
                   setReserveData({
                     ...reserveData,
                     sale_type: saleType,
+                    direct_to_developer_rate:
+                      saleType === "direct_to_developer"
+                        ? reserveData.direct_to_developer_rate ||
+                          selectedDirectToDeveloperRate
+                        : reserveData.direct_to_developer_rate,
                   });
                 }}
               >
@@ -3724,12 +3951,23 @@ const ClientProfile = () => {
                     value={formatText(selectedMainSeller.seller_role)}
                   />
                   <MiniDetail
-                    label="Rate"
+                    label={
+                      reserveData.sale_type === "direct_to_developer"
+                        ? "Direct-to-Developer Rate"
+                        : "Rate"
+                    }
                     value={
-                      selectedMainSeller.personal_commission_rate ||
-                      selectedMainSeller.commission_rate
-                        ? `${formatNumber(selectedMainSeller.personal_commission_rate || selectedMainSeller.commission_rate)}%`
-                        : "-"
+                      reserveData.sale_type === "direct_to_developer"
+                        ? displayedDirectToDeveloperRate
+                          ? `${formatNumber(displayedDirectToDeveloperRate)}%`
+                          : "Default rate"
+                        : selectedMainSeller.personal_commission_rate ||
+                            selectedMainSeller.commission_rate
+                          ? `${formatNumber(
+                              selectedMainSeller.personal_commission_rate ||
+                                selectedMainSeller.commission_rate,
+                            )}%`
+                          : "-"
                     }
                   />
                 </div>
@@ -3787,6 +4025,38 @@ const ClientProfile = () => {
                   broker, and BNM override releases will not be generated for
                   this sale.
                 </p>
+
+                <div className="mt-4 grid gap-4 md:grid-cols-2">
+                  <Input
+                    disabled={!isSuperAdmin}
+                    label="Direct-to-Developer Commission Rate (%)"
+                    type="number"
+                    min={0}
+                    max={100}
+                    step="0.01"
+                    value={displayedDirectToDeveloperRate}
+                    onChange={(e) =>
+                      setReserveData({
+                        ...reserveData,
+                        direct_to_developer_rate: e.target.value,
+                      })
+                    }
+                    placeholder={
+                      selectedDirectToDeveloperRate || "Use system default"
+                    }
+                  />
+                </div>
+
+                {isSuperAdmin ? (
+                  <p className="mt-2 text-xs font-medium text-emerald-700">
+                    Super Admin can override this rate for this reservation only.
+                  </p>
+                ) : (
+                  <p className="mt-2 text-xs font-medium text-emerald-700">
+                    This rate is controlled by Super Admin. The saved
+                    Direct-to-Developer/default seller rate will be used.
+                  </p>
+                )}
               </div>
             ) : null}
 
@@ -3867,12 +4137,21 @@ const ClientProfile = () => {
             <Select
               label="Assigned Seller / Unit Manager"
               value={editUnitData.seller_id}
-              onChange={(e) =>
+              onChange={(e) => {
+                const nextSeller = sellers.find(
+                  (seller) => Number(seller.id) === Number(e.target.value),
+                );
+
                 setEditUnitData({
                   ...editUnitData,
                   seller_id: e.target.value,
-                })
-              }
+                  direct_to_developer_rate:
+                    editUnitData.sale_type === "direct_to_developer" &&
+                    !editUnitData.direct_to_developer_rate
+                      ? getSellerDirectToDeveloperRate(nextSeller)
+                      : editUnitData.direct_to_developer_rate,
+                });
+              }}
             >
               <option value="">No seller selected</option>
               {sellers.map((seller) => (
@@ -3936,6 +4215,15 @@ const ClientProfile = () => {
                 setEditUnitData({
                   ...editUnitData,
                   sale_type: saleType,
+                  direct_to_developer_rate:
+                    saleType === "direct_to_developer" &&
+                    !editUnitData.direct_to_developer_rate
+                      ? selectedEditDirectToDeveloperRate
+                      : editUnitData.direct_to_developer_rate,
+                  regenerate_commission:
+                    saleType !== editUnitData.sale_type
+                      ? true
+                      : editUnitData.regenerate_commission,
                 });
               }}
             >
@@ -4014,9 +4302,47 @@ const ClientProfile = () => {
           ) : null}
 
           {editUnitData.sale_type === "direct_to_developer" ? (
-            <div className="mt-4 rounded-xl border border-emerald-100 bg-emerald-50 p-4 text-sm text-slate-600">
-              Direct-to-developer sales generate only the selected seller
-              commission. No hierarchy override milestones will be created.
+            <div className="mt-4 rounded-xl border border-emerald-100 bg-emerald-50 p-4">
+              <h3 className="text-sm font-bold text-slate-900">
+                Direct to Developer Commission
+              </h3>
+              <p className="mt-1 text-sm text-slate-600">
+                Direct-to-developer sales generate only the selected seller
+                commission. No hierarchy override milestones will be created.
+              </p>
+
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                <Input
+                  disabled={!isSuperAdmin}
+                  label="Direct-to-Developer Commission Rate (%)"
+                  type="number"
+                  min={0}
+                  max={100}
+                  step="0.01"
+                  value={displayedEditDirectToDeveloperRate}
+                  onChange={(e) =>
+                    setEditUnitData({
+                      ...editUnitData,
+                      direct_to_developer_rate: e.target.value,
+                      regenerate_commission: true,
+                    })
+                  }
+                  placeholder={
+                    selectedEditDirectToDeveloperRate || "Use system default"
+                  }
+                />
+              </div>
+
+              {isSuperAdmin ? (
+                <p className="mt-2 text-xs font-medium text-emerald-700">
+                  Changing this rate will apply when pending commissions are
+                  recalculated. Released commissions stay locked.
+                </p>
+              ) : (
+                <p className="mt-2 text-xs font-medium text-emerald-700">
+                  This rate is controlled by Super Admin.
+                </p>
+              )}
             </div>
           ) : null}
 
@@ -4053,6 +4379,9 @@ const ClientProfile = () => {
               variant="warning"
               title="Use this when the same client changes to another available unit. Payments and document checklist stay on the account."
             />
+            <p className="text-red-600 bg-red-50 px-4 py-1">
+              Cannot change unit for cancelled, fully paid, or closed account
+            </p>
 
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <MiniDetail label="Current Unit" value={changeUnit.unit_id} />
@@ -4500,6 +4829,193 @@ const ClientProfile = () => {
           ) : null}
         </Modal>
       ) : null}
+    </div>
+  );
+};
+
+
+const ReserveDocumentRequirementsSection = ({
+  documents,
+  setDocuments,
+  documentLibrary,
+  isLoading,
+  buyerType,
+}: {
+  documents: ReserveDocumentRequirement[];
+  setDocuments: (documents: ReserveDocumentRequirement[]) => void;
+  documentLibrary: LibraryDocument[];
+  isLoading: boolean;
+  buyerType: BuyerType;
+}) => {
+  const [documentSearch, setDocumentSearch] = useState("");
+
+  const selectedDocumentIds = new Set(
+    documents
+      .map((document) => document.document_id)
+      .filter(Boolean)
+      .map(Number),
+  );
+
+  const filteredDocumentLibrary = documentLibrary.filter((document) =>
+    [document.name, document.description]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase()
+      .includes(documentSearch.toLowerCase().trim()),
+  );
+
+  const updateDocument = (
+    index: number,
+    updates: Partial<ReserveDocumentRequirement>,
+  ) => {
+    setDocuments(
+      documents.map((document, i) =>
+        i === index ? { ...document, ...updates } : document,
+      ),
+    );
+  };
+
+  const addDocument = (documentId: number) => {
+    const libraryDocument = documentLibrary.find(
+      (document) => Number(document.id) === Number(documentId),
+    );
+
+    if (!libraryDocument || selectedDocumentIds.has(Number(documentId))) return;
+
+    setDocuments([
+      ...documents,
+      {
+        document_id: libraryDocument.id,
+        name: libraryDocument.name,
+        description: libraryDocument.description,
+        can_reuse: libraryDocument.can_reuse,
+        is_required: true,
+        status: "active",
+        sort_order: documents.length + 1,
+        source: "client_unit_custom",
+      },
+    ]);
+  };
+
+  const removeDocument = (index: number) => {
+    setDocuments(documents.filter((_, i) => i !== index));
+  };
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div>
+          <h3 className="text-sm font-bold text-slate-900">
+            Reservation Document Checklist
+          </h3>
+          <p className="mt-1 text-xs text-slate-500">
+            This becomes the final client-unit checklist for this reservation. Add extra documents when the buyer is married, has a spouse, second buyer, representative, or other special requirement.
+          </p>
+          {buyerType !== "single" ? (
+            <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700">
+              Buyer type is {formatText(buyerType)}. Review if spouse/second buyer documents are required.
+            </p>
+          ) : null}
+        </div>
+        <div className="flex flex-wrap gap-2 text-xs">
+          <span className="rounded-full bg-blue-50 px-3 py-1 font-semibold text-blue-700">
+            {documents.length} docs
+          </span>
+          <span className="rounded-full bg-emerald-50 px-3 py-1 font-semibold text-emerald-700">
+            {documents.filter((document) => Boolean(document.is_required) && document.status !== "inactive").length} required
+          </span>
+        </div>
+      </div>
+
+      {isLoading ? (
+        <p className="mt-3 text-sm text-slate-500">Loading listing document defaults...</p>
+      ) : null}
+
+      <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
+        <Input
+          onChange={(e) => setDocumentSearch(e.target.value)}
+          placeholder="Search and add documents..."
+          value={documentSearch}
+        />
+
+        <div className="mt-3 grid max-h-44 grid-cols-1 gap-2 overflow-y-auto md:grid-cols-2">
+          {filteredDocumentLibrary.map((document) => {
+            const alreadySelected = selectedDocumentIds.has(Number(document.id));
+
+            return (
+              <div
+                className="rounded-lg border border-slate-200 bg-white p-3"
+                key={document.id}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-slate-900">
+                      {document.name}
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      {document.description || "No description"}
+                    </p>
+                  </div>
+                  <Button
+                    disabled={alreadySelected}
+                    onClick={() => addDocument(document.id)}
+                  >
+                    {alreadySelected ? "Added" : "Add"}
+                  </Button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {documents.length === 0 ? (
+        <div className="mt-3 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-3 text-sm text-slate-500">
+          No documents selected. This reservation will start without a checklist.
+        </div>
+      ) : (
+        <div className="mt-3 space-y-2">
+          {documents.map((document, index) => (
+            <div
+              className="grid grid-cols-1 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 md:grid-cols-[1fr_150px_120px_auto]"
+              key={`${document.document_id || document.name}-${index}`}
+            >
+              <div className="min-w-0">
+                <p className="font-semibold text-slate-900">{document.name}</p>
+                <p className="text-xs text-slate-500">
+                  {document.description || formatText(document.source || "client_unit_custom")}
+                </p>
+                <p className="text-[11px] text-slate-400">
+                  Source: {formatText(document.source || "client_unit_custom")}
+                </p>
+              </div>
+              <Select
+                label="Requirement"
+                onChange={(e) =>
+                  updateDocument(index, {
+                    is_required: e.target.value === "true",
+                  })
+                }
+                value={String(Boolean(document.is_required))}
+              >
+                <option value="true">Required</option>
+                <option value="false">Optional</option>
+              </Select>
+              <Select
+                label="Status"
+                onChange={(e) => updateDocument(index, { status: e.target.value })}
+                value={document.status || "active"}
+              >
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
+              </Select>
+              <Button onClick={() => removeDocument(index)} variant="danger">
+                Remove
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 };

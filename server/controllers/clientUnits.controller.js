@@ -54,6 +54,26 @@ const normalizeMoney = (value) => {
   return Number(Number(value || 0).toFixed(2))
 }
 
+const normalizeRate = (value) => {
+  if (isMissing(value)) return null
+
+  const parsedValue = Number(value)
+
+  if (!Number.isFinite(parsedValue)) return null
+
+  return Number(parsedValue.toFixed(2))
+}
+
+const validateRateRange = (rate, label) => {
+  if (rate === null) return null
+
+  if (rate < 0 || rate > 100) {
+    return `${label} must be between 0 and 100`
+  }
+
+  return null
+}
+
 const parseDateOnly = (value) => {
   if (isMissing(value)) return null
 
@@ -812,6 +832,7 @@ const clientUnitFields = `
   seller.full_name AS seller_name,
   seller.seller_role AS seller_role,
   seller.commission_rate AS seller_commission_rate,
+  seller.direct_to_developer_rate AS direct_to_developer_rate,
   COALESCE(parent_seller.full_name, seller.custom_reports_under, 'None') AS reports_under,
   COALESCE(document_summary.total_count, 0) AS document_total_count,
   COALESCE(document_summary.checklist_count, 0) AS document_checklist_count,
@@ -990,6 +1011,89 @@ const createClientDocumentChecklist = async (connectionOrDb, clientUnitId) => {
   )
 
   return createClientDocumentChecklistFromListing(connectionOrDb, clientUnitRows[0])
+}
+
+
+const booleanDocumentValue = (value, fallback = true) => {
+  if (value === undefined || value === null || value === '') return fallback
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'number') return value === 1
+  const normalized = String(value).trim().toLowerCase()
+  if (['1', 'true', 'yes', 'required'].includes(normalized)) return true
+  if (['0', 'false', 'no', 'optional'].includes(normalized)) return false
+  return fallback
+}
+
+const normalizeDocumentRequirementsPayload = (requirements = []) => {
+  if (!Array.isArray(requirements)) return null
+
+  const seen = new Set()
+
+  return requirements
+    .map((requirement, index) => ({
+      document_id: Number(requirement.document_id),
+      is_required: booleanDocumentValue(requirement.is_required, true),
+      status: requirement.status === 'inactive' ? 'inactive' : 'active',
+      sort_order: Number(requirement.sort_order || index + 1),
+      source: requirement.source || 'client_unit_custom',
+    }))
+    .filter((requirement) => {
+      if (!Number.isInteger(requirement.document_id) || requirement.document_id < 1) {
+        return false
+      }
+      if (seen.has(requirement.document_id)) return false
+      seen.add(requirement.document_id)
+      return true
+    })
+}
+
+const createClientDocumentChecklistFromPayload = async (
+  connectionOrDb,
+  clientUnitId,
+  requirements = []
+) => {
+  const normalizedRequirements = normalizeDocumentRequirementsPayload(requirements)
+
+  if (!normalizedRequirements) {
+    return createClientDocumentChecklist(connectionOrDb, clientUnitId)
+  }
+
+  const activeRequirements = normalizedRequirements.filter(
+    (requirement) => requirement.status === 'active'
+  )
+
+  if (activeRequirements.length === 0) {
+    return { insertedCount: 0, customized: true }
+  }
+
+  const values = activeRequirements.map((requirement) => [
+    clientUnitId,
+    requirement.document_id,
+    requirement.is_required ? 1 : 0,
+    requirement.source || 'client_unit_custom',
+    'not_submitted',
+  ])
+
+  const [result] = await connectionOrDb.query(
+    `
+    INSERT INTO client_document_list (
+      client_unit_id,
+      document_id,
+      is_required,
+      requirement_source,
+      status
+    ) VALUES ?
+    ON DUPLICATE KEY UPDATE
+      is_required = VALUES(is_required),
+      requirement_source = VALUES(requirement_source)
+    `,
+    [values]
+  )
+
+  return {
+    insertedCount: Number(result.affectedRows || 0),
+    customized: true,
+  }
 }
 
 const createReservationCommissions = async ({
@@ -1356,12 +1460,15 @@ export const reserveListing = async (req, res) => {
     assigned_user_id,
     main_commission_rate_override,
     sale_type = 'distributed',
+    direct_to_developer_rate,
     override_seller_id,
     override_rate,
     override_notes,
     cash_kaliwaan_amount = 0,
     cash_kaliwaan_date,
     cash_kaliwaan_notes,
+    document_requirements,
+    documentRequirements,
   } = req.body
 
   if (isMissing(listing_id)) {
@@ -1386,6 +1493,34 @@ export const reserveListing = async (req, res) => {
   const finalSaleType = validateSaleType(sale_type)
   const finalModeOfPayment = mode_of_payment
   const finalBuyerType = validateBuyerType(buyer_type)
+  const isSuperAdmin = req.user?.role === 'super_admin'
+
+  let directToDeveloperRateOverride = null
+
+  if (
+    finalSaleType === 'direct_to_developer' &&
+    isSuperAdmin &&
+    !isMissing(direct_to_developer_rate)
+  ) {
+    directToDeveloperRateOverride = normalizeRate(direct_to_developer_rate)
+
+    const rateValidationMessage = validateRateRange(
+      directToDeveloperRateOverride,
+      'Direct-to-developer commission rate'
+    )
+
+    if (directToDeveloperRateOverride === null) {
+      return res.status(400).json({
+        message: 'Direct-to-developer commission rate must be a valid number',
+      })
+    }
+
+    if (rateValidationMessage) {
+      return res.status(400).json({
+        message: rateValidationMessage,
+      })
+    }
+  }
 
   const connection = await db.getConnection()
 
@@ -1566,14 +1701,23 @@ export const reserveListing = async (req, res) => {
       )
     }
 
-    await createClientDocumentChecklist(connection, clientUnitId)
+    const documentChecklistResult = await createClientDocumentChecklistFromPayload(
+      connection,
+      clientUnitId,
+      Array.isArray(document_requirements) || Array.isArray(documentRequirements)
+        ? document_requirements || documentRequirements || []
+        : null
+    )
 
     const createdCommissions = await createReservationCommissions({
       connection,
       clientUnitId,
       listing,
       sellerId: finalSellerId,
-      mainRateOverride: main_commission_rate_override,
+      mainRateOverride:
+        finalSaleType === 'direct_to_developer'
+          ? directToDeveloperRateOverride
+          : main_commission_rate_override,
       saleType: finalSaleType,
       cashKaliwaanAmount: cash_kaliwaan_amount,
       cashKaliwaanDate: cash_kaliwaan_date,
@@ -1616,7 +1760,9 @@ export const reserveListing = async (req, res) => {
         monthly_amortization: terms.monthlyAmortization,
         contract_processing_status: terms.contractProcessingStatus,
         sale_type: finalSaleType,
+        direct_to_developer_rate: directToDeveloperRateOverride,
         buyer_type: finalBuyerType,
+        documentChecklist: documentChecklistResult,
       },
     })
   } catch (err) {
@@ -1643,6 +1789,7 @@ export const updateClientUnit = async (req, res) => {
     regenerate_commission = false,
     main_commission_rate_override,
     sale_type,
+    direct_to_developer_rate,
     override_seller_id,
     override_rate,
     override_notes,
@@ -1707,6 +1854,34 @@ export const updateClientUnit = async (req, res) => {
       ? existingClientUnit.buyer_type
       : buyer_type
   )
+
+  const isSuperAdmin = req.user?.role === 'super_admin'
+  let directToDeveloperRateOverride = null
+
+  if (
+    finalSaleType === 'direct_to_developer' &&
+    isSuperAdmin &&
+    !isMissing(direct_to_developer_rate)
+  ) {
+    directToDeveloperRateOverride = normalizeRate(direct_to_developer_rate)
+
+    if (directToDeveloperRateOverride === null) {
+      return res.status(400).json({
+        message: 'Direct-to-developer commission rate must be a valid number',
+      })
+    }
+
+    const rateValidationMessage = validateRateRange(
+      directToDeveloperRateOverride,
+      'Direct-to-developer commission rate'
+    )
+
+    if (rateValidationMessage) {
+      return res.status(400).json({
+        message: rateValidationMessage,
+      })
+    }
+  }
 
   const connection = await db.getConnection()
 
@@ -1873,7 +2048,10 @@ export const updateClientUnit = async (req, res) => {
         clientUnitId: id,
         listing,
         sellerId: finalSellerId,
-        mainRateOverride: main_commission_rate_override,
+        mainRateOverride:
+          finalSaleType === 'direct_to_developer'
+            ? directToDeveloperRateOverride
+            : main_commission_rate_override,
         saleType: finalSaleType,
         cashKaliwaanAmount: 0,
         cashKaliwaanDate: null,
