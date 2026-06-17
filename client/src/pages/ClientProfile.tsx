@@ -494,6 +494,27 @@ const getSelectedNumber = (
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+const getValidOption = (
+  optionValue: string | number | null | undefined,
+  allowedValues: string[],
+  fallback: string,
+) => {
+  const value = String(optionValue ?? "");
+
+  return allowedValues.includes(value) ? value : fallback;
+};
+
+const getValidDiscountOption = (
+  optionValue: string | number | null | undefined,
+  fallback = "7.5",
+) => {
+  return getValidOption(
+    optionValue,
+    ["2.5", "5", "7.5", "10", "custom"],
+    fallback,
+  );
+};
+
 const defaultEditUnitData: EditUnitData = {
   seller_id: "",
   due_date: "",
@@ -2053,7 +2074,25 @@ const ClientProfile = () => {
 
     reserveMutation.mutate({
       clientId,
-      reserveData,
+      reserveData: {
+        ...reserveData,
+        downpayment_amount:
+          reserveData.mode_of_payment === "installment"
+            ? reserveDownpayment.toFixed(2)
+            : "0",
+        deferred_cash_amount:
+          reserveData.mode_of_payment === "cash"
+            ? String(reserveDeferredCash)
+            : "0",
+        payment_terms_months:
+          reserveData.mode_of_payment === "installment"
+            ? reserveTermsMonths
+            : "",
+        monthly_amortization:
+          reserveData.mode_of_payment === "installment"
+            ? displayedMonthlyAmortization
+            : "",
+      },
     });
   };
 
@@ -3221,6 +3260,30 @@ const ClientProfile = () => {
                 value={reserveData.mode_of_payment}
                 onChange={(e) => {
                   const paymentMode = e.target.value as "cash" | "installment";
+                  const nextDownpaymentPercentOption =
+                    paymentMode === "installment"
+                      ? getValidOption(
+                          reserveData.downpayment_percent_option,
+                          ["15", "30", "custom"],
+                          "30",
+                        )
+                      : "0";
+                  const nextDownpaymentGivesOption =
+                    paymentMode === "installment"
+                      ? getValidOption(
+                          reserveData.downpayment_gives_option,
+                          ["1", "2", "3", "custom"],
+                          "3",
+                        )
+                      : "0";
+                  const nextDiscountOption =
+                    paymentMode === "installment" &&
+                    nextDownpaymentGivesOption === "1"
+                      ? getValidDiscountOption(
+                          reserveData.downpayment_discount_rate_option,
+                          "7.5",
+                        )
+                      : "0";
 
                   setReserveData({
                     ...reserveData,
@@ -3231,35 +3294,34 @@ const ClientProfile = () => {
                         : "0",
                     downpayment_percent:
                       paymentMode === "installment"
-                        ? reserveData.downpayment_percent || "30"
+                        ? nextDownpaymentPercentOption === "custom"
+                          ? reserveData.downpayment_percent_custom
+                          : nextDownpaymentPercentOption
                         : "0",
-                    downpayment_percent_option:
-                      paymentMode === "installment"
-                        ? reserveData.downpayment_percent_option || "30"
-                        : "0",
+                    downpayment_percent_option: nextDownpaymentPercentOption,
                     downpayment_gives:
                       paymentMode === "installment"
-                        ? reserveData.downpayment_gives || "3"
+                        ? nextDownpaymentGivesOption === "custom"
+                          ? reserveData.downpayment_gives_custom
+                          : nextDownpaymentGivesOption
                         : "0",
-                    downpayment_gives_option:
-                      paymentMode === "installment"
-                        ? reserveData.downpayment_gives_option || "3"
-                        : "0",
+                    downpayment_gives_option: nextDownpaymentGivesOption,
                     downpayment_discount_rate:
-                      paymentMode === "installment"
-                        ? reserveData.downpayment_discount_rate || "0"
-                        : "0",
-                    downpayment_discount_rate_option:
-                      paymentMode === "installment"
-                        ? reserveData.downpayment_discount_rate_option || "0"
-                        : "0",
+                      nextDiscountOption === "custom"
+                        ? reserveData.downpayment_discount_rate_custom
+                        : nextDiscountOption,
+                    downpayment_discount_rate_option: nextDiscountOption,
                     deferred_cash_amount:
                       paymentMode === "cash"
                         ? reserveData.deferred_cash_amount
                         : "0",
                     payment_terms_months:
                       paymentMode === "installment"
-                        ? reserveData.payment_terms_months || 36
+                        ? getSelectedNumber(
+                            reserveData.payment_terms_months_option,
+                            reserveData.payment_terms_months_custom,
+                            36,
+                          )
                         : "",
                     interest_rate:
                       paymentMode === "installment"
@@ -3424,19 +3486,23 @@ const ClientProfile = () => {
                           nextGives === "custom"
                             ? reserveData.downpayment_gives_custom
                             : nextGives;
+                        const nextDiscountOption =
+                          nextGives === "1"
+                            ? getValidDiscountOption(
+                                reserveData.downpayment_discount_rate_option,
+                                "7.5",
+                              )
+                            : "0";
+
                         setReserveData({
                           ...reserveData,
                           downpayment_gives_option: nextGives,
                           downpayment_gives: nextActualGives,
-                          downpayment_discount_rate_option:
-                            nextGives === "1"
-                              ? reserveData.downpayment_discount_rate_option ||
-                                "7.5"
-                              : "0",
+                          downpayment_discount_rate_option: nextDiscountOption,
                           downpayment_discount_rate:
-                            nextGives === "1"
-                              ? reserveData.downpayment_discount_rate || "7.5"
-                              : "0",
+                            nextDiscountOption === "custom"
+                              ? reserveData.downpayment_discount_rate_custom
+                              : nextDiscountOption,
                           monthly_amortization: "",
                         });
                         setReserveValidationMessage("");
