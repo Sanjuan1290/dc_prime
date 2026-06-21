@@ -35,9 +35,9 @@ import { paginateRows } from "../utils/pagination";
 type ListingStatus =
   | "available"
   | "reserved"
+  | "active"
+  | "hold"
   | "sold"
-  | "pending_cancellation"
-  | "cancelled"
   | "inactive"
   | "superseded"
   | string;
@@ -55,17 +55,6 @@ type Listing = {
   source_unit_ids?: string | null;
   derived_unit_ids?: string | null;
   lot_type: string | null;
-  property_type: "lot" | "house_and_lot" | "house_only" | string;
-  pricing_method: "area_based" | "package_price" | "manual" | string;
-  house_model: string | null;
-  floor_area_sqm: number | string;
-  bedrooms: number | string;
-  bathrooms: number | string;
-  parking_slots: number | string;
-  lot_price: number | string;
-  house_price: number | string;
-  package_price: number | string;
-  manual_net_selling_price: number | string;
   reservation_fee: number | string;
   price_per_sqm: number | string;
   lot_area_sqm: number | string;
@@ -93,7 +82,6 @@ type Project = {
   id: number;
   name: string;
   location_code: string;
-  project_type?: string;
 };
 
 type ClientUnitFullDetails = {
@@ -180,17 +168,6 @@ type ListingFormData = {
   unit_id: string;
   old_unit_ids: string;
   lot_type: string;
-  property_type: "lot" | "house_and_lot" | "house_only";
-  pricing_method: "area_based" | "package_price" | "manual";
-  house_model: string;
-  floor_area_sqm: number;
-  bedrooms: number;
-  bathrooms: number;
-  parking_slots: number;
-  lot_price: number;
-  house_price: number;
-  package_price: number;
-  manual_net_selling_price: number;
   reservation_fee: number;
   price_per_sqm: number;
   lot_area_sqm: number;
@@ -212,17 +189,6 @@ const defaultListingFormData: ListingFormData = {
   unit_id: "",
   old_unit_ids: "",
   lot_type: "inner",
-  property_type: "lot",
-  pricing_method: "area_based",
-  house_model: "",
-  floor_area_sqm: 0,
-  bedrooms: 0,
-  bathrooms: 0,
-  parking_slots: 0,
-  lot_price: 0,
-  house_price: 0,
-  package_price: 0,
-  manual_net_selling_price: 0,
   reservation_fee: 50000,
   price_per_sqm: 0,
   lot_area_sqm: 0,
@@ -234,9 +200,9 @@ const statusFilters = [
   { label: "All", value: "all" },
   { label: "Available", value: "available" },
   { label: "Reserved", value: "reserved" },
+  { label: "Active", value: "active" },
+  { label: "Hold", value: "hold" },
   { label: "Sold", value: "sold" },
-  { label: "Pending Cancellation", value: "pending_cancellation" },
-  { label: "Cancelled", value: "cancelled" },
   { label: "Inactive", value: "inactive" },
   { label: "Superseded", value: "superseded" },
 ];
@@ -560,21 +526,6 @@ const listingToFormData = (listing: Listing): ListingFormData => ({
   unit_id: listing.unit_id,
   old_unit_ids: listing.old_unit_ids || "",
   lot_type: listing.lot_type || "inner",
-  property_type: ["lot", "house_and_lot", "house_only"].includes(listing.property_type)
-    ? (listing.property_type as ListingFormData["property_type"])
-    : "lot",
-  pricing_method: ["area_based", "package_price", "manual"].includes(listing.pricing_method)
-    ? (listing.pricing_method as ListingFormData["pricing_method"])
-    : "area_based",
-  house_model: listing.house_model || "",
-  floor_area_sqm: Number(listing.floor_area_sqm || 0),
-  bedrooms: Number(listing.bedrooms || 0),
-  bathrooms: Number(listing.bathrooms || 0),
-  parking_slots: Number(listing.parking_slots || 0),
-  lot_price: Number(listing.lot_price || 0),
-  house_price: Number(listing.house_price || 0),
-  package_price: Number(listing.package_price || 0),
-  manual_net_selling_price: Number(listing.manual_net_selling_price || 0),
   reservation_fee: Number(listing.reservation_fee || 50000),
   price_per_sqm: Number(listing.price_per_sqm || 0),
   lot_area_sqm: Number(listing.lot_area_sqm || 0),
@@ -585,19 +536,9 @@ const listingToFormData = (listing: Listing): ListingFormData => ({
 const roundMoney = (value: number) => Number(value.toFixed(2));
 
 const calculateListingBreakdown = (listingData: ListingFormData) => {
-  let netSellingPrice =
+  const netSellingPrice =
     Number(listingData.lot_area_sqm || 0) *
     Number(listingData.price_per_sqm || 0);
-
-  if (listingData.property_type === "house_only") {
-    netSellingPrice = Number(listingData.house_price || 0);
-  } else if (listingData.pricing_method === "package_price") {
-    netSellingPrice = Number(listingData.package_price || 0);
-  } else if (listingData.pricing_method === "manual") {
-    netSellingPrice =
-      Number(listingData.manual_net_selling_price || 0) ||
-      Number(listingData.lot_price || 0) + Number(listingData.house_price || 0);
-  }
   const legalMiscFee =
     netSellingPrice * (Number(listingData.legal_misc_rate || 0) / 100);
   const totalContractPrice = netSellingPrice + legalMiscFee;
@@ -965,12 +906,12 @@ const Listings = () => {
           value={listings.filter((item) => item.status === "reserved").length}
         />
         <StatCard
-          label="Sold"
-          value={listings.filter((item) => item.status === "sold").length}
+          label="Active"
+          value={listings.filter((item) => item.status === "active").length}
         />
         <StatCard
-          label="Cancelled"
-          value={listings.filter((item) => item.status === "cancelled").length}
+          label="Hold"
+          value={listings.filter((item) => item.status === "hold").length}
         />
         <StatCard label="Superseded" value={supersededCount} />
         <StatCard label="Total Value" value={formatMoney(totalValue)} />
@@ -1079,8 +1020,6 @@ const Listings = () => {
           <thead className="bg-slate-50">
             <tr className="border-b border-slate-200">
               <FormulaHeader label="Unit Type" />
-              <FormulaHeader label="Property Type" />
-              <FormulaHeader label="Pricing" />
               <FormulaHeader label="Unit ID" />
               <FormulaHeader label="Old Unit IDs" />
               <FormulaHeader label="Area" />
@@ -1108,14 +1047,6 @@ const Listings = () => {
               <tr key={listing.id} className="border-b border-slate-100">
                 <td className="px-4 py-3 font-semibold">
                   {formatText(listing.lot_type)}
-                </td>
-
-                <td className="px-4 py-3 text-slate-600">
-                  {formatText(listing.property_type)}
-                </td>
-
-                <td className="px-4 py-3 text-slate-600">
-                  {formatText(listing.pricing_method)}
                 </td>
 
                 <td className="px-4 py-3 font-semibold">{listing.unit_id}</td>
@@ -1205,7 +1136,7 @@ const Listings = () => {
                     </Button>
 
                     <Button
-                      disabled={listing.status !== "available"}
+                      disabled={!["available", "hold"].includes(listing.status)}
                       icon={<FiTrash2 />}
                       onClick={() => setListingToDelete(listing)}
                       variant="danger"
@@ -1219,7 +1150,7 @@ const Listings = () => {
 
             {paginatedListings.length === 0 ? (
               <tr>
-                <td colSpan={22}>
+                <td colSpan={20}>
                   <EmptyState title="No listings found" />
                 </td>
               </tr>
@@ -1566,107 +1497,6 @@ const ListingFormModal = ({
             />
           ) : null}
 
-          <Select
-            label="Property Type"
-            value={formData.property_type}
-            onChange={(e) => {
-              const nextPropertyType = e.target.value as ListingFormData["property_type"];
-              setFormData({
-                ...formData,
-                property_type: nextPropertyType,
-                pricing_method:
-                  nextPropertyType === "lot"
-                    ? "area_based"
-                    : nextPropertyType === "house_only"
-                      ? "manual"
-                      : formData.pricing_method,
-              });
-            }}
-          >
-            <option value="lot">Lot</option>
-            <option value="house_and_lot">House and Lot</option>
-            <option value="house_only">House Only</option>
-          </Select>
-
-          <Select
-            label="Pricing Method"
-            value={formData.pricing_method}
-            onChange={(e) =>
-              setFormData({
-                ...formData,
-                pricing_method: e.target.value as ListingFormData["pricing_method"],
-              })
-            }
-          >
-            <option value="area_based">Area Based</option>
-            <option value="package_price">Package Price</option>
-            <option value="manual">Manual</option>
-          </Select>
-
-          {formData.property_type !== "lot" ? (
-            <>
-              <Input
-                label="House Model"
-                value={formData.house_model}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    house_model: e.target.value,
-                  })
-                }
-              />
-              <Input
-                label="Floor Area SQM"
-                type="number"
-                min={0}
-                step="0.01"
-                value={formData.floor_area_sqm}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    floor_area_sqm: Number(e.target.value),
-                  })
-                }
-              />
-              <Input
-                label="Bedrooms"
-                type="number"
-                min={0}
-                value={formData.bedrooms}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    bedrooms: Number(e.target.value),
-                  })
-                }
-              />
-              <Input
-                label="Bathrooms"
-                type="number"
-                min={0}
-                value={formData.bathrooms}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    bathrooms: Number(e.target.value),
-                  })
-                }
-              />
-              <Input
-                label="Parking Slots"
-                type="number"
-                min={0}
-                value={formData.parking_slots}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    parking_slots: Number(e.target.value),
-                  })
-                }
-              />
-            </>
-          ) : null}
-
           <Input
             label="Reservation Fee"
             type="number"
@@ -1709,66 +1539,6 @@ const ListingFormModal = ({
             }
           />
 
-          {formData.pricing_method === "package_price" ? (
-            <Input
-              label="Package Price"
-              type="number"
-              min={0}
-              step="0.01"
-              value={formData.package_price}
-              onChange={(e) =>
-                setFormData({
-                  ...formData,
-                  package_price: Number(e.target.value),
-                })
-              }
-            />
-          ) : null}
-
-          {formData.pricing_method === "manual" ? (
-            <>
-              <Input
-                label="Lot Price"
-                type="number"
-                min={0}
-                step="0.01"
-                value={formData.lot_price}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    lot_price: Number(e.target.value),
-                  })
-                }
-              />
-              <Input
-                label="House Price"
-                type="number"
-                min={0}
-                step="0.01"
-                value={formData.house_price}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    house_price: Number(e.target.value),
-                  })
-                }
-              />
-              <Input
-                label="Manual Net Selling Price"
-                type="number"
-                min={0}
-                step="0.01"
-                value={formData.manual_net_selling_price}
-                onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    manual_net_selling_price: Number(e.target.value),
-                  })
-                }
-              />
-            </>
-          ) : null}
-
           <div>
             <Input
               label="Legal / Misc Rate (%)"
@@ -1800,9 +1570,9 @@ const ListingFormModal = ({
           >
             <option value="available">Available</option>
             <option value="reserved">Reserved</option>
+            <option value="active">Active</option>
+            <option value="hold">Hold</option>
             <option value="sold">Sold</option>
-            <option value="pending_cancellation">Pending Cancellation</option>
-            <option value="cancelled">Cancelled</option>
             <option value="inactive">Inactive</option>
             <option value="superseded">Superseded</option>
           </Select>
@@ -1931,25 +1701,6 @@ const ListingDetailsModal = ({
               value={formatText(details.listing.lot_type)}
             />
             <Detail
-              label="Property Type"
-              value={formatText(details.listing.property_type)}
-            />
-            <Detail
-              label="Pricing Method"
-              value={formatText(details.listing.pricing_method)}
-            />
-            <Detail
-              label="House Model"
-              value={details.listing.house_model || "-"}
-            />
-            <Detail
-              label="Floor Area"
-              value={formatNumber(details.listing.floor_area_sqm)}
-            />
-            <Detail label="Bedrooms" value={details.listing.bedrooms} />
-            <Detail label="Bathrooms" value={details.listing.bathrooms} />
-            <Detail label="Parking Slots" value={details.listing.parking_slots} />
-            <Detail
               label="Listing Status"
               value={formatText(details.listing.status)}
             />
@@ -1963,22 +1714,6 @@ const ListingDetailsModal = ({
             <Detail
               label="Price / SQM"
               value={formatMoney(details.listing.price_per_sqm)}
-            />
-            <Detail
-              label="Lot Price"
-              value={formatMoney(details.listing.lot_price)}
-            />
-            <Detail
-              label="House Price"
-              value={formatMoney(details.listing.house_price)}
-            />
-            <Detail
-              label="Package Price"
-              value={formatMoney(details.listing.package_price)}
-            />
-            <Detail
-              label="Manual NSP"
-              value={formatMoney(details.listing.manual_net_selling_price)}
             />
             <Detail
               label="Net Selling Price"

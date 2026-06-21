@@ -5,8 +5,6 @@ import {
   getVisibleSellerIdsForUser,
   isOfficeRole,
 } from "../utils/sellerVisibility.js";
-import { calculateGrossCommission as calculateFormulaGrossCommission } from "../utils/formulas/commissionFormulas.js";
-import { createVoucherForSource } from "../utils/vouchers.js";
 
 const isMissing = (value) => {
   return value === undefined || value === null || value === "";
@@ -26,7 +24,9 @@ const normalizeRate = (value) => {
 };
 
 const calculateGrossCommission = (commissionBase, rate) => {
-  return calculateFormulaGrossCommission({ commissionBase, rate });
+  return normalizeMoney(
+    normalizeMoney(commissionBase) * (normalizeRate(rate) / 100),
+  );
 };
 
 const canPromoteRetentionEligibility = (options = {}) => {
@@ -348,16 +348,11 @@ const getClientUnitCommissionBase = async (connectionOrDb, clientUnitId) => {
         cu.client_id,
         cu.listing_id,
         cu.seller_id,
-        cu.seller_group_id,
-        cu.seller_group_pool_rate,
         cu.sale_type,
         cu.status AS client_unit_status,
         client.full_name AS client_name,
         listing.unit_id,
         COALESCE(
-          NULLIF(cu.offer_purchase_price, 0),
-          NULLIF(listing.total_contract_price, 0),
-          NULLIF(listing.net_selling_price + listing.legal_misc_fee, 0),
           NULLIF(listing.net_selling_price, 0),
           0
         ) AS commission_base
@@ -920,15 +915,12 @@ const getExpectedCommissionRowsForClientUnit = async ({
           seller,
           rateType: "direct_to_developer",
         })
-      : (!isMissing(clientUnit.seller_group_pool_rate) &&
-          ["broker", "broker_network_manager"].includes(seller.seller_role)
-          ? normalizeRate(clientUnit.seller_group_pool_rate)
-          : getAssignedSaleRate(seller) ??
-            (await getFinalRate({
-              connectionOrDb,
-              seller,
-              rateType: "personal",
-            })));
+      : getAssignedSaleRate(seller) ??
+        (await getFinalRate({
+          connectionOrDb,
+          seller,
+          rateType: "personal",
+        }));
 
     return {
       clientUnit,
@@ -951,7 +943,6 @@ const getExpectedCommissionRowsForClientUnit = async ({
   const preview = await buildHierarchyCommissionPreview({
     connectionOrDb,
     sellerId: finalSellerId,
-    sellerGroupPoolRate: clientUnit.seller_group_pool_rate,
   });
 
   return {
@@ -1307,7 +1298,6 @@ export const refreshCommissionEligibility = async (
         cu.id AS client_unit_id,
         cu.status AS client_unit_status,
         COALESCE(
-          NULLIF(cu.offer_purchase_price, 0),
           NULLIF(l.total_contract_price, 0),
           l.net_selling_price + l.legal_misc_fee,
           l.net_selling_price,
@@ -1477,7 +1467,6 @@ const getAssignedSaleRate = (seller) => {
 export const buildHierarchyCommissionPreview = async ({
   connectionOrDb = db,
   sellerId,
-  sellerGroupPoolRate = null,
 }) => {
   const chain = await getSellerChain(connectionOrDb, sellerId);
 
@@ -1498,15 +1487,8 @@ export const buildHierarchyCommissionPreview = async ({
   );
   const warnings = [];
   const rows = [];
-  const snapshotPoolRate =
-    !isMissing(sellerGroupPoolRate) && normalizeRate(sellerGroupPoolRate) > 0
-      ? normalizeRate(sellerGroupPoolRate)
-      : null;
 
   const sellingRate =
-    (["broker", "broker_network_manager"].includes(sellingSeller.seller_role)
-      ? snapshotPoolRate
-      : null) ??
     getAssignedSaleRate(sellingSeller) ??
     (await getFinalRate({
       connectionOrDb,
@@ -1559,7 +1541,7 @@ export const buildHierarchyCommissionPreview = async ({
         : null;
 
   if (broker && Number(broker.id) !== Number(sellingSeller.id)) {
-    const brokerPoolRate = snapshotPoolRate ?? getAssignedSaleRate(broker);
+    const brokerPoolRate = getAssignedSaleRate(broker);
 
     if (brokerPoolRate !== null && downlineRateUnderBroker !== null) {
       const brokerResidualRate = normalizeRate(
@@ -1588,7 +1570,7 @@ export const buildHierarchyCommissionPreview = async ({
     }
   }
 
-  if (bnm && broker && snapshotPoolRate === null) {
+  if (bnm && broker) {
     const bnmPoolRate = getAssignedSaleRate(bnm);
     const brokerPoolRate = getAssignedSaleRate(broker);
 
@@ -1598,36 +1580,6 @@ export const buildHierarchyCommissionPreview = async ({
       if (bnmResidualRate < 0) {
         throw new Error(
           `Commission split exceeds BNM pool. BNM pool is ${bnmPoolRate}%, but broker pool is ${brokerPoolRate}%.`,
-        );
-      }
-
-      if (bnmResidualRate > 0) {
-        rows.push({
-          seller: bnm,
-          rate: bnmResidualRate,
-          sourceType: "override",
-          commissionRole: "broker_network_manager",
-          label: "Broker Network Manager residual release milestone",
-        });
-      }
-    }
-  }
-
-  if (bnm && !broker && Number(bnm.id) !== Number(sellingSeller.id)) {
-    const bnmPoolRate = snapshotPoolRate ?? getAssignedSaleRate(bnm);
-    const downlineRateUnderBnm =
-      sellingSeller.seller_role === "agent"
-        ? getAssignedSaleRate(manager) ?? sellingRate
-        : sellingSeller.seller_role === "manager"
-          ? getAssignedSaleRate(sellingSeller)
-          : sellingRate;
-
-    if (bnmPoolRate !== null && downlineRateUnderBnm !== null) {
-      const bnmResidualRate = normalizeRate(bnmPoolRate - downlineRateUnderBnm);
-
-      if (bnmResidualRate < 0) {
-        throw new Error(
-          `Commission split exceeds BNM pool. BNM pool is ${bnmPoolRate}%, but downline allocation is ${downlineRateUnderBnm}%.`,
         );
       }
 
@@ -1662,10 +1614,6 @@ export const createHierarchyCommissionsForClientUnit = async ({
   actorRole = null,
 }) => {
   const connectionOrDb = connection || db;
-  const clientUnit = await getClientUnitCommissionBase(
-    connectionOrDb,
-    clientUnitId,
-  );
 
   if (saleType === "direct" || saleType === "direct_to_developer") {
     const seller = await getSeller(connectionOrDb, sellerId);
@@ -1677,9 +1625,6 @@ export const createHierarchyCommissionsForClientUnit = async ({
             rateType: "direct_to_developer",
           })
         : getAssignedSaleRate(seller) ??
-          (!isMissing(clientUnit?.seller_group_pool_rate)
-            ? normalizeRate(clientUnit.seller_group_pool_rate)
-            : null) ??
           (await getFinalRate({
             connectionOrDb,
             seller,
@@ -1706,7 +1651,6 @@ export const createHierarchyCommissionsForClientUnit = async ({
   const preview = await buildHierarchyCommissionPreview({
     connectionOrDb,
     sellerId,
-    sellerGroupPoolRate: clientUnit?.seller_group_pool_rate,
   });
 
   const createdCommissions = [];
@@ -2959,12 +2903,9 @@ export const markReleaseStage = async (req, res) => {
       `
         SELECT
           cr.*,
-          cm.client_unit_id,
-          cm.seller_id,
-          seller.full_name AS seller_name
+          cm.client_unit_id
         FROM commission_releases cr
         INNER JOIN commissions cm ON cm.id = cr.commission_id
-        LEFT JOIN accredited_sellers seller ON seller.id = cm.seller_id
         WHERE cr.id = ?
         LIMIT 1
         FOR UPDATE
@@ -3040,19 +2981,6 @@ export const markReleaseStage = async (req, res) => {
 
     await recalculateCommissionReleaseTotals(connection, release.commission_id);
 
-    const voucher = await createVoucherForSource({
-      connection,
-      voucherType: "commission_release",
-      sourceType: "commission_releases",
-      sourceId: release.id,
-      payeeType: "seller",
-      payeeId: release.seller_id,
-      payeeName: release.seller_name,
-      amount: release.net_release_amount,
-      generatedBy: req.user.id,
-      remarks: `Commission ${release.release_stage} release`,
-    });
-
     await connection.commit();
 
     await safeCreateAuditLog({
@@ -3068,7 +2996,6 @@ export const markReleaseStage = async (req, res) => {
       data: {
         releaseId: Number(releaseId),
         commissionId: release.commission_id,
-        voucher,
       },
     });
   } catch (err) {
@@ -3134,12 +3061,9 @@ export const deductCashAdvanceManual = async (req, res) => {
 
     const [advanceRows] = await connection.query(
       `
-        SELECT
-          ca.*,
-          seller.full_name AS seller_name
-        FROM cash_advances ca
-        INNER JOIN accredited_sellers seller ON seller.id = ca.seller_id
-        WHERE ca.id = ?
+        SELECT *
+        FROM cash_advances
+        WHERE id = ?
         LIMIT 1
         FOR UPDATE
         `,
@@ -3205,7 +3129,7 @@ export const deductCashAdvanceManual = async (req, res) => {
       });
     }
 
-    const [deductionResult] = await connection.query(
+    await connection.query(
       `
         INSERT INTO cash_advance_deductions (
           cash_advance_id,
@@ -3223,19 +3147,6 @@ export const deductCashAdvanceManual = async (req, res) => {
         nullableValue(notes),
       ],
     );
-
-    const voucher = await createVoucherForSource({
-      connection,
-      voucherType: "cash_advance_deduction",
-      sourceType: "cash_advance_deductions",
-      sourceId: deductionResult.insertId,
-      payeeType: "seller",
-      payeeId: cashAdvance.seller_id,
-      payeeName: cashAdvance.seller_name,
-      amount: deductionAmount,
-      generatedBy: req.user.id,
-      remarks: `Cash advance deduction from release #${releaseId}`,
-    });
 
     const nextRemainingBalance = normalizeMoney(
       cashAdvanceRemaining - deductionAmount,
@@ -3295,7 +3206,6 @@ export const deductCashAdvanceManual = async (req, res) => {
         cash_advance_id: Number(cash_advance_id),
         amount: deductionAmount,
         net_release_amount: nextNetReleaseAmount,
-        voucher,
       },
     });
   } catch (err) {

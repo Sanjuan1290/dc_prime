@@ -11,7 +11,6 @@ import Select from "../components/ui/Select";
 import StatCard from "../components/ui/StatCard";
 import StatusBadge from "../components/ui/StatusBadge";
 import TableContainer from "../components/ui/TableContainer";
-import FormulaCenter from "../components/settings/FormulaCenter";
 import { API_URL, getErrorMessage } from "../utils/api";
 import useCurrentUser from "../utils/useCurrentUser";
 import { formatDate, formatText } from "../utils/formatters";
@@ -554,8 +553,6 @@ const Settings = () => {
           <EmptyState title="No settings found" />
         ) : null}
       </TableContainer>
-
-      <FormulaCenter currentUserRole={currentUserRole} />
     </div>
   );
 };

@@ -8,7 +8,6 @@ import { db } from './db/connect.js'
 
 import usersRouter from './routers/users.router.js'
 import sellerPortalRouter from './routers/sellerPortal.router.js'
-import proofIncomeRequestsRouter from './routers/proofIncomeRequests.router.js'
 
 import projectsRouter from './routers/projects.router.js'
 import listingsRouter from './routers/listings.router.js'
@@ -27,7 +26,6 @@ import settingsRouter from './routers/settings.router.js'
 import cashAdvancesRouter from './routers/cashAdvances.router.js'
 import printFormsRouter from './routers/printForms.router.js'
 import usersManagementRouter from './routers/usersManagement.router.js'
-import vouchersRouter from './routers/vouchers.router.js'
 
 import useCurrentUser from './utils/useCurrentUser.js'
 import { startPaymentReminderJob } from './jobs/paymentReminderJob.js'
@@ -70,7 +68,6 @@ app.get('/api/v1/getCurrentUser', useCurrentUser)
 */
 app.use('/api/v1', usersRouter)
 app.use('/api/v1', sellerPortalRouter)
-app.use('/api/v1', proofIncomeRequestsRouter)
 
 /*
   Admin-only routers.
@@ -94,7 +91,6 @@ app.use('/api/v1', settingsRouter)
 app.use('/api/v1', cashAdvancesRouter)
 app.use('/api/v1', printFormsRouter)
 app.use('/api/v1', usersManagementRouter)
-app.use('/api/v1', vouchersRouter)
 
 app.use((req, res) => {
   res.status(404).json({
@@ -145,7 +141,7 @@ app.use((err, req, res, _next) => {
   return res.status(status).json(response)
 })
 
-const PORT = process.env.PORT || 5001
+const PORT = process.env.PORT || 5000
 
 if (process.env.ENABLE_EMAIL_JOBS !== 'false') {
   startPaymentReminderJob()

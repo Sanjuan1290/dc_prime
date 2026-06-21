@@ -31,7 +31,6 @@ type Project = {
   name: string;
   location: string | null;
   location_code: string;
-  project_type: "lot_only" | "house_and_lot" | "mixed" | string;
   administrator: string | null;
   tax_declaration_no: string | null;
   pin: string | null;
@@ -82,7 +81,6 @@ type ProjectFormData = {
   name: string;
   location: string;
   location_code: string;
-  project_type: "lot_only" | "house_and_lot" | "mixed";
   administrator: string;
   tax_declaration_no: string;
   pin: string;
@@ -110,7 +108,6 @@ const emptyFormData: ProjectFormData = {
   name: "",
   location: "",
   location_code: "",
-  project_type: "lot_only",
   administrator: "",
   tax_declaration_no: "",
   pin: "",
@@ -130,12 +127,6 @@ const normalizeRequirements = (requirements: DocumentRequirement[] = []) =>
     status: requirement.status || "active",
     sort_order: Number(requirement.sort_order || index + 1),
   }));
-
-const formatProjectType = (value: string | null | undefined) => {
-  if (value === "house_and_lot") return "House and Lot";
-  if (value === "mixed") return "Mixed";
-  return "Lot Only";
-};
 
 const fetchProjects = async () => {
   const response = await fetch(`${API_URL}/projects`, {
@@ -254,9 +245,6 @@ const projectToFormData = (project: Project): ProjectFormData => ({
   name: project.name,
   location: project.location ?? "",
   location_code: project.location_code ?? "",
-  project_type: ["lot_only", "house_and_lot", "mixed"].includes(project.project_type)
-    ? (project.project_type as ProjectFormData["project_type"])
-    : "lot_only",
   administrator: project.administrator ?? "",
   tax_declaration_no: project.tax_declaration_no ?? "",
   pin: project.pin ?? "",
@@ -654,20 +642,6 @@ const Projects = () => {
                 required
                 value={data.location_code}
               />
-              <Select
-                label="Project Type"
-                onChange={(e) =>
-                  setData({
-                    ...data,
-                    project_type: e.target.value as ProjectFormData["project_type"],
-                  })
-                }
-                value={data.project_type}
-              >
-                <option value="lot_only">Lot Only</option>
-                <option value="house_and_lot">House and Lot</option>
-                <option value="mixed">Mixed</option>
-              </Select>
               <Input
                 label="Administrator"
                 placeholder="enter admin name"
@@ -1036,7 +1010,6 @@ const Projects = () => {
                       "Name",
                       "Location",
                       "Location Code",
-                      "Project Type",
                       "Default Docs",
                       "Status",
                       "Actions",
@@ -1066,9 +1039,6 @@ const Projects = () => {
                         <span className="inline-flex rounded border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-bold tracking-wide text-slate-700">
                           {project.location_code || "-"}
                         </span>
-                      </td>
-                      <td className="px-4 py-3 text-slate-600">
-                        {formatProjectType(project.project_type)}
                       </td>
                       <td className="px-4 py-3 text-slate-600">
                         {Number(project.document_count || 0)} docs / {Number(project.required_document_count || 0)} required
@@ -1143,7 +1113,6 @@ const Projects = () => {
             <p><b>Name:</b> {viewProject.name}</p>
             <p><b>Location:</b> {viewProject.location || "-"}</p>
             <p><b>Location Code:</b> {viewProject.location_code || "-"}</p>
-            <p><b>Project Type:</b> {formatProjectType(viewProject.project_type)}</p>
             <p><b>Administrator:</b> {viewProject.administrator || "-"}</p>
             <p><b>Tax Declaration No.:</b> {viewProject.tax_declaration_no || "-"}</p>
             <p><b>PIN:</b> {viewProject.pin || "-"}</p>

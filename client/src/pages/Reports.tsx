@@ -33,13 +33,6 @@ type ReportType =
   | "commissions"
   | "documents"
   | "clients"
-  | "buyer_accounts"
-  | "past_due_accounts"
-  | "seller_groups"
-  | "cash_advances"
-  | "vouchers"
-  | "cancellations"
-  | "proof_income_requests"
 
 type SalesReport = {
   client_unit_id: number
@@ -131,8 +124,6 @@ type ClientsReport = {
   balance: number | string
 }
 
-type GenericReport = Record<string, string | number | boolean | null>
-
 type AnyReportRow =
   | SalesReport
   | CollectionsReport
@@ -140,7 +131,6 @@ type AnyReportRow =
   | CommissionsReport
   | DocumentsReport
   | ClientsReport
-  | GenericReport
 
 type ReportResponse = {
   sales?: SalesReport[]
@@ -149,13 +139,6 @@ type ReportResponse = {
   commissions?: CommissionsReport[]
   documents?: DocumentsReport[]
   clients?: ClientsReport[]
-  buyer_accounts?: GenericReport[]
-  past_due_accounts?: GenericReport[]
-  seller_groups?: GenericReport[]
-  cash_advances?: GenericReport[]
-  vouchers?: GenericReport[]
-  cancellations?: GenericReport[]
-  proof_income_requests?: GenericReport[]
 }
 
 const reportTypes: ReportType[] = [
@@ -165,13 +148,6 @@ const reportTypes: ReportType[] = [
   "commissions",
   "documents",
   "clients",
-  "buyer_accounts",
-  "past_due_accounts",
-  "seller_groups",
-  "cash_advances",
-  "vouchers",
-  "cancellations",
-  "proof_income_requests",
 ]
 
 const reportDescriptions: Record<ReportType, string> = {
@@ -187,20 +163,6 @@ const reportDescriptions: Record<ReportType, string> = {
     "Client unit document checklist report with required, reusable, and review status.",
   clients:
     "Client report with contact details, region, total contract value, paid amount, and balance.",
-  buyer_accounts:
-    "Buyer accounts grouped by account status with sales, collections, and outstanding balance.",
-  past_due_accounts:
-    "Past due payment schedule rows with client, unit, due date, and remaining balance.",
-  seller_groups:
-    "Seller group performance with active members, sales, gross commissions, and releases.",
-  cash_advances:
-    "Cash advance balances, deducted amount, status, and approval timing.",
-  vouchers:
-    "Voucher register by type, source, payee, amount, and fund release status.",
-  cancellations:
-    "Cancellation settlement report with refund, forfeited amount, and resale clearance.",
-  proof_income_requests:
-    "Separate proof of income requests with requester, verifier, and request status.",
 }
 
 const getReportEndpoint = (reportType: ReportType) => {
@@ -267,20 +229,6 @@ const getReportTotalAmount = (reportType: ReportType, rows: AnyReportRow[]) => {
   if (reportType === "clients") {
     return (rows as ClientsReport[]).reduce(
       (sum, row) => sum + Number(row.total_contract_value || 0),
-      0
-    )
-  }
-
-  if (["cash_advances", "vouchers"].includes(reportType)) {
-    return (rows as GenericReport[]).reduce(
-      (sum, row) => sum + Number(row.amount || 0),
-      0
-    )
-  }
-
-  if (reportType === "seller_groups") {
-    return (rows as GenericReport[]).reduce(
-      (sum, row) => sum + Number(row.total_sales || 0),
       0
     )
   }
@@ -752,68 +700,6 @@ const ReportTable = ({
 
         {rows.length === 0 ? (
           <EmptyState title="No document records found" />
-        ) : null}
-      </TableContainer>
-    )
-  }
-
-  if (reportType !== "clients") {
-    const paginatedRows = paginateRows(rows as GenericReport[], page, rowsPerPage)
-    const headings = Array.from(
-      new Set(paginatedRows.flatMap((row) => Object.keys(row)))
-    ).slice(0, 12)
-
-    return (
-      <TableContainer>
-        <table className="min-w-full divide-y divide-slate-200 text-sm">
-          <thead className="bg-slate-50">
-            <tr>
-              {headings.map((heading) => (
-                <th key={heading} className={headerClass}>
-                  {formatText(heading)}
-                </th>
-              ))}
-            </tr>
-          </thead>
-
-          <tbody className="divide-y divide-slate-100 bg-white">
-            {paginatedRows.map((item, index) => (
-              <tr key={String(item.id || item.voucher_id || item.client_unit_id || index)} className="hover:bg-slate-50">
-                {headings.map((heading) => {
-                  const value = item[heading]
-                  const isStatus = heading === "status" || heading.endsWith("_status")
-                  const isMoney =
-                    heading.includes("amount") ||
-                    heading.includes("balance") ||
-                    heading.includes("commission") ||
-                    heading.includes("sales") ||
-                    heading.includes("price")
-                  const isDate =
-                    heading.endsWith("_at") ||
-                    heading.endsWith("_date") ||
-                    heading === "created_at"
-
-                  return (
-                    <td key={heading} className={isStatus ? "px-4 py-3" : cellClass}>
-                      {isStatus ? (
-                        <StatusBadge status={String(value || "-")} />
-                      ) : isMoney ? (
-                        formatMoney(value as number | string)
-                      ) : isDate ? (
-                        formatDate(value as string | null)
-                      ) : (
-                        String(value ?? "-")
-                      )}
-                    </td>
-                  )
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-
-        {rows.length === 0 ? (
-          <EmptyState title={`No ${formatText(reportType)} records found`} />
         ) : null}
       </TableContainer>
     )
