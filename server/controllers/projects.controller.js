@@ -46,11 +46,40 @@ const validateLocationCode = (value) => {
   }
 }
 
+const allowedProjectTypes = ['lot_only', 'house_and_lot', 'mixed']
+
+const normalizeProjectType = (value) => {
+  if (isMissing(value)) return 'lot_only'
+  return allowedProjectTypes.includes(value) ? value : 'lot_only'
+}
+
+const ensureProjectUpgradeSchema = async (connectionOrDb = db) => {
+  const [columns] = await connectionOrDb.query(
+    `
+    SELECT COLUMN_NAME
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'projects'
+      AND COLUMN_NAME = 'project_type'
+    `,
+  )
+
+  if (columns.length > 0) return
+
+  await connectionOrDb.query(
+    `
+    ALTER TABLE projects
+    ADD COLUMN project_type ENUM('lot_only','house_and_lot','mixed') NOT NULL DEFAULT 'lot_only' AFTER location_code
+    `,
+  )
+}
+
 const projectSelectFields = `
   p.id,
   p.name,
   p.location,
   p.location_code,
+  COALESCE(p.project_type, 'lot_only') AS project_type,
   p.administrator,
   p.tax_declaration_no,
   p.pin,
@@ -77,6 +106,8 @@ const hydrateProjectRequirements = async (project) => {
 }
 
 export const getProjects = async (req, res) => {
+  await ensureProjectUpgradeSchema()
+
   const [projects] = await db.query(
     `
     SELECT
@@ -103,6 +134,8 @@ export const getProjects = async (req, res) => {
 
 export const getProject = async (req, res) => {
   const { id } = req.params
+
+  await ensureProjectUpgradeSchema()
 
   const [rows] = await db.query(
     `
@@ -197,6 +230,7 @@ export const createProject = async (req, res) => {
     name,
     location,
     location_code,
+    project_type,
     administrator,
     tax_declaration_no,
     pin,
@@ -213,6 +247,7 @@ export const createProject = async (req, res) => {
   }
 
   const locationCodeValidation = validateLocationCode(location_code)
+  const finalProjectType = normalizeProjectType(project_type)
 
   if (!locationCodeValidation.isValid) {
     return res.status(400).json({
@@ -224,6 +259,7 @@ export const createProject = async (req, res) => {
 
   try {
     await connection.beginTransaction()
+    await ensureProjectUpgradeSchema(connection)
 
     const [result] = await connection.query(
       `
@@ -231,17 +267,19 @@ export const createProject = async (req, res) => {
         name,
         location,
         location_code,
+        project_type,
         administrator,
         tax_declaration_no,
         pin,
         status,
         document_template_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         name,
         location || null,
         locationCodeValidation.value,
+        finalProjectType,
         administrator || null,
         tax_declaration_no || null,
         pin || null,
@@ -290,6 +328,7 @@ export const updateProject = async (req, res) => {
     name,
     location,
     location_code,
+    project_type,
     administrator,
     tax_declaration_no,
     pin,
@@ -330,6 +369,7 @@ export const updateProject = async (req, res) => {
   )
 
   let finalLocationCode = existingProject.location_code || ''
+  const finalProjectType = normalizeProjectType(project_type)
 
   if (hasLocationCode) {
     const locationCodeValidation = validateLocationCode(location_code)
@@ -347,6 +387,7 @@ export const updateProject = async (req, res) => {
 
   try {
     await connection.beginTransaction()
+    await ensureProjectUpgradeSchema(connection)
 
     const [result] = await connection.query(
       `
@@ -355,6 +396,7 @@ export const updateProject = async (req, res) => {
         name = ?,
         location = ?,
         location_code = ?,
+        project_type = ?,
         administrator = ?,
         tax_declaration_no = ?,
         pin = ?,
@@ -367,6 +409,7 @@ export const updateProject = async (req, res) => {
         name,
         location || null,
         finalLocationCode,
+        finalProjectType,
         administrator || null,
         tax_declaration_no || null,
         pin || null,

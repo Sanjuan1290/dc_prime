@@ -1,6 +1,10 @@
 import { db } from "../db/connect.js";
 import { safeCreateAuditLog } from "../utils/createAuditLog.js";
 import { getClientIp } from "../utils/getClientIp.js";
+import {
+  formulaSettingsSeed,
+  validateFormulaSettingValue,
+} from "../utils/formulaSettings.js";
 
 const defaultSettingsMap = {
   company_name: "D&C Prime Realty",
@@ -117,6 +121,79 @@ const validateSettingValue = (key, value) => {
 const canEditProtectedSetting = (userRole, key) => {
   if (key !== "commission_release_days") return true;
   return normalizeRole(userRole) === "super_admin";
+};
+
+const ensureFormulaSettingsTable = async (connectionOrDb = db) => {
+  await connectionOrDb.query(`
+    CREATE TABLE IF NOT EXISTS system_formula_settings (
+      id INT NOT NULL AUTO_INCREMENT,
+      setting_key VARCHAR(100) NOT NULL,
+      category VARCHAR(100) NOT NULL,
+      label VARCHAR(150) NOT NULL,
+      formula_text TEXT NOT NULL,
+      description TEXT NULL,
+      value_type ENUM('number','percentage','currency','days','text','boolean','json') NOT NULL DEFAULT 'text',
+      setting_value TEXT NULL,
+      default_value TEXT NULL,
+      is_editable BOOLEAN NOT NULL DEFAULT TRUE,
+      sort_order INT NOT NULL DEFAULT 0,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      UNIQUE KEY uq_system_formula_settings_key (setting_key),
+      KEY idx_system_formula_settings_category (category),
+      KEY idx_system_formula_settings_sort_order (sort_order)
+    )
+  `);
+};
+
+const seedFormulaSettings = async (connectionOrDb = db) => {
+  await ensureFormulaSettingsTable(connectionOrDb);
+
+  const placeholders = formulaSettingsSeed
+    .map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    .join(", ");
+
+  const params = formulaSettingsSeed.flatMap((setting) => [
+    setting.setting_key,
+    setting.category,
+    setting.label,
+    setting.formula_text,
+    setting.description,
+    setting.value_type,
+    setting.setting_value,
+    setting.default_value,
+    setting.is_editable ? 1 : 0,
+    setting.sort_order,
+  ]);
+
+  await connectionOrDb.query(
+    `
+    INSERT INTO system_formula_settings (
+      setting_key,
+      category,
+      label,
+      formula_text,
+      description,
+      value_type,
+      setting_value,
+      default_value,
+      is_editable,
+      sort_order
+    ) VALUES ${placeholders}
+    ON DUPLICATE KEY UPDATE
+      category = VALUES(category),
+      label = VALUES(label),
+      formula_text = VALUES(formula_text),
+      description = VALUES(description),
+      value_type = VALUES(value_type),
+      setting_value = COALESCE(system_formula_settings.setting_value, VALUES(setting_value)),
+      default_value = VALUES(default_value),
+      is_editable = VALUES(is_editable),
+      sort_order = VALUES(sort_order)
+    `,
+    params,
+  );
 };
 
 export const settingsRowsToObject = (rows) => {
@@ -321,5 +398,113 @@ export const updateSetting = async (req, res) => {
 
   res.status(200).json({
     message: "Setting updated successfully",
+  });
+};
+
+export const getFormulaSettings = async (_req, res) => {
+  await seedFormulaSettings();
+
+  const [formulas] = await db.query(
+    `
+    SELECT
+      id,
+      setting_key,
+      category,
+      label,
+      formula_text,
+      description,
+      value_type,
+      setting_value,
+      default_value,
+      is_editable,
+      sort_order,
+      created_at,
+      updated_at
+    FROM system_formula_settings
+    ORDER BY sort_order ASC, id ASC
+    `,
+  );
+
+  const grouped = formulas.reduce((result, formula) => {
+    if (!result[formula.category]) result[formula.category] = [];
+    result[formula.category].push(formula);
+    return result;
+  }, {});
+
+  res.status(200).json({
+    formulas,
+    grouped,
+  });
+};
+
+export const updateFormulaSetting = async (req, res) => {
+  const { settingKey } = req.params;
+
+  if (!isPlainObject(req.body) || !hasOwn(req.body, "setting_value")) {
+    return res.status(400).json({
+      message: "Formula setting value is required",
+    });
+  }
+
+  await seedFormulaSettings();
+
+  const [rows] = await db.query(
+    `
+    SELECT
+      setting_key,
+      label,
+      value_type,
+      is_editable
+    FROM system_formula_settings
+    WHERE setting_key = ?
+    LIMIT 1
+    `,
+    [settingKey],
+  );
+
+  const formulaSetting = rows[0];
+
+  if (!formulaSetting) {
+    return res.status(404).json({
+      message: "Formula setting not found",
+    });
+  }
+
+  if (!formulaSetting.is_editable) {
+    return res.status(403).json({
+      message: "This formula value is informational and cannot be edited.",
+    });
+  }
+
+  const valueValidation = validateFormulaSettingValue(
+    formulaSetting.value_type,
+    req.body.setting_value,
+  );
+
+  if (!valueValidation.isValid) {
+    return res.status(400).json({
+      message: valueValidation.message,
+    });
+  }
+
+  await db.query(
+    `
+    UPDATE system_formula_settings
+    SET setting_value = ?
+    WHERE setting_key = ?
+    `,
+    [valueValidation.normalizedValue, settingKey],
+  );
+
+  await safeCreateAuditLog({
+    userId: req.user?.id,
+    action: "update",
+    module: "Formula Center",
+    description: `Updated formula setting ${formulaSetting.label}`,
+    ipAddress: getClientIp(req),
+  });
+
+  res.status(200).json({
+    message: "Formula setting updated successfully",
   });
 };

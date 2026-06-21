@@ -2,8 +2,10 @@ import { db } from '../db/connect.js'
 import { safeCreateAuditLog } from '../utils/createAuditLog.js'
 import { getClientIp } from '../utils/getClientIp.js'
 import { refreshCommissionEligibility } from './commissions.controller.js'
+import { buildCashReferenceNumber } from '../utils/formulas/referenceFormulas.js'
+import { rebuildPaymentScheduleForClientUnit } from '../utils/paymentSchedule.js'
 
-const allowedPaymentStatuses = ['pending', 'verified', 'rejected']
+const allowedPaymentStatuses = ['pending', 'verified', 'rejected', 'voided']
 
 const isMissing = (value) => {
   return value === undefined || value === null || value === ''
@@ -46,6 +48,19 @@ const getTodayDateOnly = () => {
   return toDateOnly(new Date())
 }
 
+const getCashReferencePrefix = async (connectionOrDb) => {
+  const [rows] = await connectionOrDb.query(
+    `
+    SELECT setting_value
+    FROM system_formula_settings
+    WHERE setting_key = 'reference.cash_prefix'
+    LIMIT 1
+    `,
+  ).catch(() => [[]])
+
+  return rows[0]?.setting_value || 'CASH'
+}
+
 const normalizeMoney = (value) => {
   return Number(Number(value || 0).toFixed(2))
 }
@@ -63,6 +78,12 @@ const validatePaymentStatus = (status) => {
   if (isMissing(status)) return 'pending'
   if (!allowedPaymentStatuses.includes(status)) return null
   return status
+}
+
+const requiresManualReference = (paymentMethod) => {
+  return ['bank_transfer', 'gcash', 'maya', 'check'].includes(
+    String(paymentMethod || '').trim().toLowerCase()
+  )
 }
 
 
@@ -253,6 +274,53 @@ const getPaymentById = async (id) => {
   return rows[0] || null
 }
 
+const generateUniqueCashReference = async ({
+  connectionOrDb,
+  clientUnitId,
+  paymentDate,
+}) => {
+  const prefix = await getCashReferencePrefix(connectionOrDb)
+  const dateOnly = toDateOnly(paymentDate) || getTodayDateOnly()
+
+  const [rows] = await connectionOrDb.query(
+    `
+    SELECT COUNT(id) AS cash_count
+    FROM payments
+    WHERE client_unit_id = ?
+      AND payment_method = 'cash'
+      AND DATE(payment_date) = ?
+      AND reference_id IS NOT NULL
+    `,
+    [clientUnitId, dateOnly]
+  )
+
+  let sequence = Number(rows[0]?.cash_count || 0) + 1
+
+  for (let attempt = 0; attempt < 1000; attempt += 1) {
+    const reference = buildCashReferenceNumber({
+      prefix,
+      date: dateOnly,
+      clientUnitId,
+      sequence,
+    })
+
+    const [existingRows] = await connectionOrDb.query(
+      `
+      SELECT id
+      FROM payments
+      WHERE reference_id = ?
+      LIMIT 1
+      `,
+      [reference]
+    )
+
+    if (existingRows.length === 0) return reference
+    sequence += 1
+  }
+
+  throw new Error('Unable to generate a unique cash reference number.')
+}
+
 export const recomputeClientUnitBalance = async (
   connectionOrDb,
   clientUnitId,
@@ -314,7 +382,7 @@ export const recomputeClientUnitBalance = async (
       nextListingStatus = 'sold'
     } else if (activePaymentPaid > 0) {
       nextStatus = 'active'
-      nextListingStatus = 'active'
+      nextListingStatus = 'sold'
     } else if (reservationPaid > 0 || paidAmount >= reservationFee) {
       nextStatus = 'reserved'
       nextListingStatus = 'reserved'
@@ -530,6 +598,12 @@ export const createPayment = async (req, res) => {
     })
   }
 
+  if (requiresManualReference(payment_method) && isMissing(reference_id)) {
+    return res.status(400).json({
+      message: 'Reference ID is required for this payment method.',
+    })
+  }
+
   const connection = await db.getConnection()
 
   try {
@@ -546,6 +620,9 @@ export const createPayment = async (req, res) => {
 
     const verifiedBy = finalStatus === 'verified' ? req.user.id : null
     const verifiedAt = finalStatus === 'verified' ? new Date() : null
+    const finalPaymentDate = toDateOnly(payment_date) || getTodayDateOnly()
+    const finalPaymentMethod = nullableValue(payment_method)
+    const shouldAutoGenerateCashReference = finalPaymentMethod === 'cash'
 
     const [result] = await connection.query(
       `
@@ -565,19 +642,43 @@ export const createPayment = async (req, res) => {
         client_unit_id,
         amountValidation.value,
         nullableValue(payment_type),
-        nullableValue(payment_method),
-        nullableValue(reference_id),
-        toDateOnly(payment_date) || getTodayDateOnly(),
+        finalPaymentMethod,
+        shouldAutoGenerateCashReference ? null : nullableValue(reference_id),
+        finalPaymentDate,
         finalStatus,
         verifiedBy,
         verifiedAt,
       ]
     )
 
+    let generatedReference = null
+
+    if (shouldAutoGenerateCashReference) {
+      generatedReference = await generateUniqueCashReference({
+        connectionOrDb: connection,
+        clientUnitId: client_unit_id,
+        paymentDate: finalPaymentDate,
+      })
+
+      await connection.query(
+        `
+        UPDATE payments
+        SET reference_id = ?
+        WHERE id = ?
+        `,
+        [generatedReference, result.insertId]
+      )
+    }
+
     const balanceSummary = await recomputeClientUnitBalance(
       connection,
       client_unit_id,
       { actorRole: req.user.role }
+    )
+
+    const scheduleSummary = await rebuildPaymentScheduleForClientUnit(
+      connection,
+      client_unit_id
     )
 
     const eligibilitySummary = await refreshCommissionEligibility(
@@ -603,7 +704,9 @@ export const createPayment = async (req, res) => {
       eligibilitySummary,
       data: {
         paymentId: result.insertId,
+        reference_id: generatedReference,
         balanceSummary,
+        scheduleSummary,
         eligibilitySummary,
       },
     })
@@ -665,6 +768,22 @@ export const updatePayment = async (req, res) => {
     })
   }
 
+  const nextPaymentMethod = !isMissing(payment_method)
+    ? nullableValue(payment_method)
+    : existingPayment.payment_method
+  const nextReferenceId = !isMissing(reference_id)
+    ? nullableValue(reference_id)
+    : existingPayment.reference_id
+  const nextPaymentDate = !isMissing(payment_date)
+    ? toDateOnly(payment_date)
+    : existingPayment.payment_date
+
+  if (requiresManualReference(nextPaymentMethod) && isMissing(nextReferenceId)) {
+    return res.status(400).json({
+      message: 'Reference ID is required for this payment method.',
+    })
+  }
+
   const connection = await db.getConnection()
 
   try {
@@ -696,6 +815,18 @@ export const updatePayment = async (req, res) => {
         ? null
         : existingPayment.verified_at
 
+    const shouldAutoGenerateCashReference =
+      nextPaymentMethod === 'cash' && isMissing(nextReferenceId)
+    const finalReferenceId = shouldAutoGenerateCashReference
+      ? await generateUniqueCashReference({
+          connectionOrDb: connection,
+          clientUnitId: nextClientUnitId,
+          paymentDate: nextPaymentDate,
+        })
+      : nextPaymentMethod === 'cash'
+        ? existingPayment.reference_id || nextReferenceId
+        : nextReferenceId
+
     await connection.query(
       `
       UPDATE payments
@@ -717,15 +848,9 @@ export const updatePayment = async (req, res) => {
         !isMissing(payment_type)
           ? nullableValue(payment_type)
           : existingPayment.payment_type,
-        !isMissing(payment_method)
-          ? nullableValue(payment_method)
-          : existingPayment.payment_method,
-        !isMissing(reference_id)
-          ? nullableValue(reference_id)
-          : existingPayment.reference_id,
-        !isMissing(payment_date)
-          ? toDateOnly(payment_date)
-          : existingPayment.payment_date,
+        nextPaymentMethod,
+        finalReferenceId,
+        nextPaymentDate,
         nextStatus,
         verifiedBy,
         verifiedAt,
@@ -748,6 +873,11 @@ export const updatePayment = async (req, res) => {
         { actorRole: req.user.role }
       )
 
+      const scheduleSummary = await rebuildPaymentScheduleForClientUnit(
+        connection,
+        affectedClientUnitId
+      )
+
       const eligibilitySummary = await refreshCommissionEligibility(
         affectedClientUnitId,
         connection,
@@ -757,6 +887,7 @@ export const updatePayment = async (req, res) => {
       balanceSummaries.push({
         client_unit_id: affectedClientUnitId,
         balanceSummary,
+        scheduleSummary,
       })
 
       eligibilitySummaries.push({
@@ -829,6 +960,11 @@ export const deletePayment = async (req, res) => {
       { actorRole: req.user.role }
     )
 
+    const scheduleSummary = await rebuildPaymentScheduleForClientUnit(
+      connection,
+      existingPayment.client_unit_id
+    )
+
     const eligibilitySummary = await refreshCommissionEligibility(
       existingPayment.client_unit_id,
       connection,
@@ -851,6 +987,7 @@ export const deletePayment = async (req, res) => {
         paymentId: Number(id),
         client_unit_id: existingPayment.client_unit_id,
         balanceSummary,
+        scheduleSummary,
         eligibilitySummary,
       },
     })

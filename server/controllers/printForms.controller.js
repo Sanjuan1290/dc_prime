@@ -168,11 +168,30 @@ const fetchPrintData = async (clientUnitId) => {
     [clientUnitId]
   )
 
+  const [paymentSchedules] = await db.query(
+    `
+    SELECT
+      due_date,
+      description,
+      total_due AS due_amount,
+      penalty_due AS penalty,
+      date_paid,
+      amount_paid,
+      reference_no AS reference,
+      running_balance
+    FROM payment_schedules
+    WHERE client_unit_id = ?
+    ORDER BY sort_order ASC, id ASC
+    `,
+    [clientUnitId]
+  ).catch(() => [[]])
+
   return {
     unit,
     coBuyers,
     employmentDetails,
     payments,
+    paymentSchedules,
   }
 }
 
@@ -258,31 +277,6 @@ const buildSchedule = ({ unit, payments }) => {
   const verifiedPayments = [...payments]
   let cumulativePaid = 0
 
-  const adjustFutureMonthlyRows = (currentIndex, runningBalance) => {
-    const futureRows = rows.slice(currentIndex + 1)
-    const fixedFutureAmount = futureRows
-      .filter((row) => row.schedule_type !== 'monthly')
-      .reduce((sum, row) => normalizeMoney(sum + normalizeMoney(row.due_amount)), 0)
-    const futureMonthlyRows = futureRows.filter(
-      (row) => row.schedule_type === 'monthly'
-    )
-
-    if (futureMonthlyRows.length === 0) return
-
-    const monthlyPool = normalizeMoney(Math.max(runningBalance - fixedFutureAmount, 0))
-    const monthlyBase = normalizeMoney(monthlyPool / futureMonthlyRows.length)
-    let remainingMonthlyPool = monthlyPool
-
-    futureMonthlyRows.forEach((row, index) => {
-      const amount = index === futureMonthlyRows.length - 1
-        ? normalizeMoney(remainingMonthlyPool)
-        : monthlyBase
-
-      row.due_amount = amount
-      remainingMonthlyPool = normalizeMoney(remainingMonthlyPool - amount)
-    })
-  }
-
   rows.forEach((row, index) => {
     const payment = verifiedPayments.shift()
 
@@ -294,10 +288,6 @@ const buildSchedule = ({ unit, payments }) => {
     }
 
     row.running_balance = normalizeMoney(Math.max(totalAmountPayable - cumulativePaid, 0))
-
-    if (payment && normalizeMoney(payment.amount) > normalizeMoney(row.due_amount)) {
-      adjustFutureMonthlyRows(index, row.running_balance)
-    }
   })
 
   return rows.map(({ schedule_type, ...row }) => row)
@@ -311,7 +301,9 @@ export const getClientUnitPrintData = async (req, res) => {
     return res.status(404).json({ message: 'Client unit not found' })
   }
 
-  const schedule = buildSchedule(printData)
+  const schedule = printData.paymentSchedules?.length
+    ? printData.paymentSchedules
+    : buildSchedule(printData)
   const totalPaid = normalizeMoney(
     printData.payments.reduce((sum, payment) => sum + toNumber(payment.amount), 0)
   )

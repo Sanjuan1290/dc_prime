@@ -2,6 +2,7 @@ import { db } from '../db/connect.js'
 import { safeCreateAuditLog } from '../utils/createAuditLog.js'
 import { getClientIp } from '../utils/getClientIp.js'
 import { getVisibleSellerIdsForUser, isOfficeRole } from '../utils/sellerVisibility.js'
+import { createVoucherForSource } from '../utils/vouchers.js'
 
 const allowedCashAdvanceStatuses = [
   'pending',
@@ -774,46 +775,75 @@ export const approveCashAdvance = async (req, res) => {
     })
   }
 
-  const existing = await getCashAdvanceById(id)
+  const connection = await db.getConnection()
 
-  if (!existing) {
-    return res.status(404).json({
-      message: 'Cash advance not found',
+  try {
+    await connection.beginTransaction()
+
+    const existing = await getCashAdvanceById(id, connection)
+
+    if (!existing) {
+      await connection.rollback()
+      return res.status(404).json({
+        message: 'Cash advance not found',
+      })
+    }
+
+    if (existing.status !== 'pending') {
+      await connection.rollback()
+      return res.status(400).json({
+        message: 'Only pending cash advances can be approved',
+      })
+    }
+
+    await connection.query(
+      `
+      UPDATE cash_advances
+      SET
+        status = 'approved',
+        approved_at = NOW(),
+        approved_by = ?
+      WHERE id = ?
+      `,
+      [req.user.id, id]
+    )
+
+    const voucher = await createVoucherForSource({
+      connection,
+      voucherType: 'cash_advance',
+      sourceType: 'cash_advances',
+      sourceId: existing.id,
+      payeeType: 'seller',
+      payeeId: existing.seller_id,
+      payeeName: existing.seller_name,
+      amount: existing.amount,
+      generatedBy: req.user.id,
+      remarks: `Cash Advance #${existing.id}`,
     })
-  }
 
-  if (existing.status !== 'pending') {
-    return res.status(400).json({
-      message: 'Only pending cash advances can be approved',
+    await connection.commit()
+
+    await safeCreateAuditLog({
+      userId: req.user.id,
+      action: 'approve',
+      module: 'Cash Advances',
+      description: `Approved cash advance ${id}`,
+      ipAddress: getClientIp(req),
     })
+
+    res.status(200).json({
+      message: 'Cash advance approved successfully',
+      data: {
+        cashAdvanceId: Number(id),
+        voucher,
+      },
+    })
+  } catch (err) {
+    await connection.rollback()
+    throw err
+  } finally {
+    connection.release()
   }
-
-  await db.query(
-    `
-    UPDATE cash_advances
-    SET
-      status = 'approved',
-      approved_at = NOW(),
-      approved_by = ?
-    WHERE id = ?
-    `,
-    [req.user.id, id]
-  )
-
-  await safeCreateAuditLog({
-    userId: req.user.id,
-    action: 'approve',
-    module: 'Cash Advances',
-    description: `Approved cash advance ${id}`,
-    ipAddress: getClientIp(req),
-  })
-
-  res.status(200).json({
-    message: 'Cash advance approved successfully',
-    data: {
-      cashAdvanceId: Number(id),
-    },
-  })
 }
 
 export const rejectCashAdvance = async (req, res) => {
@@ -943,9 +973,12 @@ export const deductCashAdvance = async (req, res) => {
 
     const [advanceRows] = await connection.query(
       `
-      SELECT *
-      FROM cash_advances
-      WHERE id = ?
+      SELECT
+        ca.*,
+        seller.full_name AS seller_name
+      FROM cash_advances ca
+      INNER JOIN accredited_sellers seller ON seller.id = ca.seller_id
+      WHERE ca.id = ?
       LIMIT 1
       FOR UPDATE
       `,
@@ -1015,7 +1048,7 @@ export const deductCashAdvance = async (req, res) => {
         Math.max(Number(release.net_release_amount || 0) - deductionAmount, 0)
       )
 
-      await connection.query(
+      const [deductionResult] = await connection.query(
         `
         INSERT INTO cash_advance_deductions (
           cash_advance_id,
@@ -1033,6 +1066,19 @@ export const deductCashAdvance = async (req, res) => {
           `Automatic deduction from Cash Advance #${cashAdvance.id}`,
         ]
       )
+
+      await createVoucherForSource({
+        connection,
+        voucherType: 'cash_advance_deduction',
+        sourceType: 'cash_advance_deductions',
+        sourceId: deductionResult.insertId,
+        payeeType: 'seller',
+        payeeId: cashAdvance.seller_id,
+        payeeName: cashAdvance.seller_name,
+        amount: deductionAmount,
+        generatedBy: req.user.id,
+        remarks: `Cash advance deduction from release #${release.id}`,
+      })
 
       await connection.query(
         `

@@ -2,6 +2,7 @@ import { db } from '../db/connect.js'
 import { safeCreateAuditLog } from '../utils/createAuditLog.js'
 import { getClientIp } from '../utils/getClientIp.js'
 import { refreshCommissionEligibility } from './commissions.controller.js'
+import { calculateListingPricing } from '../utils/formulas/listingFormulas.js'
 import {
   copyProjectRequirementsToListing,
   ensureClientDocumentChecklistForClientUnit,
@@ -27,15 +28,33 @@ const formatDecimal = (value) => {
 }
 
 const computeListingAmounts = ({
+  property_type = 'lot',
+  pricing_method = 'area_based',
   lot_area_sqm,
   price_per_sqm,
+  lot_price,
+  house_price,
+  package_price,
+  manual_net_selling_price,
   legal_misc_rate,
   reservation_fee
 }) => {
-  const netSellingPrice = numberValue(lot_area_sqm) * numberValue(price_per_sqm)
-  const legalMiscRate = numberValue(legal_misc_rate)
-  const legalMiscFee = netSellingPrice * (legalMiscRate / 100)
-  const totalContractPrice = netSellingPrice + legalMiscFee
+  const pricing = calculateListingPricing({
+    propertyType: property_type,
+    pricingMethod: pricing_method,
+    lotAreaSqm: lot_area_sqm,
+    pricePerSqm: price_per_sqm,
+    lotPrice: lot_price,
+    housePrice: house_price,
+    packagePrice: package_price,
+    manualNetSellingPrice: manual_net_selling_price,
+    legalMiscRate: legal_misc_rate,
+  })
+
+  const netSellingPrice = pricing.netSellingPrice
+  const legalMiscRate = pricing.legalMiscRate
+  const legalMiscFee = pricing.legalMiscFee
+  const totalContractPrice = pricing.totalContractPrice
   const reservationFee = numberValue(reservation_fee)
 
   const thirtyPercent = Math.max(totalContractPrice * 0.3 - reservationFee, 0)
@@ -136,7 +155,7 @@ const recomputeListingClientUnitBalances = async (
       nextListingStatus = 'sold'
     } else if (activePaymentPaid > 0) {
       nextStatus = 'active'
-      nextListingStatus = 'active'
+      nextListingStatus = 'sold'
     } else if (reservationPaid > 0 || paidAmount >= reservationFee) {
       nextStatus = 'reserved'
       nextListingStatus = 'reserved'
@@ -234,6 +253,78 @@ const syncListingUnitAliases = async (connectionOrDb, listingId, aliases = []) =
 const formatOldUnitIdsForAudit = (oldUnitIds) => {
   const aliases = normalizeUnitAliasList(oldUnitIds)
   return aliases.length ? ` | Old Unit IDs: ${aliases.join(', ')}` : ''
+}
+
+const listingUpgradeColumns = [
+  {
+    name: 'property_type',
+    definition: "ENUM('lot','house_and_lot','house_only') NOT NULL DEFAULT 'lot' AFTER lot_type",
+  },
+  {
+    name: 'pricing_method',
+    definition: "ENUM('area_based','package_price','manual') NOT NULL DEFAULT 'area_based' AFTER property_type",
+  },
+  { name: 'house_model', definition: 'VARCHAR(150) NULL AFTER pricing_method' },
+  { name: 'floor_area_sqm', definition: 'DECIMAL(10,2) NOT NULL DEFAULT 0.00 AFTER house_model' },
+  { name: 'bedrooms', definition: 'INT NOT NULL DEFAULT 0 AFTER floor_area_sqm' },
+  { name: 'bathrooms', definition: 'INT NOT NULL DEFAULT 0 AFTER bedrooms' },
+  { name: 'parking_slots', definition: 'INT NOT NULL DEFAULT 0 AFTER bathrooms' },
+  { name: 'lot_price', definition: 'DECIMAL(15,2) NOT NULL DEFAULT 0.00 AFTER parking_slots' },
+  { name: 'house_price', definition: 'DECIMAL(15,2) NOT NULL DEFAULT 0.00 AFTER lot_price' },
+  { name: 'package_price', definition: 'DECIMAL(15,2) NOT NULL DEFAULT 0.00 AFTER house_price' },
+  { name: 'manual_net_selling_price', definition: 'DECIMAL(15,2) NOT NULL DEFAULT 0.00 AFTER package_price' },
+]
+
+const ensureListingUpgradeSchema = async (connectionOrDb = db) => {
+  const [columns] = await connectionOrDb.query(
+    `
+    SELECT COLUMN_NAME
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'listings'
+      AND COLUMN_NAME IN (?)
+    `,
+    [listingUpgradeColumns.map((column) => column.name)]
+  )
+
+  const existingColumns = new Set(columns.map((column) => column.COLUMN_NAME))
+
+  for (const column of listingUpgradeColumns) {
+    if (existingColumns.has(column.name)) continue
+
+    await connectionOrDb.query(
+      `ALTER TABLE listings ADD COLUMN ${column.name} ${column.definition}`
+    )
+  }
+}
+
+const checkDuplicateActiveUnit = async (
+  connectionOrDb,
+  { projectId, unitId, excludeListingId = null }
+) => {
+  const params = [projectId, unitId]
+  const excludeClause = excludeListingId ? 'AND l.id <> ?' : ''
+
+  if (excludeListingId) params.push(excludeListingId)
+
+  const [rows] = await connectionOrDb.query(
+    `
+    SELECT
+      l.id,
+      l.unit_id,
+      p.name AS project_name
+    FROM listings l
+    INNER JOIN projects p ON p.id = l.project_id
+    WHERE l.project_id = ?
+      AND l.unit_id = ?
+      AND l.status <> 'superseded'
+      ${excludeClause}
+    LIMIT 1
+    `,
+    params
+  )
+
+  return rows[0] || null
 }
 
 
@@ -434,6 +525,17 @@ const listingFields = `
     WHERE lul.parent_listing_id = l.id
   ) AS derived_unit_ids,
   l.lot_type,
+  COALESCE(l.property_type, 'lot') AS property_type,
+  COALESCE(l.pricing_method, 'area_based') AS pricing_method,
+  l.house_model,
+  COALESCE(l.floor_area_sqm, 0) AS floor_area_sqm,
+  COALESCE(l.bedrooms, 0) AS bedrooms,
+  COALESCE(l.bathrooms, 0) AS bathrooms,
+  COALESCE(l.parking_slots, 0) AS parking_slots,
+  COALESCE(l.lot_price, 0) AS lot_price,
+  COALESCE(l.house_price, 0) AS house_price,
+  COALESCE(l.package_price, 0) AS package_price,
+  COALESCE(l.manual_net_selling_price, 0) AS manual_net_selling_price,
   l.reservation_fee,
   l.price_per_sqm,
   l.lot_area_sqm,
@@ -472,8 +574,14 @@ const listingFields = `
 
 const mapListing = (listing) => {
   const computed = computeListingAmounts({
+    property_type: listing.property_type,
+    pricing_method: listing.pricing_method,
     lot_area_sqm: listing.lot_area_sqm,
     price_per_sqm: listing.price_per_sqm,
+    lot_price: listing.lot_price,
+    house_price: listing.house_price,
+    package_price: listing.package_price,
+    manual_net_selling_price: listing.manual_net_selling_price,
     legal_misc_rate: listing.legal_misc_rate,
     reservation_fee: listing.reservation_fee
   })
@@ -499,6 +607,8 @@ const mapListing = (listing) => {
 
 export const getListings = async (req, res) => {
   const { search, project_id, status, lot_type } = req.query
+
+  await ensureListingUpgradeSchema()
 
   const conditions = []
   const params = []
@@ -577,6 +687,8 @@ export const getListings = async (req, res) => {
 export const getListing = async (req, res) => {
   const { id } = req.params
 
+  await ensureListingUpgradeSchema()
+
   const [listings] = await db.query(
     `
     SELECT
@@ -604,6 +716,8 @@ export const getListing = async (req, res) => {
 
 export const getListingFullDetails = async (req, res) => {
   const { id } = req.params
+
+  await ensureListingUpgradeSchema()
 
   const [listingRows] = await db.query(
     `
@@ -842,6 +956,17 @@ export const createListing = async (req, res) => {
     unit_id,
     old_unit_ids = '',
     lot_type,
+    property_type = 'lot',
+    pricing_method = 'area_based',
+    house_model,
+    floor_area_sqm = 0,
+    bedrooms = 0,
+    bathrooms = 0,
+    parking_slots = 0,
+    lot_price = 0,
+    house_price = 0,
+    package_price = 0,
+    manual_net_selling_price = 0,
     reservation_fee = 50000,
     price_per_sqm = 0,
     lot_area_sqm = 0,
@@ -880,8 +1005,14 @@ export const createListing = async (req, res) => {
   }
 
   const computedAmounts = computeListingAmounts({
+    property_type,
+    pricing_method,
     lot_area_sqm,
     price_per_sqm,
+    lot_price,
+    house_price,
+    package_price,
+    manual_net_selling_price,
     legal_misc_rate,
     reservation_fee
   })
@@ -892,6 +1023,19 @@ export const createListing = async (req, res) => {
 
   try {
     await connection.beginTransaction()
+    await ensureListingUpgradeSchema(connection)
+
+    const duplicateListing = await checkDuplicateActiveUnit(connection, {
+      projectId: project_id,
+      unitId: unit_id,
+    })
+
+    if (duplicateListing) {
+      await connection.rollback()
+      return res.status(409).json({
+        message: `Unit ${unit_id} already exists in ${duplicateListing.project_name}. Please check the existing listing or use a different Unit ID.`,
+      })
+    }
 
     const [result] = await connection.query(
       `
@@ -900,18 +1044,40 @@ export const createListing = async (req, res) => {
         cadastral_lot_no,
         unit_id,
         lot_type,
+        property_type,
+        pricing_method,
+        house_model,
+        floor_area_sqm,
+        bedrooms,
+        bathrooms,
+        parking_slots,
+        lot_price,
+        house_price,
+        package_price,
+        manual_net_selling_price,
         reservation_fee,
         price_per_sqm,
         lot_area_sqm,
         legal_misc_rate,
         status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         project_id,
         nullableValue(cadastral_lot_no),
         unit_id,
         nullableValue(lot_type),
+        property_type,
+        pricing_method,
+        nullableValue(house_model),
+        numberValue(floor_area_sqm),
+        numberValue(bedrooms),
+        numberValue(bathrooms),
+        numberValue(parking_slots),
+        numberValue(lot_price),
+        numberValue(house_price),
+        numberValue(package_price),
+        numberValue(manual_net_selling_price),
         numberValue(reservation_fee),
         numberValue(price_per_sqm),
         numberValue(lot_area_sqm),
@@ -942,6 +1108,18 @@ export const createListing = async (req, res) => {
     await connection.commit()
   } catch (error) {
     await connection.rollback()
+
+    if (error?.code === 'ER_DUP_ENTRY') {
+      const [projectRows] = await db.query(
+        `SELECT name FROM projects WHERE id = ? LIMIT 1`,
+        [project_id]
+      )
+
+      return res.status(409).json({
+        message: `Unit ${unit_id} already exists in ${projectRows[0]?.name || 'this project'}. Please check the existing listing or use a different Unit ID.`,
+      })
+    }
+
     throw error
   } finally {
     connection.release()
@@ -976,6 +1154,17 @@ export const updateListing = async (req, res) => {
     unit_id,
     old_unit_ids = '',
     lot_type,
+    property_type = 'lot',
+    pricing_method = 'area_based',
+    house_model,
+    floor_area_sqm = 0,
+    bedrooms = 0,
+    bathrooms = 0,
+    parking_slots = 0,
+    lot_price = 0,
+    house_price = 0,
+    package_price = 0,
+    manual_net_selling_price = 0,
     reservation_fee = 50000,
     price_per_sqm = 0,
     lot_area_sqm = 0,
@@ -998,8 +1187,14 @@ export const updateListing = async (req, res) => {
   }
 
   const computedAmounts = computeListingAmounts({
+    property_type,
+    pricing_method,
     lot_area_sqm,
     price_per_sqm,
+    lot_price,
+    house_price,
+    package_price,
+    manual_net_selling_price,
     legal_misc_rate,
     reservation_fee
   })
@@ -1009,6 +1204,7 @@ export const updateListing = async (req, res) => {
 
   try {
     await connection.beginTransaction()
+    await ensureListingUpgradeSchema(connection)
 
     const [existingListingRows] = await connection.query(
       `SELECT id, unit_id FROM listings WHERE id = ? LIMIT 1`,
@@ -1032,6 +1228,19 @@ export const updateListing = async (req, res) => {
         : []),
     ]
 
+    const duplicateListing = await checkDuplicateActiveUnit(connection, {
+      projectId: project_id,
+      unitId: unit_id,
+      excludeListingId: id,
+    })
+
+    if (duplicateListing) {
+      await connection.rollback()
+      return res.status(409).json({
+        message: `Unit ${unit_id} already exists in ${duplicateListing.project_name}. Please check the existing listing or use a different Unit ID.`,
+      })
+    }
+
     const [result] = await connection.query(
       `
       UPDATE listings
@@ -1040,6 +1249,17 @@ export const updateListing = async (req, res) => {
         cadastral_lot_no = ?,
         unit_id = ?,
         lot_type = ?,
+        property_type = ?,
+        pricing_method = ?,
+        house_model = ?,
+        floor_area_sqm = ?,
+        bedrooms = ?,
+        bathrooms = ?,
+        parking_slots = ?,
+        lot_price = ?,
+        house_price = ?,
+        package_price = ?,
+        manual_net_selling_price = ?,
         reservation_fee = ?,
         price_per_sqm = ?,
         lot_area_sqm = ?,
@@ -1052,6 +1272,17 @@ export const updateListing = async (req, res) => {
         nullableValue(cadastral_lot_no),
         unit_id,
         nullableValue(lot_type),
+        property_type,
+        pricing_method,
+        nullableValue(house_model),
+        numberValue(floor_area_sqm),
+        numberValue(bedrooms),
+        numberValue(bathrooms),
+        numberValue(parking_slots),
+        numberValue(lot_price),
+        numberValue(house_price),
+        numberValue(package_price),
+        numberValue(manual_net_selling_price),
         numberValue(reservation_fee),
         numberValue(price_per_sqm),
         numberValue(lot_area_sqm),
@@ -1071,13 +1302,23 @@ export const updateListing = async (req, res) => {
 
     await syncListingUnitAliases(connection, id, mergedOldUnitIds)
 
-    balanceSummaries = await recomputeListingClientUnitBalances(connection, id, {
-      actorRole: req.user.role,
-    })
+    balanceSummaries = []
 
     await connection.commit()
   } catch (error) {
     await connection.rollback()
+
+    if (error?.code === 'ER_DUP_ENTRY') {
+      const [projectRows] = await db.query(
+        `SELECT name FROM projects WHERE id = ? LIMIT 1`,
+        [project_id]
+      )
+
+      return res.status(409).json({
+        message: `Unit ${unit_id} already exists in ${projectRows[0]?.name || 'this project'}. Please check the existing listing or use a different Unit ID.`,
+      })
+    }
+
     throw error
   } finally {
     connection.release()

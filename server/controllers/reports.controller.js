@@ -17,6 +17,7 @@ const booleanFilterValue = (value) => {
 
 const contractValueExpression = `
   COALESCE(
+    NULLIF(cu.offer_purchase_price, 0),
     NULLIF(l.total_contract_price, 0),
     l.net_selling_price + l.legal_misc_fee,
     l.net_selling_price,
@@ -62,6 +63,8 @@ export const getSalesReport = async (req, res) => {
   if (!isMissing(status) && status !== 'all') {
     conditions.push('cu.status = ?')
     params.push(status)
+  } else {
+    conditions.push(`cu.status <> 'cancelled'`)
   }
 
   const whereClause =
@@ -183,6 +186,7 @@ export const getCollectionsReport = async (req, res) => {
         client_unit_id,
         SUM(amount) AS total_paid
       FROM payments
+      WHERE status = 'verified'
       GROUP BY client_unit_id
     ) payment_summary ON payment_summary.client_unit_id = cu.id
     ${whereClause}
@@ -242,7 +246,7 @@ export const getInventoryReport = async (req, res) => {
       l.net_selling_price,
       l.legal_misc_rate,
       l.legal_misc_fee,
-      ${contractValueExpression} AS total_contract_price,
+      ${listingContractValueExpression} AS total_contract_price,
       l.status,
       l.created_at
     FROM listings l
@@ -461,6 +465,7 @@ export const getClientsReport = async (req, res) => {
         client_unit_id,
         SUM(amount) AS total_paid
       FROM payments
+      WHERE status = 'verified'
       GROUP BY client_unit_id
     ) payment_summary ON payment_summary.client_unit_id = cu.id
     ${whereClause}
@@ -484,5 +489,246 @@ export const getClientsReport = async (req, res) => {
       total_paid: formatDecimal(row.total_paid),
       balance: formatDecimal(row.balance),
     })),
+  })
+}
+
+const safeReportQuery = async (query, params = []) => {
+  try {
+    const [rows] = await db.query(query, params)
+    return rows
+  } catch (error) {
+    if (
+      ['ER_NO_SUCH_TABLE', 'ER_BAD_FIELD_ERROR'].includes(error.code)
+    ) {
+      return []
+    }
+    throw error
+  }
+}
+
+export const getBuyerAccountsReport = async (_req, res) => {
+  const [rows] = await db.query(
+    `
+    SELECT
+      cu.status,
+      COUNT(cu.id) AS account_count,
+      COALESCE(SUM(${contractValueExpression}), 0) AS total_contract_price,
+      COALESCE(SUM(payment_summary.total_paid), 0) AS total_paid,
+      COALESCE(SUM(GREATEST(${contractValueExpression} - COALESCE(payment_summary.total_paid, 0), 0)), 0) AS outstanding_balance
+    FROM client_units cu
+    INNER JOIN listings l ON l.id = cu.listing_id
+    LEFT JOIN (
+      SELECT client_unit_id, SUM(amount) AS total_paid
+      FROM payments
+      WHERE status = 'verified'
+      GROUP BY client_unit_id
+    ) payment_summary ON payment_summary.client_unit_id = cu.id
+    GROUP BY cu.status
+    ORDER BY cu.status ASC
+    `
+  )
+
+  res.status(200).json({
+    buyer_accounts: rows.map((row) => ({
+      ...row,
+      account_count: Number(row.account_count || 0),
+      total_contract_price: formatDecimal(row.total_contract_price),
+      total_paid: formatDecimal(row.total_paid),
+      outstanding_balance: formatDecimal(row.outstanding_balance),
+    })),
+  })
+}
+
+export const getPastDueAccountsReport = async (_req, res) => {
+  const rows = await safeReportQuery(
+    `
+    SELECT
+      cu.id AS client_unit_id,
+      client.full_name AS client_name,
+      project.name AS project_name,
+      listing.unit_id,
+      ps.due_date,
+      ps.total_due,
+      ps.amount_paid,
+      ps.balance,
+      ps.running_balance,
+      cu.status
+    FROM payment_schedules ps
+    INNER JOIN client_units cu ON cu.id = ps.client_unit_id
+    INNER JOIN clients client ON client.id = cu.client_id
+    INNER JOIN listings listing ON listing.id = cu.listing_id
+    INNER JOIN projects project ON project.id = listing.project_id
+    WHERE ps.status = 'past_due'
+    ORDER BY ps.due_date ASC, cu.id DESC
+    `
+  )
+
+  res.status(200).json({
+    past_due_accounts: rows.map((row) => ({
+      ...row,
+      total_due: formatDecimal(row.total_due),
+      amount_paid: formatDecimal(row.amount_paid),
+      balance: formatDecimal(row.balance),
+      running_balance: formatDecimal(row.running_balance),
+    })),
+  })
+}
+
+export const getSellerGroupsReport = async (_req, res) => {
+  const rows = await safeReportQuery(
+    `
+    SELECT
+      sg.id AS seller_group_id,
+      sg.group_name,
+      sg.group_type,
+      sg.pool_rate,
+      sg.status,
+      COUNT(DISTINCT sgm.seller_id) AS active_member_count,
+      COUNT(DISTINCT cu.id) AS account_count,
+      COALESCE(SUM(cu.offer_purchase_price), 0) AS total_sales,
+      COALESCE(SUM(cm.gross_commission), 0) AS gross_commission,
+      COALESCE(SUM(cm.released_amount), 0) AS released_commission
+    FROM seller_groups sg
+    LEFT JOIN seller_group_members sgm
+      ON sgm.seller_group_id = sg.id
+      AND sgm.status = 'active'
+    LEFT JOIN client_units cu ON cu.seller_group_id = sg.id
+      AND cu.status <> 'cancelled'
+    LEFT JOIN commissions cm ON cm.client_unit_id = cu.id
+      AND cm.status <> 'cancelled'
+    GROUP BY sg.id
+    ORDER BY total_sales DESC, sg.group_name ASC
+    `
+  )
+
+  res.status(200).json({
+    seller_groups: rows.map((row) => ({
+      ...row,
+      pool_rate: formatDecimal(row.pool_rate),
+      active_member_count: Number(row.active_member_count || 0),
+      account_count: Number(row.account_count || 0),
+      total_sales: formatDecimal(row.total_sales),
+      gross_commission: formatDecimal(row.gross_commission),
+      released_commission: formatDecimal(row.released_commission),
+    })),
+  })
+}
+
+export const getCashAdvancesReport = async (_req, res) => {
+  const [rows] = await db.query(
+    `
+    SELECT
+      ca.id AS cash_advance_id,
+      seller.full_name AS seller_name,
+      ca.amount,
+      ca.remaining_balance,
+      (ca.amount - ca.remaining_balance) AS deducted_amount,
+      ca.status,
+      ca.requested_at,
+      ca.approved_at
+    FROM cash_advances ca
+    INNER JOIN accredited_sellers seller ON seller.id = ca.seller_id
+    ORDER BY ca.id DESC
+    `
+  )
+
+  res.status(200).json({
+    cash_advances: rows.map((row) => ({
+      ...row,
+      amount: formatDecimal(row.amount),
+      remaining_balance: formatDecimal(row.remaining_balance),
+      deducted_amount: formatDecimal(row.deducted_amount),
+    })),
+  })
+}
+
+export const getVouchersReport = async (_req, res) => {
+  const rows = await safeReportQuery(
+    `
+    SELECT
+      v.id AS voucher_id,
+      v.voucher_no,
+      v.voucher_type,
+      v.source_type,
+      v.source_id,
+      v.payee_type,
+      v.payee_name,
+      v.amount,
+      v.status,
+      v.created_at
+    FROM vouchers v
+    ORDER BY v.id DESC
+    `
+  )
+
+  res.status(200).json({
+    vouchers: rows.map((row) => ({
+      ...row,
+      amount: formatDecimal(row.amount),
+    })),
+  })
+}
+
+export const getCancellationsReport = async (_req, res) => {
+  const rows = await safeReportQuery(
+    `
+    SELECT
+      cu.id AS client_unit_id,
+      client.full_name AS client_name,
+      project.name AS project_name,
+      listing.unit_id,
+      cu.status,
+      cu.cancellation_date,
+      cu.cancellation_result,
+      cu.total_paid_by_client,
+      cu.refund_amount,
+      cu.forfeited_amount,
+      cu.settlement_date,
+      cu.cleared_for_resale_at
+    FROM client_units cu
+    INNER JOIN clients client ON client.id = cu.client_id
+    INNER JOIN listings listing ON listing.id = cu.listing_id
+    INNER JOIN projects project ON project.id = listing.project_id
+    WHERE cu.status IN ('pending_cancellation', 'cancelled')
+       OR cu.cancellation_result IS NOT NULL
+    ORDER BY COALESCE(cu.settlement_date, cu.cancellation_date, cu.created_at) DESC
+    `
+  )
+
+  res.status(200).json({
+    cancellations: rows.map((row) => ({
+      ...row,
+      total_paid_by_client: formatDecimal(row.total_paid_by_client),
+      refund_amount: formatDecimal(row.refund_amount),
+      forfeited_amount: formatDecimal(row.forfeited_amount),
+    })),
+  })
+}
+
+export const getProofIncomeRequestsReport = async (_req, res) => {
+  const rows = await safeReportQuery(
+    `
+    SELECT
+      pir.id AS proof_income_request_id,
+      client.full_name AS client_name,
+      listing.unit_id,
+      pir.document_type,
+      pir.status,
+      requester.full_name AS requested_by_name,
+      pir.requested_at,
+      verifier.full_name AS verified_by_name,
+      pir.verified_at
+    FROM proof_income_requests pir
+    INNER JOIN clients client ON client.id = pir.client_id
+    LEFT JOIN client_units cu ON cu.id = pir.client_unit_id
+    LEFT JOIN listings listing ON listing.id = cu.listing_id
+    LEFT JOIN users requester ON requester.id = pir.requested_by
+    LEFT JOIN users verifier ON verifier.id = pir.verified_by
+    ORDER BY pir.id DESC
+    `
+  )
+
+  res.status(200).json({
+    proof_income_requests: rows,
   })
 }

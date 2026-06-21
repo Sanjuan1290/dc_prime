@@ -8,10 +8,14 @@ import {
   refreshCommissionEligibility,
 } from './commissions.controller.js'
 import { recomputeClientUnitBalance } from './payments.controller.js'
+import { calculateListingPricing } from '../utils/formulas/listingFormulas.js'
+import { createVoucherForSource } from '../utils/vouchers.js'
 
 const allowedClientUnitStatuses = [
   'reserved',
   'active',
+  'past_due',
+  'pending_cancellation',
   'cancelled',
   'fully_paid',
   'closed',
@@ -174,10 +178,10 @@ const validateDueDay = (dueDay) => {
 }
 
 const listingStatusFromClientUnitStatus = (status) => {
-  if (status === 'cancelled') return 'available'
+  if (status === 'cancelled') return 'cancelled'
+  if (status === 'pending_cancellation') return 'pending_cancellation'
   if (status === 'reserved') return 'reserved'
-  if (status === 'active') return 'active'
-  if (status === 'fully_paid' || status === 'closed') return 'sold'
+  if (['active', 'past_due', 'fully_paid', 'closed'].includes(status)) return 'sold'
 
   return null
 }
@@ -497,7 +501,21 @@ const replaceClientUnitCoBuyer = async ({
 }
 
 const getListingPurchasePrice = (listing) => {
-  const totalContractPrice = normalizeMoney(listing.total_contract_price)
+  const computedPricing = calculateListingPricing({
+    propertyType: listing.property_type || 'lot',
+    pricingMethod: listing.pricing_method || 'area_based',
+    lotAreaSqm: listing.lot_area_sqm,
+    pricePerSqm: listing.price_per_sqm,
+    lotPrice: listing.lot_price,
+    housePrice: listing.house_price,
+    packagePrice: listing.package_price,
+    manualNetSellingPrice: listing.manual_net_selling_price,
+    legalMiscRate: listing.legal_misc_rate,
+  })
+
+  const totalContractPrice = normalizeMoney(
+    computedPricing.totalContractPrice || listing.total_contract_price
+  )
 
   if (totalContractPrice > 0) return totalContractPrice
 
@@ -1002,6 +1020,128 @@ const getSellerById = async (connectionOrDb, sellerId) => {
   )
 
   return rows[0]
+}
+
+const ensureClientUnitSellerGroupSnapshotColumns = async (connectionOrDb) => {
+  const [columns] = await connectionOrDb.query(
+    `
+    SELECT COLUMN_NAME
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'client_units'
+      AND COLUMN_NAME IN ('seller_group_id', 'seller_group_pool_rate')
+    `
+  )
+
+  const existingColumns = new Set(columns.map((column) => column.COLUMN_NAME))
+
+  if (!existingColumns.has('seller_group_id')) {
+    await connectionOrDb.query(
+      `
+      ALTER TABLE client_units
+      ADD COLUMN seller_group_id INT NULL AFTER seller_id
+      `
+    )
+  }
+
+  if (!existingColumns.has('seller_group_pool_rate')) {
+    await connectionOrDb.query(
+      `
+      ALTER TABLE client_units
+      ADD COLUMN seller_group_pool_rate DECIMAL(5,2) NOT NULL DEFAULT 0.00 AFTER seller_group_id
+      `
+    )
+  }
+}
+
+const getActiveSellerGroupForSeller = async (connectionOrDb, sellerId) => {
+  if (isMissing(sellerId)) return null
+
+  const [rows] = await connectionOrDb.query(
+    `
+    SELECT
+      sg.id,
+      sg.pool_rate
+    FROM seller_group_members sgm
+    INNER JOIN seller_groups sg ON sg.id = sgm.seller_group_id
+    WHERE sgm.seller_id = ?
+      AND sgm.status = 'active'
+      AND sg.status = 'active'
+    ORDER BY sgm.id DESC
+    LIMIT 1
+    `,
+    [sellerId]
+  ).catch(() => [[]])
+
+  return rows[0] || null
+}
+
+const cancellationSettlementColumns = [
+  {
+    name: 'cancellation_date',
+    definition: 'ADD COLUMN cancellation_date DATE NULL',
+  },
+  {
+    name: 'cancellation_result',
+    definition: `ADD COLUMN cancellation_result ENUM('refunded','partial_refund','forfeited','no_refund','pending_settlement') NULL`,
+  },
+  {
+    name: 'total_paid_by_client',
+    definition: 'ADD COLUMN total_paid_by_client DECIMAL(14,2) NOT NULL DEFAULT 0.00',
+  },
+  {
+    name: 'refund_amount',
+    definition: 'ADD COLUMN refund_amount DECIMAL(14,2) NOT NULL DEFAULT 0.00',
+  },
+  {
+    name: 'forfeited_amount',
+    definition: 'ADD COLUMN forfeited_amount DECIMAL(14,2) NOT NULL DEFAULT 0.00',
+  },
+  {
+    name: 'cancellation_reason',
+    definition: 'ADD COLUMN cancellation_reason TEXT NULL',
+  },
+  {
+    name: 'cancellation_approved_by',
+    definition: 'ADD COLUMN cancellation_approved_by INT NULL',
+  },
+  {
+    name: 'settlement_date',
+    definition: 'ADD COLUMN settlement_date DATE NULL',
+  },
+  {
+    name: 'cancellation_remarks',
+    definition: 'ADD COLUMN cancellation_remarks TEXT NULL',
+  },
+  {
+    name: 'cleared_for_resale_at',
+    definition: 'ADD COLUMN cleared_for_resale_at DATETIME NULL',
+  },
+  {
+    name: 'cleared_for_resale_by',
+    definition: 'ADD COLUMN cleared_for_resale_by INT NULL',
+  },
+]
+
+const ensureCancellationSettlementColumns = async (connectionOrDb) => {
+  const [columns] = await connectionOrDb.query(
+    `
+    SELECT COLUMN_NAME
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'client_units'
+      AND COLUMN_NAME IN (${cancellationSettlementColumns.map(() => '?').join(', ')})
+    `,
+    cancellationSettlementColumns.map((column) => column.name)
+  )
+
+  const existingColumns = new Set(columns.map((column) => column.COLUMN_NAME))
+
+  for (const column of cancellationSettlementColumns) {
+    if (!existingColumns.has(column.name)) {
+      await connectionOrDb.query(`ALTER TABLE client_units ${column.definition}`)
+    }
+  }
 }
 
 const createClientDocumentChecklist = async (connectionOrDb, clientUnitId) => {
@@ -1597,13 +1737,18 @@ export const reserveListing = async (req, res) => {
       })
     }
 
+    await ensureClientUnitSellerGroupSnapshotColumns(connection)
+    const sellerGroupSnapshot = await getActiveSellerGroupForSeller(
+      connection,
+      finalSellerId
+    )
 
     const [duplicateRows] = await connection.query(
       `
       SELECT id
       FROM client_units
       WHERE listing_id = ?
-        AND status IN ('reserved', 'active', 'fully_paid', 'closed')
+        AND status IN ('reserved', 'active', 'past_due', 'pending_cancellation', 'fully_paid', 'closed')
       LIMIT 1
       `,
       [listing_id]
@@ -1623,6 +1768,8 @@ export const reserveListing = async (req, res) => {
         listing_id,
         assigned_user_id,
         seller_id,
+        seller_group_id,
+        seller_group_pool_rate,
         status,
         mode_of_payment,
         buyer_type,
@@ -1645,13 +1792,15 @@ export const reserveListing = async (req, res) => {
         monthly_amortization,
         contract_processing_status,
         sale_type
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         clientId,
         listing_id,
         nullableValue(assigned_user_id || req.user.id),
         finalSellerId,
+        nullableValue(sellerGroupSnapshot?.id),
+        normalizeRate(sellerGroupSnapshot?.pool_rate),
         status,
         finalModeOfPayment,
         finalBuyerType,
@@ -2297,7 +2446,7 @@ export const changeClientUnitListing = async (req, res) => {
 
 export const cancelClientUnit = async (req, res) => {
   const { id } = req.params
-  const { release_listing = true, reason = null } = req.body
+  const { reason = null } = req.body
 
   const existingClientUnit = await getClientUnitById(id)
 
@@ -2317,23 +2466,28 @@ export const cancelClientUnit = async (req, res) => {
 
   try {
     await connection.beginTransaction()
+    await ensureCancellationSettlementColumns(connection)
 
     await connection.query(
       `
       UPDATE client_units
-      SET status = 'cancelled'
+      SET
+        status = 'pending_cancellation',
+        cancellation_date = CURDATE(),
+        cancellation_result = 'pending_settlement',
+        cancellation_reason = ?
       WHERE id = ?
       `,
-      [id]
+      [nullableValue(reason), id]
     )
 
     await connection.query(
       `
       UPDATE listings
-      SET status = ?
+      SET status = 'pending_cancellation'
       WHERE id = ?
       `,
-      [release_listing ? 'available' : 'hold', existingClientUnit.listing_id]
+      [existingClientUnit.listing_id]
     )
 
     await connection.query(
@@ -2368,10 +2522,263 @@ export const cancelClientUnit = async (req, res) => {
     })
 
     return res.status(200).json({
-      message: 'Client unit cancelled successfully',
+      message: 'Client unit marked pending cancellation successfully',
       data: {
         clientUnitId: Number(id),
-        listing_status: release_listing ? 'available' : 'hold',
+        listing_status: 'pending_cancellation',
+      },
+    })
+  } catch (err) {
+    await connection.rollback()
+    throw err
+  } finally {
+    connection.release()
+  }
+}
+
+export const settleClientUnitCancellation = async (req, res) => {
+  const { id } = req.params
+  const {
+    cancellation_result,
+    refund_amount = 0,
+    forfeited_amount = 0,
+    settlement_date,
+    remarks = null,
+  } = req.body
+
+  const allowedResults = ['refunded', 'partial_refund', 'forfeited', 'no_refund', 'pending_settlement']
+
+  if (!allowedResults.includes(cancellation_result)) {
+    return res.status(400).json({ message: 'Invalid cancellation result' })
+  }
+
+  if (isMissing(settlement_date)) {
+    return res.status(400).json({ message: 'Settlement date is required' })
+  }
+
+  const refundAmount = normalizeMoney(refund_amount)
+  const forfeitedAmount = normalizeMoney(forfeited_amount)
+
+  const connection = await db.getConnection()
+
+  try {
+    await connection.beginTransaction()
+    await ensureCancellationSettlementColumns(connection)
+
+    const [unitRows] = await connection.query(
+      `
+      SELECT *
+      FROM client_units
+      WHERE id = ?
+      LIMIT 1
+      FOR UPDATE
+      `,
+      [id]
+    )
+
+    const clientUnit = unitRows[0]
+
+    if (!clientUnit) {
+      await connection.rollback()
+      return res.status(404).json({ message: 'Client unit not found' })
+    }
+
+    if (!['pending_cancellation', 'cancelled'].includes(clientUnit.status)) {
+      await connection.rollback()
+      return res.status(400).json({
+        message: 'Only pending cancellation or cancelled accounts can be settled',
+      })
+    }
+
+    const [paymentRows] = await connection.query(
+      `
+      SELECT COALESCE(SUM(amount), 0) AS total_paid
+      FROM payments
+      WHERE client_unit_id = ?
+        AND status = 'verified'
+      `,
+      [id]
+    )
+
+    const totalPaid = normalizeMoney(paymentRows[0]?.total_paid || 0)
+    const settlementTotal = normalizeMoney(refundAmount + forfeitedAmount)
+
+    if (Math.abs(totalPaid - settlementTotal) > 0.01) {
+      await connection.rollback()
+      return res.status(400).json({
+        message: `Settlement must balance. Total paid is ${totalPaid}; refund plus forfeited is ${settlementTotal}.`,
+      })
+    }
+
+    await connection.query(
+      `
+      UPDATE client_units
+      SET
+        status = 'cancelled',
+        cancellation_result = ?,
+        total_paid_by_client = ?,
+        refund_amount = ?,
+        forfeited_amount = ?,
+        cancellation_approved_by = ?,
+        settlement_date = ?,
+        cancellation_remarks = ?
+      WHERE id = ?
+      `,
+      [
+        cancellation_result,
+        totalPaid,
+        refundAmount,
+        forfeitedAmount,
+        req.user.id,
+        settlement_date,
+        nullableValue(remarks),
+        id,
+      ]
+    )
+
+    await connection.query(
+      `
+      UPDATE listings
+      SET status = 'cancelled'
+      WHERE id = ?
+      `,
+      [clientUnit.listing_id]
+    )
+
+    let refundVoucher = null
+
+    if (refundAmount > 0) {
+      const [clientRows] = await connection.query(
+        `
+        SELECT c.full_name
+        FROM clients c
+        WHERE c.id = ?
+        LIMIT 1
+        `,
+        [clientUnit.client_id]
+      )
+
+      refundVoucher = await createVoucherForSource({
+        connection,
+        voucherType: 'refund',
+        sourceType: 'client_units',
+        sourceId: Number(id),
+        payeeType: 'client',
+        payeeId: clientUnit.client_id,
+        payeeName: clientRows[0]?.full_name,
+        amount: refundAmount,
+        generatedBy: req.user.id,
+        remarks: `Cancellation refund for client unit #${id}`,
+      })
+    }
+
+    await connection.commit()
+
+    await safeCreateAuditLog({
+      userId: req.user.id,
+      action: 'settle',
+      module: 'Client Units',
+      description: `Settled cancellation for client unit ${id}`,
+      ipAddress: getClientIp(req),
+    })
+
+    return res.status(200).json({
+      message: 'Cancellation settlement saved successfully',
+      data: {
+        clientUnitId: Number(id),
+        refundVoucher,
+      },
+    })
+  } catch (err) {
+    await connection.rollback()
+    throw err
+  } finally {
+    connection.release()
+  }
+}
+
+export const clearClientUnitForResale = async (req, res) => {
+  const { id } = req.params
+
+  const connection = await db.getConnection()
+
+  try {
+    await connection.beginTransaction()
+    await ensureCancellationSettlementColumns(connection)
+
+    const [unitRows] = await connection.query(
+      `
+      SELECT *
+      FROM client_units
+      WHERE id = ?
+      LIMIT 1
+      FOR UPDATE
+      `,
+      [id]
+    )
+
+    const clientUnit = unitRows[0]
+
+    if (!clientUnit) {
+      await connection.rollback()
+      return res.status(404).json({ message: 'Client unit not found' })
+    }
+
+    const hasSettlementAmount =
+      normalizeMoney(clientUnit.refund_amount) > 0 ||
+      normalizeMoney(clientUnit.forfeited_amount) > 0 ||
+      normalizeMoney(clientUnit.total_paid_by_client) === 0
+
+    const canClear =
+      clientUnit.status === 'cancelled' &&
+      !isMissing(clientUnit.cancellation_result) &&
+      clientUnit.cancellation_result !== 'pending_settlement' &&
+      hasSettlementAmount &&
+      !isMissing(clientUnit.cancellation_approved_by) &&
+      !isMissing(clientUnit.settlement_date)
+
+    if (!canClear) {
+      await connection.rollback()
+      return res.status(400).json({
+        message: 'Cancellation must be settled with result, settlement date, approver, and refund/forfeited amount before resale.',
+      })
+    }
+
+    await connection.query(
+      `
+      UPDATE listings
+      SET status = 'available'
+      WHERE id = ?
+      `,
+      [clientUnit.listing_id]
+    )
+
+    await connection.query(
+      `
+      UPDATE client_units
+      SET
+        cleared_for_resale_at = NOW(),
+        cleared_for_resale_by = ?
+      WHERE id = ?
+      `,
+      [req.user.id, id]
+    )
+
+    await connection.commit()
+
+    await safeCreateAuditLog({
+      userId: req.user.id,
+      action: 'clear_for_resale',
+      module: 'Client Units',
+      description: `Cleared client unit ${id} listing for resale`,
+      ipAddress: getClientIp(req),
+    })
+
+    return res.status(200).json({
+      message: 'Listing cleared for resale successfully',
+      data: {
+        clientUnitId: Number(id),
+        listing_status: 'available',
       },
     })
   } catch (err) {

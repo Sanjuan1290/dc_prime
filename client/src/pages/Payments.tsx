@@ -32,7 +32,7 @@ import {
 } from "../utils/formatters"
 import { paginateRows } from "../utils/pagination"
 
-type PaymentStatus = "pending" | "verified" | "rejected" | string
+type PaymentStatus = "pending" | "verified" | "rejected" | "voided" | string
 
 type Payment = {
   id: number
@@ -138,6 +138,7 @@ const paymentMethods = [
   "cash",
   "bank_transfer",
   "gcash",
+  "maya",
   "check",
   "other",
 ]
@@ -148,7 +149,7 @@ const getPaymentDateValue = (date: string | null | undefined) => {
   return formattedDate === "-" ? "" : formattedDate
 }
 
-const paymentStatuses = ["pending", "verified", "rejected"]
+const paymentStatuses = ["pending", "verified", "rejected", "voided"]
 
 const fetchPayments = async (): Promise<Payment[]> => {
   const response = await fetch(`${API_URL}/payments`, {
@@ -253,7 +254,10 @@ const formatPaymentPayload = (paymentData: PaymentFormData) => {
     amount: Number(paymentData.amount || 0),
     payment_type: paymentData.payment_type || null,
     payment_method: paymentData.payment_method || null,
-    reference_id: paymentData.reference_id.trim() || null,
+    reference_id:
+      paymentData.payment_method === "cash"
+        ? null
+        : paymentData.reference_id.trim() || null,
     payment_date: paymentData.payment_date || getLocalDate(),
     status: paymentData.status || "pending",
   }
@@ -1058,6 +1062,8 @@ const PaymentModal = ({
               setFormData({
                 ...formData,
                 payment_method: e.target.value,
+                reference_id:
+                  e.target.value === "cash" ? "" : formData.reference_id,
               })
             }
           >
@@ -1070,6 +1076,7 @@ const PaymentModal = ({
 
           <Input
             label="Reference ID / OR No. / Transaction No."
+            disabled={formData.payment_method === "cash"}
             value={formData.reference_id}
             onChange={(e) =>
               setFormData({
@@ -1077,7 +1084,11 @@ const PaymentModal = ({
                 reference_id: e.target.value,
               })
             }
-            placeholder="Optional for cash; recommended for bank, GCash, check"
+            placeholder={
+              formData.payment_method === "cash"
+                ? "Auto-generated after saving"
+                : "Required for bank, GCash, Maya, and check"
+            }
           />
 
           <Select
