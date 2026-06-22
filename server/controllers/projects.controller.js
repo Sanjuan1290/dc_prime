@@ -571,3 +571,198 @@ export const deleteProject = async (req, res) => {
   res.status(200).json({ message: 'Project deleted successfully' })
 }
 
+const toNumber = (value, fallback = 0) => {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : fallback
+}
+
+const toBoolean = (value, fallback = false) => {
+  if (value === undefined || value === null || value === '') return fallback
+  return ['true', '1', 'yes', 'on'].includes(String(value).toLowerCase())
+}
+
+const computeAmortization = (principal, annualInterestRate, years) => {
+  const safePrincipal = Math.max(toNumber(principal), 0)
+  const safeYears = Math.max(toNumber(years), 0)
+  const months = Math.round(safeYears * 12)
+
+  if (safePrincipal <= 0 || months <= 0) return 0
+
+  const monthlyRate = toNumber(annualInterestRate) / 100 / 12
+
+  if (monthlyRate <= 0) {
+    return safePrincipal / months
+  }
+
+  const factor = Math.pow(1 + monthlyRate, months)
+  return (safePrincipal * monthlyRate * factor) / (factor - 1)
+}
+
+const getDiscountAmount = ({ sellingPrice, discountType, discountValue }) => {
+  const amount = Math.max(toNumber(discountValue), 0)
+
+  if (discountType === 'fixed') {
+    return Math.min(amount, sellingPrice)
+  }
+
+  if (discountType === 'none') {
+    return 0
+  }
+
+  return Math.min(sellingPrice * (amount / 100), sellingPrice)
+}
+
+export const getProjectPriceList = async (req, res) => {
+  const { id } = req.params
+
+  const [projectRows] = await db.query(
+    `
+    SELECT
+      id,
+      name,
+      location,
+      location_code,
+      administrator,
+      tax_declaration_no,
+      pin,
+      status
+    FROM projects
+    WHERE id = ?
+    LIMIT 1
+    `,
+    [id]
+  )
+
+  const project = projectRows[0]
+
+  if (!project) {
+    return res.status(404).json({ message: 'Project not found' })
+  }
+
+  const title = String(
+    req.query.title || `${project.name}: ${toNumber(req.query.downpayment_percent, 15)}% DOWNPAYMENT`
+  ).trim()
+  const effectiveDate = String(req.query.effective_date || '').trim() || null
+  const downpaymentPercent = Math.max(toNumber(req.query.downpayment_percent, 15), 0)
+  const payableTerms = Math.max(Math.round(toNumber(req.query.payable_terms, 6)), 1)
+  const interestRate = Math.max(toNumber(req.query.interest_rate, 0), 0)
+  const termYearsA = Math.max(toNumber(req.query.term_years_a, 3), 0)
+  const termYearsB = Math.max(toNumber(req.query.term_years_b, 5), 0)
+  const reservationFeeOverride = req.query.reservation_fee === undefined || req.query.reservation_fee === ''
+    ? null
+    : Math.max(toNumber(req.query.reservation_fee), 0)
+  const discountType = ['none', 'fixed', 'percent'].includes(String(req.query.discount_type || 'percent'))
+    ? String(req.query.discount_type || 'percent')
+    : 'percent'
+  const discountValue = Math.max(toNumber(req.query.discount_value, 0), 0)
+
+  const includeStatuses = []
+  if (toBoolean(req.query.include_available, true)) includeStatuses.push('available')
+  if (toBoolean(req.query.include_reserved, true)) includeStatuses.push('reserved')
+  if (toBoolean(req.query.include_sold, false)) includeStatuses.push('sold')
+  if (toBoolean(req.query.include_pending_cancellation, false)) includeStatuses.push('pending_cancellation')
+
+  if (includeStatuses.length === 0) {
+    return res.status(400).json({
+      message: 'Select at least one listing status to include in the price list.',
+    })
+  }
+
+  const placeholders = includeStatuses.map(() => '?').join(',')
+  const [listings] = await db.query(
+    `
+    SELECT
+      id,
+      unit_id,
+      block_no,
+      lot_no,
+      orientation,
+      cadastral_lot_no,
+      lot_type,
+      lot_area_sqm,
+      price_per_sqm,
+      net_selling_price,
+      reservation_fee,
+      legal_misc_rate,
+      legal_misc_fee,
+      total_contract_price,
+      status
+    FROM listings
+    WHERE project_id = ?
+      AND status IN (${placeholders})
+    ORDER BY
+      CAST(NULLIF(block_no, '') AS UNSIGNED),
+      block_no,
+      CAST(NULLIF(lot_no, '') AS UNSIGNED),
+      lot_no,
+      unit_id
+    `,
+    [id, ...includeStatuses]
+  )
+
+  const rows = listings.map((listing, index) => {
+    const area = toNumber(listing.lot_area_sqm)
+    const pricePerSqm = toNumber(listing.price_per_sqm)
+    const sellingPrice = toNumber(listing.net_selling_price, area * pricePerSqm)
+    const discount = getDiscountAmount({
+      sellingPrice,
+      discountType,
+      discountValue,
+    })
+    const totalContractPrice = Math.max(sellingPrice - discount, 0)
+    const downpayment = totalContractPrice * (downpaymentPercent / 100)
+    const reservationFee = reservationFeeOverride ?? toNumber(listing.reservation_fee)
+    const netDownpayment = Math.max(downpayment - reservationFee, 0)
+    const monthlyDownpayment = netDownpayment / payableTerms
+    const balance = Math.max(totalContractPrice - downpayment, 0)
+    const monthlyTermA = computeAmortization(balance, interestRate, termYearsA)
+    const monthlyTermB = computeAmortization(balance, interestRate, termYearsB)
+
+    return {
+      no: index + 1,
+      listing_id: listing.id,
+      unit_id: listing.unit_id,
+      block_no: listing.block_no || '',
+      lot_no: listing.lot_no || '',
+      area,
+      orientation: listing.orientation || listing.lot_type || '',
+      cadastral_lot_no: listing.cadastral_lot_no || '',
+      price_per_sqm: pricePerSqm,
+      selling_price: sellingPrice,
+      discount,
+      total_contract_price: totalContractPrice,
+      downpayment_percent: downpaymentPercent,
+      downpayment,
+      reservation_fee: reservationFee,
+      net_downpayment: netDownpayment,
+      payable_terms: payableTerms,
+      monthly_dp: monthlyDownpayment,
+      balance,
+      interest_rate: interestRate,
+      term_years_a: termYearsA,
+      monthly_term_a: monthlyTermA,
+      term_years_b: termYearsB,
+      monthly_term_b: monthlyTermB,
+      status: listing.status,
+    }
+  })
+
+  res.status(200).json({
+    project,
+    title,
+    effective_date: effectiveDate,
+    settings: {
+      downpayment_percent: downpaymentPercent,
+      reservation_fee_override: reservationFeeOverride,
+      payable_terms: payableTerms,
+      interest_rate: interestRate,
+      term_years_a: termYearsA,
+      term_years_b: termYearsB,
+      discount_type: discountType,
+      discount_value: discountValue,
+      included_statuses: includeStatuses,
+    },
+    rows,
+  })
+}
+

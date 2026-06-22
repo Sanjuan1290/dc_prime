@@ -6,6 +6,7 @@ import {
   FiFileText,
   FiMap,
   FiPlus,
+  FiPrinter,
   FiSearch,
   FiTrash2,
 } from "react-icons/fi";
@@ -23,7 +24,7 @@ import StatCard from "../components/ui/StatCard";
 import StatusBadge from "../components/ui/StatusBadge";
 import TableContainer from "../components/ui/TableContainer";
 import { API_URL, getErrorMessage } from "../utils/api";
-import { formatDate } from "../utils/formatters";
+import { formatDate, getLocalDate } from "../utils/formatters";
 import { paginateRows } from "../utils/pagination";
 
 type Project = {
@@ -95,6 +96,23 @@ type ProjectFormData = {
   document_requirements: DocumentRequirement[];
 };
 
+type PriceListFormData = {
+  title: string;
+  effective_date: string;
+  downpayment_percent: string;
+  reservation_fee: string;
+  payable_terms: string;
+  interest_rate: string;
+  term_years_a: string;
+  term_years_b: string;
+  discount_type: "none" | "fixed" | "percent";
+  discount_value: string;
+  include_available: boolean;
+  include_reserved: boolean;
+  include_sold: boolean;
+  include_pending_cancellation: boolean;
+};
+
 type ProjectsResponse = {
   projects: Project[];
 };
@@ -122,6 +140,23 @@ const emptyFormData: ProjectFormData = {
   document_template_ids: [],
   document_requirements: [],
 };
+
+const getDefaultPriceListForm = (project?: Project | null): PriceListFormData => ({
+  title: project?.name ? `${project.name.toUpperCase()}: 15% DOWNPAYMENT` : "PROJECT UNIT PRICE LIST",
+  effective_date: getLocalDate(),
+  downpayment_percent: "15",
+  reservation_fee: "",
+  payable_terms: "6",
+  interest_rate: "11.5",
+  term_years_a: "3",
+  term_years_b: "5",
+  discount_type: "percent",
+  discount_value: "1",
+  include_available: true,
+  include_reserved: true,
+  include_sold: false,
+  include_pending_cancellation: false,
+});
 
 const normalizeCadastralLots = (value: unknown): string[] => {
   const rawLots = Array.isArray(value)
@@ -307,6 +342,10 @@ const Projects = () => {
   const [editTemplateSearch, setEditTemplateSearch] = useState("");
   const [documentSearch, setDocumentSearch] = useState("");
   const [editDocumentSearch, setEditDocumentSearch] = useState("");
+  const [priceListProject, setPriceListProject] = useState<Project | null>(null);
+  const [priceListForm, setPriceListForm] = useState<PriceListFormData>(
+    getDefaultPriceListForm(),
+  );
 
   const {
     data: projects = [],
@@ -408,6 +447,40 @@ const Projects = () => {
   const openEditModal = (project: Project) => {
     setEditProjectId(project.id);
     setEditFormData(projectToFormData(project));
+  };
+
+  const openPriceListModal = (project: Project) => {
+    setPriceListProject(project);
+    setPriceListForm(getDefaultPriceListForm(project));
+  };
+
+  const handlePrintPriceList = () => {
+    if (!priceListProject) return;
+
+    const params = new URLSearchParams({
+      title: priceListForm.title,
+      effective_date: priceListForm.effective_date,
+      downpayment_percent: priceListForm.downpayment_percent,
+      reservation_fee: priceListForm.reservation_fee,
+      payable_terms: priceListForm.payable_terms,
+      interest_rate: priceListForm.interest_rate,
+      term_years_a: priceListForm.term_years_a,
+      term_years_b: priceListForm.term_years_b,
+      discount_type: priceListForm.discount_type,
+      discount_value: priceListForm.discount_type === "none" ? "0" : priceListForm.discount_value,
+      include_available: String(priceListForm.include_available),
+      include_reserved: String(priceListForm.include_reserved),
+      include_sold: String(priceListForm.include_sold),
+      include_pending_cancellation: String(
+        priceListForm.include_pending_cancellation,
+      ),
+    });
+
+    window.open(
+      `/projects/${priceListProject.id}/price-list/print?${params.toString()}`,
+      "_blank",
+      "noopener,noreferrer",
+    );
   };
 
   const handleAddProject = (e: { preventDefault: () => void }) => {
@@ -1179,6 +1252,12 @@ const Projects = () => {
                             Details
                           </Button>
                           <Button
+                            icon={<FiPrinter />}
+                            onClick={() => openPriceListModal(project)}
+                          >
+                            Price List
+                          </Button>
+                          <Button
                             icon={<FiEdit2 />}
                             onClick={() => openEditModal(project)}
                           >
@@ -1251,6 +1330,15 @@ const Projects = () => {
           </div>
           <div className="mt-5 flex justify-end gap-2">
             <Button
+              icon={<FiPrinter />}
+              onClick={() => {
+                openPriceListModal(viewProject);
+                setViewProject(null);
+              }}
+            >
+              Print Price List
+            </Button>
+            <Button
               icon={<FiEdit2 />}
               onClick={() => {
                 openEditModal(viewProject);
@@ -1281,6 +1369,204 @@ const Projects = () => {
         </Modal>
       ) : null}
 
+      {priceListProject ? (
+        <Modal
+          onClose={() => setPriceListProject(null)}
+          title="Print Project Unit Price List"
+          size="lg"
+        >
+          <div className="space-y-5">
+            <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
+              <p className="text-sm font-bold text-blue-900">
+                {priceListProject.name}
+              </p>
+              <p className="mt-1 text-sm text-blue-700">
+                Set the downpayment, terms, interest, and effective date for the printable sales price sheet.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <Input
+                label="Price List Title"
+                onChange={(e) =>
+                  setPriceListForm({ ...priceListForm, title: e.target.value })
+                }
+                value={priceListForm.title}
+              />
+              <Input
+                label="Pricing Effective Date"
+                onChange={(e) =>
+                  setPriceListForm({
+                    ...priceListForm,
+                    effective_date: e.target.value,
+                  })
+                }
+                type="date"
+                value={priceListForm.effective_date}
+              />
+              <Input
+                label="Downpayment %"
+                min="0"
+                onChange={(e) =>
+                  setPriceListForm({
+                    ...priceListForm,
+                    downpayment_percent: e.target.value,
+                  })
+                }
+                step="0.01"
+                type="number"
+                value={priceListForm.downpayment_percent}
+              />
+              <Input
+                label="Reservation Fee for Price List"
+                min="0"
+                onChange={(e) =>
+                  setPriceListForm({
+                    ...priceListForm,
+                    reservation_fee: e.target.value,
+                  })
+                }
+                placeholder="Blank = use each unit's reservation fee"
+                step="0.01"
+                type="number"
+                value={priceListForm.reservation_fee}
+              />
+              <Input
+                label="DP Payable Terms (months)"
+                min="1"
+                onChange={(e) =>
+                  setPriceListForm({
+                    ...priceListForm,
+                    payable_terms: e.target.value,
+                  })
+                }
+                type="number"
+                value={priceListForm.payable_terms}
+              />
+              <Input
+                label="Annual Interest Rate %"
+                min="0"
+                onChange={(e) =>
+                  setPriceListForm({
+                    ...priceListForm,
+                    interest_rate: e.target.value,
+                  })
+                }
+                step="0.01"
+                type="number"
+                value={priceListForm.interest_rate}
+              />
+              <Input
+                label="First Amortization Term (years)"
+                min="1"
+                onChange={(e) =>
+                  setPriceListForm({
+                    ...priceListForm,
+                    term_years_a: e.target.value,
+                  })
+                }
+                type="number"
+                value={priceListForm.term_years_a}
+              />
+              <Input
+                label="Second Amortization Term (years)"
+                min="1"
+                onChange={(e) =>
+                  setPriceListForm({
+                    ...priceListForm,
+                    term_years_b: e.target.value,
+                  })
+                }
+                type="number"
+                value={priceListForm.term_years_b}
+              />
+              <Select
+                label="Discount Type"
+                onChange={(e) => {
+                  const nextDiscountType = e.target.value as PriceListFormData["discount_type"]
+
+                  setPriceListForm({
+                    ...priceListForm,
+                    discount_type: nextDiscountType,
+                    discount_value: nextDiscountType === "none" ? "" : priceListForm.discount_value,
+                  })
+                }}
+                value={priceListForm.discount_type}
+              >
+                <option value="percent">Percentage</option>
+                <option value="fixed">Fixed Amount</option>
+                <option value="none">No Discount</option>
+              </Select>
+              {priceListForm.discount_type !== "none" ? (
+                <Input
+                  label={priceListForm.discount_type === "fixed" ? "Discount Amount" : "Discount %"}
+                  min="0"
+                  onChange={(e) =>
+                    setPriceListForm({
+                      ...priceListForm,
+                      discount_value: e.target.value,
+                    })
+                  }
+                  step="0.01"
+                  type="number"
+                  value={priceListForm.discount_value}
+                />
+              ) : (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500">
+                  <p className="font-semibold text-slate-700">Discount Value</p>
+                  <p className="mt-1 text-xs">Hidden because No Discount is selected.</p>
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <p className="mb-3 text-sm font-bold text-slate-900">Include Units</p>
+              <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                {([
+                  ["include_available", "Available"],
+                  ["include_reserved", "Reserved"],
+                  ["include_sold", "Sold"],
+                  ["include_pending_cancellation", "Pending Cancellation"],
+                ] as Array<[
+                  keyof Pick<
+                    PriceListFormData,
+                    | "include_available"
+                    | "include_reserved"
+                    | "include_sold"
+                    | "include_pending_cancellation"
+                  >,
+                  string,
+                ]>).map(([key, label]) => (
+                  <label
+                    className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700"
+                    key={key}
+                  >
+                    <input
+                      checked={Boolean(priceListForm[key])}
+                      onChange={(e) =>
+                        setPriceListForm({
+                          ...priceListForm,
+                          [key]: e.target.checked,
+                        })
+                      }
+                      type="checkbox"
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <Button onClick={() => setPriceListProject(null)}>Cancel</Button>
+              <Button icon={<FiPrinter />} onClick={handlePrintPriceList} variant="primary">
+                Open Printable Price List
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      ) : null}
+
       {editProjectId ? (
         <Modal onClose={() => setEditProjectId(null)} title="Edit Project" size="xl">
           {isEditLoading ? <LoadingState message="Loading project documents..." /> : null}
@@ -1307,4 +1593,3 @@ const Projects = () => {
 };
 
 export default Projects;
-

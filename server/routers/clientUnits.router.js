@@ -6,6 +6,7 @@ import {
   changeClientUnitListing,
   cancelClientUnit,
   updateCancellationSettlement,
+  releaseCancellationRefund,
   clearClientUnitForResale,
   deleteClientUnit,
   getClientUnitsByClient,
@@ -26,6 +27,7 @@ router.patch('/client-units/:id', updateClientUnit)
 router.patch('/client-units/:id/change-listing', changeClientUnitListing)
 router.patch('/client-units/:id/cancel', cancelClientUnit)
 router.patch('/client-units/:id/cancellation-settlement', updateCancellationSettlement)
+router.patch('/client-units/:id/cancellation-refund-release', releaseCancellationRefund)
 router.patch('/client-units/:id/clear-for-resale', clearClientUnitForResale)
 router.delete('/client-units/:id', deleteClientUnit)
 router.get('/clients/:clientId/units', getClientUnitsByClient)

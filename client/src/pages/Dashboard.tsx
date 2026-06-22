@@ -40,6 +40,12 @@ type DashboardSummary = {
   collectionProgress: number | string
   clientsCount: number | string
   pendingDocuments: number | string
+  discontinuedMoney?: number | string
+  refundedAmount?: number | string
+  pendingRefunds?: number | string
+  pendingCancellations?: number | string
+  cancelledAccounts?: number | string
+  unitsClearedForResale?: number | string
   totalCommissionLiability?: number | string
   commissionPayableNow?: number | string
   commissionReleased: number | string
@@ -203,6 +209,11 @@ const Dashboard = () => {
   const availableLotValue = safeNum(summary?.availableLotValue)
   const soldLotValue = safeNum(summary?.soldLotValue)
   const pendingDocuments = safeNum(summary?.pendingDocuments)
+  const discontinuedMoney = safeNum(summary?.discontinuedMoney)
+  const refundedAmount = safeNum(summary?.refundedAmount)
+  const pendingRefunds = safeNum(summary?.pendingRefunds)
+  const pendingCancellations = safeNum(summary?.pendingCancellations)
+  const unitsClearedForResale = safeNum(summary?.unitsClearedForResale)
 
   const totalCommissionLiability = safeNum(
     summary?.totalCommissionLiability ?? summary?.commissionPayable,
@@ -284,6 +295,45 @@ const Dashboard = () => {
       formula:
         "COUNT(*) from client document checklist where status is not_submitted or rejected.",
       icon: <FiFileText />,
+    },
+    {
+      title: "Discontinued Money",
+      value: formatMoney(discontinuedMoney),
+      description: "Non-refundable cancelled-sale money retained by company",
+      formula:
+        "SUM(discontinued_amount) from settled cancellation settlements.",
+      icon: <FiDollarSign />,
+    },
+    {
+      title: "Refunded Amount",
+      value: formatMoney(refundedAmount),
+      description: "Refunds released from settled cancellations",
+      formula:
+        "SUM(refund_amount) from settled full-refund or partial-refund settlements.",
+      icon: <FiCreditCard />,
+    },
+    {
+      title: "Pending Refunds",
+      value: formatMoney(pendingRefunds),
+      description: "Approved refunds not yet marked as released",
+      formula:
+        "SUM(refund_amount) from cancellation settlements where status = approved_for_refund.",
+      icon: <FiCreditCard />,
+    },
+    {
+      title: "Pending Cancellations",
+      value: formatNumber(pendingCancellations),
+      description: "Units locked while cancellation settlement is not yet complete",
+      formula:
+        "COUNT(client_units) where status = pending_cancellation or cancellation_status is pending.",
+      icon: <FiHome />,
+    },
+    {
+      title: "Cleared for Resale",
+      value: formatNumber(unitsClearedForResale),
+      description: "Cancelled accounts whose listings were returned to available",
+      formula: "COUNT(client_units) where cleared_for_resale_at is not null.",
+      icon: <FiHome />,
     },
     {
       title: "Total Commission",

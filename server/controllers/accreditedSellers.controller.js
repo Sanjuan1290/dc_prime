@@ -787,6 +787,203 @@ export const getPossibleParentSellers = async (req, res) => {
 }
 
 
+
+const isValidDateOnly = (value) => /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''))
+
+const getDateRangeFromQuery = (query) => {
+  const today = new Date().toISOString().slice(0, 10)
+  const dateFrom = query.date_from || query.from || '1970-01-01'
+  const dateTo = query.date_to || query.to || today
+
+  if (!isValidDateOnly(dateFrom) || !isValidDateOnly(dateTo)) {
+    return {
+      isValid: false,
+      message: 'Use valid date filters in YYYY-MM-DD format.',
+    }
+  }
+
+  if (dateFrom > dateTo) {
+    return {
+      isValid: false,
+      message: 'Date from cannot be later than date to.',
+    }
+  }
+
+  return {
+    isValid: true,
+    dateFrom,
+    dateTo,
+  }
+}
+
+const sumMoney = (rows, key) => {
+  return normalizeMoney(rows.reduce((total, row) => total + Number(row[key] || 0), 0))
+}
+
+export const getSellerProofOfIncome = async (req, res) => {
+  const { id } = req.params
+  const dateRange = getDateRangeFromQuery(req.query)
+
+  if (!dateRange.isValid) {
+    return res.status(400).json({ message: dateRange.message })
+  }
+
+  const seller = await getSellerById(id)
+
+  if (!seller) {
+    return res.status(404).json({ message: 'Accredited seller not found' })
+  }
+
+  const { dateFrom, dateTo } = dateRange
+
+  const [releasedCommissions] = await db.query(
+    `
+    SELECT
+      cr.id AS release_id,
+      cr.release_stage,
+      cr.trigger_payment_percent,
+      cr.release_percent,
+      cr.cumulative_release_percent,
+      cr.gross_release_amount,
+      cr.cash_advance_deduction,
+      cr.net_release_amount,
+      cr.status AS release_status,
+      cr.released_at,
+      releasedBy.full_name AS released_by_name,
+      cm.id AS commission_id,
+      cm.commission_role,
+      cm.rate,
+      cm.commission_base,
+      cm.gross_commission,
+      cm.source_type,
+      cm.sale_type,
+      cu.id AS client_unit_id,
+      client.full_name AS client_name,
+      listing.unit_id,
+      project.name AS project_name
+    FROM commission_releases cr
+    INNER JOIN commissions cm ON cm.id = cr.commission_id
+    LEFT JOIN client_units cu ON cu.id = cm.client_unit_id
+    LEFT JOIN clients client ON client.id = cu.client_id
+    LEFT JOIN listings listing ON listing.id = cu.listing_id
+    LEFT JOIN projects project ON project.id = listing.project_id
+    LEFT JOIN users releasedBy ON releasedBy.id = cr.released_by
+    WHERE cm.seller_id = ?
+      AND cr.status = 'released'
+      AND DATE(cr.released_at) BETWEEN ? AND ?
+    ORDER BY cr.released_at ASC, cr.id ASC
+    `,
+    [id, dateFrom, dateTo]
+  )
+
+  const [cashAdvances] = await db.query(
+    `
+    SELECT
+      ca.id,
+      ca.client_unit_id,
+      ca.amount,
+      ca.remaining_balance,
+      ca.status,
+      ca.requested_at,
+      ca.approved_at,
+      ca.deducted_at,
+      ca.notes,
+      approver.full_name AS approved_by_name,
+      client.full_name AS client_name,
+      listing.unit_id,
+      project.name AS project_name
+    FROM cash_advances ca
+    LEFT JOIN users approver ON approver.id = ca.approved_by
+    LEFT JOIN client_units cu ON cu.id = ca.client_unit_id
+    LEFT JOIN clients client ON client.id = cu.client_id
+    LEFT JOIN listings listing ON listing.id = cu.listing_id
+    LEFT JOIN projects project ON project.id = listing.project_id
+    WHERE ca.seller_id = ?
+      AND ca.status IN ('approved', 'partially_deducted', 'deducted')
+      AND DATE(COALESCE(ca.approved_at, ca.requested_at, ca.created_at)) BETWEEN ? AND ?
+    ORDER BY COALESCE(ca.approved_at, ca.requested_at, ca.created_at) ASC, ca.id ASC
+    `,
+    [id, dateFrom, dateTo]
+  )
+
+  const [cashAdvanceDeductions] = await db.query(
+    `
+    SELECT
+      cad.id,
+      cad.cash_advance_id,
+      cad.commission_release_id,
+      cad.amount,
+      cad.notes,
+      cad.created_at,
+      ca.status AS cash_advance_status,
+      cr.release_stage,
+      cr.released_at,
+      cm.commission_role,
+      cm.source_type,
+      client.full_name AS client_name,
+      listing.unit_id,
+      project.name AS project_name
+    FROM cash_advance_deductions cad
+    INNER JOIN cash_advances ca ON ca.id = cad.cash_advance_id
+    INNER JOIN commission_releases cr ON cr.id = cad.commission_release_id
+    INNER JOIN commissions cm ON cm.id = cr.commission_id
+    LEFT JOIN client_units cu ON cu.id = cm.client_unit_id
+    LEFT JOIN clients client ON client.id = cu.client_id
+    LEFT JOIN listings listing ON listing.id = cu.listing_id
+    LEFT JOIN projects project ON project.id = listing.project_id
+    WHERE ca.seller_id = ?
+      AND DATE(cad.created_at) BETWEEN ? AND ?
+    ORDER BY cad.created_at ASC, cad.id ASC
+    `,
+    [id, dateFrom, dateTo]
+  )
+
+  const [outstandingRows] = await db.query(
+    `
+    SELECT COALESCE(SUM(remaining_balance), 0) AS outstanding_cash_advance_balance
+    FROM cash_advances
+    WHERE seller_id = ?
+      AND status IN ('approved', 'partially_deducted')
+    `,
+    [id]
+  )
+
+  const totals = {
+    gross_released_commissions: sumMoney(releasedCommissions, 'gross_release_amount'),
+    cash_advance_deductions: sumMoney(releasedCommissions, 'cash_advance_deduction'),
+    net_released_commissions: sumMoney(releasedCommissions, 'net_release_amount'),
+    cash_advances_issued: sumMoney(cashAdvances, 'amount'),
+    total_cash_received: normalizeMoney(
+      sumMoney(releasedCommissions, 'net_release_amount') + sumMoney(cashAdvances, 'amount')
+    ),
+    outstanding_cash_advance_balance: normalizeMoney(outstandingRows[0]?.outstanding_cash_advance_balance || 0),
+  }
+
+  await safeCreateAuditLog({
+    userId: req.user.id,
+    action: 'print_preview',
+    module: 'Seller Proof of Income',
+    description: `Generated proof of income data for ${seller.full_name} from ${dateFrom} to ${dateTo}`,
+    ipAddress: getClientIp(req),
+  })
+
+  res.status(200).json({
+    message: 'Seller proof of income fetched successfully',
+    data: {
+      seller,
+      date_range: {
+        date_from: dateFrom,
+        date_to: dateTo,
+      },
+      released_commissions: releasedCommissions,
+      cash_advances: cashAdvances,
+      cash_advance_deductions: cashAdvanceDeductions,
+      totals,
+      generated_at: new Date().toISOString(),
+    },
+  })
+}
+
 export const deleteAccreditedSeller = async (req, res) => {
   const { id } = req.params
 

@@ -1,4 +1,4 @@
-import { useEffect } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { useParams } from "react-router-dom"
 import { API_URL } from "../utils/api"
@@ -26,6 +26,14 @@ type ScheduleRow = {
   reference_details?: ScheduleReferenceDetail[] | string | null
   running_balance: number | string
   status?: string | null
+  schedule_type?: string | null
+}
+
+type InterestBreakdownRow = ScheduleRow & {
+  beginning_balance: number
+  monthly_interest: number
+  principal_paid: number
+  ending_balance: number
 }
 
 type PrintData = {
@@ -62,6 +70,13 @@ const logPrint = async (clientUnitId: string) => {
     },
     body: JSON.stringify({ form_type: "statement_of_account" }),
   }).catch(() => null)
+}
+
+const toNumber = (value: number | string | null | undefined) => {
+  if (value === null || value === undefined || value === "") return 0
+
+  const parsed = Number(String(value).replace(/[^0-9.-]/g, ""))
+  return Number.isFinite(parsed) ? parsed : 0
 }
 
 const amount = (value: number | string | null | undefined) => {
@@ -139,8 +154,78 @@ const displayReference = (row: ScheduleRow) => {
   return stripReferenceAmount(display(fallbackReference))
 }
 
+const isInterestBearingRow = (row: ScheduleRow) => {
+  const scheduleType = String(row.schedule_type || "").toLowerCase()
+  const description = String(row.description || "").toLowerCase()
+
+  if (["monthly", "balloon"].includes(scheduleType)) return true
+
+  return (
+    description.includes("monthly") ||
+    description.includes("amortization") ||
+    description.includes("balloon")
+  )
+}
+
+const buildInterestBreakdownRows = (
+  schedule: ScheduleRow[],
+  startingBalance: number,
+  annualInterestRate: number
+): InterestBreakdownRow[] => {
+  const monthlyRate = Math.max(annualInterestRate, 0) / 100 / 12
+  let principalBalance = Math.max(startingBalance, 0)
+
+  return schedule.map((row) => {
+    const amountPaid = Math.max(toNumber(row.amount_paid), 0)
+    const penalty = Math.max(toNumber(row.penalty), 0)
+    const beginningBalance = principalBalance
+    const paymentForPrincipalAndInterest = Math.max(amountPaid - penalty, 0)
+
+    const monthlyInterest =
+      paymentForPrincipalAndInterest > 0 && isInterestBearingRow(row)
+        ? Math.min(beginningBalance * monthlyRate, paymentForPrincipalAndInterest)
+        : 0
+
+    const principalPaid = Math.min(
+      beginningBalance,
+      Math.max(paymentForPrincipalAndInterest - monthlyInterest, 0)
+    )
+
+    const endingBalance = Math.max(beginningBalance - principalPaid, 0)
+
+    principalBalance = endingBalance
+
+    return {
+      ...row,
+      beginning_balance: beginningBalance,
+      monthly_interest: monthlyInterest,
+      principal_paid: principalPaid,
+      ending_balance: endingBalance,
+    }
+  })
+}
+
+const getInitialInterestRate = (unit: Record<string, any>) => {
+  const candidates = [
+    unit.interest_rate,
+    unit.annual_interest_rate,
+    unit.interest_rate_percent,
+    unit.contract_interest_rate,
+  ]
+
+  for (const candidate of candidates) {
+    const parsed = toNumber(candidate)
+    if (parsed > 0) return String(parsed)
+  }
+
+  return "11.5"
+}
+
 const StatementOfAccountPrint = () => {
   const { clientUnitId = "" } = useParams()
+  const [showInterestBreakdown, setShowInterestBreakdown] = useState(false)
+  const [interestRate, setInterestRate] = useState("11.5")
+  const [hasLoadedInitialRate, setHasLoadedInitialRate] = useState(false)
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["soa-print-data", clientUnitId],
@@ -151,6 +236,25 @@ const StatementOfAccountPrint = () => {
   useEffect(() => {
     if (clientUnitId) logPrint(clientUnitId)
   }, [clientUnitId])
+
+  useEffect(() => {
+    if (data?.unit && !hasLoadedInitialRate) {
+      setInterestRate(getInitialInterestRate(data.unit))
+      setHasLoadedInitialRate(true)
+    }
+  }, [data?.unit, hasLoadedInitialRate])
+
+  const annualInterestRate = Math.max(toNumber(interestRate), 0)
+
+  const interestRows = useMemo(() => {
+    if (!data) return []
+
+    return buildInterestBreakdownRows(
+      data.schedule,
+      toNumber(data.totals.total_amount_payable),
+      annualInterestRate
+    )
+  }, [data, annualInterestRate])
 
   if (isLoading) {
     return <div className="soa-loading">Loading statement...</div>
@@ -165,13 +269,35 @@ const StatementOfAccountPrint = () => {
   }
 
   const unit = data.unit
+  const finalInterestBalance = interestRows.at(-1)?.ending_balance ?? toNumber(data.totals.balance)
 
   return (
     <main className="soa-page">
       <style>{printStyles}</style>
 
       <div className="no-print toolbar">
-        <button onClick={() => window.print()}>Print Statement of Account</button>
+        <div className="toolbar-left">
+          <button onClick={() => window.print()}>Print Statement of Account</button>
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={() => setShowInterestBreakdown((current) => !current)}
+          >
+            {showInterestBreakdown ? "Hide Interest Breakdown" : "Show Interest Breakdown"}
+          </button>
+        </div>
+
+        <label className="interest-control">
+          <span>Annual Interest Rate</span>
+          <input
+            min="0"
+            step="0.01"
+            type="number"
+            value={interestRate}
+            onChange={(event) => setInterestRate(event.target.value)}
+          />
+          <span>%</span>
+        </label>
       </div>
 
       <section className="sheet sheet-landscape">
@@ -230,45 +356,99 @@ const StatementOfAccountPrint = () => {
                   <td>Total Amount Payable</td>
                   <td>{amount(data.totals.total_amount_payable)}</td>
                 </tr>
+                {showInterestBreakdown ? (
+                  <tr>
+                    <td>Interest Breakdown Rate</td>
+                    <td>{annualInterestRate.toFixed(2)}% annually</td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
           </div>
         </header>
 
-        <table className="soa-table">
-          <thead>
-            <tr>
-              <th>Due Date</th>
-              <th>Description</th>
-              <th>Due Amount</th>
-              <th>Penalty</th>
-              <th>Date Paid</th>
-              <th>Amount Paid</th>
-              <th>Reference ID</th>
-              <th>Status</th>
-              <th>Running Balance</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.schedule.map((row, index) => (
-              <tr key={`${row.description}-${index}`}>
-                <td>{formatDate(row.due_date)}</td>
-                <td>{row.description}</td>
-                <td className="money strong">{amount(row.due_amount)}</td>
-                <td className="money">{Number(row.penalty || 0).toFixed(2)}</td>
-                <td>{formatDateOnly(row.date_paid)}</td>
-                <td className="money">{row.amount_paid ? amount(row.amount_paid) : ""}</td>
-                <td className="reference-cell">{displayReference(row)}</td>
-                <td>{display(row.status)}</td>
-                <td className="money strong">{amount(row.running_balance)}</td>
+        {showInterestBreakdown ? (
+          <>
+            <div className="interest-note">
+              Interest breakdown is a display-only view. Interest applies to monthly/balloon rows only.
+              Principal paid = Amount Paid - Penalty - Interest.
+            </div>
+
+            <table className="soa-table interest-table">
+              <thead>
+                <tr>
+                  <th>Due Date</th>
+                  <th>Description</th>
+                  <th>Beginning Balance</th>
+                  <th>Due Amount</th>
+                  <th>Interest</th>
+                  <th>Principal Paid</th>
+                  <th>Penalty</th>
+                  <th>Date Paid</th>
+                  <th>Amount Paid</th>
+                  <th>Reference ID</th>
+                  <th>Status</th>
+                  <th>Ending Balance</th>
+                </tr>
+              </thead>
+              <tbody>
+                {interestRows.map((row, index) => (
+                  <tr key={`${row.description}-${index}`}>
+                    <td>{formatDate(row.due_date)}</td>
+                    <td>{row.description}</td>
+                    <td className="money strong">{amount(row.beginning_balance)}</td>
+                    <td className="money strong">{amount(row.due_amount)}</td>
+                    <td className="money">{amount(row.monthly_interest)}</td>
+                    <td className="money strong">{amount(row.principal_paid)}</td>
+                    <td className="money">{Number(row.penalty || 0).toFixed(2)}</td>
+                    <td>{formatDateOnly(row.date_paid)}</td>
+                    <td className="money">{row.amount_paid ? amount(row.amount_paid) : ""}</td>
+                    <td className="reference-cell">{displayReference(row)}</td>
+                    <td>{display(row.status)}</td>
+                    <td className="money strong">{amount(row.ending_balance)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </>
+        ) : (
+          <table className="soa-table">
+            <thead>
+              <tr>
+                <th>Due Date</th>
+                <th>Description</th>
+                <th>Due Amount</th>
+                <th>Penalty</th>
+                <th>Date Paid</th>
+                <th>Amount Paid</th>
+                <th>Reference ID</th>
+                <th>Running Balance</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {data.schedule.map((row, index) => (
+                <tr key={`${row.description}-${index}`}>
+                  <td>{formatDate(row.due_date)}</td>
+                  <td>{row.description}</td>
+                  <td className="money strong">{amount(row.due_amount)}</td>
+                  <td className="money">{Number(row.penalty || 0).toFixed(2)}</td>
+                  <td>{formatDateOnly(row.date_paid)}</td>
+                  <td className="money">{row.amount_paid ? amount(row.amount_paid) : ""}</td>
+                  <td className="reference-cell">{displayReference(row)}</td>
+                  <td className="money strong">{amount(row.running_balance)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
 
         <div className="soa-total-row">
-          <span>Total amount to fully pay as of statement date</span>
-          <strong>{amount(data.totals.balance)}</strong>
+          <span>
+            {showInterestBreakdown
+              ? "Computed ending balance in interest breakdown view"
+              : "Total amount to fully pay as of statement date"}
+          </span>
+          <strong>{amount(showInterestBreakdown ? finalInterestBalance : data.totals.balance)}</strong>
         </div>
 
         <footer className="soa-footer">
@@ -295,8 +475,12 @@ const StatementOfAccountPrint = () => {
 const printStyles = `
   @page { size: A4 landscape; margin: 8mm; }
   body { background: #f8fafc; }
-  .toolbar { position: sticky; top: 0; padding: 12px; background: white; border-bottom: 1px solid #ddd; z-index: 5; }
+  .toolbar { position: sticky; top: 0; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; background: white; border-bottom: 1px solid #ddd; z-index: 5; }
+  .toolbar-left { display: flex; flex-wrap: wrap; gap: 8px; }
   .toolbar button { padding: 8px 12px; border: 1px solid #111; background: white; cursor: pointer; font-weight: 700; }
+  .toolbar .secondary-button { border-color: #2563eb; color: #1d4ed8; }
+  .interest-control { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; }
+  .interest-control input { width: 90px; border: 1px solid #cbd5e1; border-radius: 6px; padding: 7px 8px; font: inherit; }
   .soa-page { color: #111; font-family: Arial, sans-serif; }
   .sheet { margin: 16px auto; background: white; padding: 8mm; box-shadow: 0 0 0 1px #e5e7eb; }
   .sheet-landscape { width: 297mm; min-height: 210mm; }
@@ -310,11 +494,16 @@ const printStyles = `
   .top-tables th, .top-tables td { border: 1px solid #111; padding: 4px 6px; }
   .top-tables .title { font-family: Georgia, serif; font-size: 22px; text-align: center; padding: 8px; }
   .top-tables td:nth-child(2) { text-align: center; }
+  .interest-note { border: 1px solid #cbd5e1; background: #f8fafc; margin: 0 0 8px; padding: 7px 10px; font-size: 11px; font-weight: 700; }
   .soa-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .interest-table { font-size: 10px; table-layout: fixed; }
   .soa-table th { height: 42px; border: 2px solid #111; padding: 7px; text-align: center; }
   .soa-table td { border: 1px solid #222; padding: 7px; height: 21px; text-align: center; }
+  .interest-table th { height: auto; padding: 5px 3px; }
+  .interest-table td { padding: 5px 3px; }
   .soa-table td:nth-child(2) { text-align: left; }
   .reference-cell { max-width: 185px; word-break: break-word; font-size: 11px; }
+  .interest-table .reference-cell { max-width: 115px; font-size: 9px; }
   .money { text-align: right !important; white-space: nowrap; }
   .strong { font-weight: 800; }
   .soa-total-row { display: flex; justify-content: flex-end; gap: 80px; margin: 28px 0 24px; font-size: 16px; }
@@ -328,6 +517,7 @@ const printStyles = `
     body { background: white; }
     .no-print { display: none !important; }
     .sheet { margin: 0; box-shadow: none; width: auto; min-height: auto; padding: 0; }
+    .interest-note { break-after: avoid; }
   }
 `
 

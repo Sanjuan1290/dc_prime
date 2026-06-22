@@ -44,7 +44,7 @@ export const getDashboardSummary = async (req, res) => {
           0
         )
         FROM listings
-        WHERE status NOT IN ('inactive', 'superseded')
+        WHERE status IN ('available', 'reserved', 'sold', 'pending_cancellation')
       ) AS listed_lot_value,
 
       (
@@ -147,7 +147,48 @@ export const getDashboardSummary = async (req, res) => {
           WHERE cm.status <> 'cancelled'
         ),
         0
-      ) AS commission_unreleased_balance
+      ) AS commission_unreleased_balance,
+
+      (
+        SELECT COALESCE(SUM(discontinued_amount), 0)
+        FROM client_unit_cancellation_settlements
+        WHERE settlement_status = 'settled'
+          AND settlement_result IN ('discontinued', 'partial_refund')
+      ) AS discontinued_money,
+
+      (
+        SELECT COALESCE(SUM(refund_amount), 0)
+        FROM client_unit_cancellation_settlements
+        WHERE settlement_status = 'settled'
+          AND settlement_result IN ('full_refund', 'partial_refund')
+      ) AS refunded_amount,
+
+      (
+        SELECT COALESCE(SUM(refund_amount), 0)
+        FROM client_unit_cancellation_settlements
+        WHERE refund_amount > 0
+          AND settlement_status = 'approved_for_refund'
+      ) AS pending_refunds,
+
+      (
+        SELECT COUNT(*)
+        FROM client_units
+        WHERE status = 'pending_cancellation'
+          OR COALESCE(cancellation_status, 'none') IN ('pending_settlement', 'approved_for_refund')
+      ) AS pending_cancellations,
+
+      (
+        SELECT COUNT(*)
+        FROM client_units
+        WHERE status = 'cancelled'
+          AND COALESCE(cancellation_status, 'none') = 'settled'
+      ) AS cancelled_accounts,
+
+      (
+        SELECT COUNT(*)
+        FROM client_units
+        WHERE cleared_for_resale_at IS NOT NULL
+      ) AS units_cleared_for_resale
     `
   )
 
@@ -175,6 +216,12 @@ export const getDashboardSummary = async (req, res) => {
       collectionProgress,
       clientsCount: Number(summaryRow.clients_count || 0),
       pendingDocuments: Number(summaryRow.pending_documents || 0),
+      discontinuedMoney: formatDecimal(summaryRow.discontinued_money),
+      refundedAmount: formatDecimal(summaryRow.refunded_amount),
+      pendingRefunds: formatDecimal(summaryRow.pending_refunds),
+      pendingCancellations: Number(summaryRow.pending_cancellations || 0),
+      cancelledAccounts: Number(summaryRow.cancelled_accounts || 0),
+      unitsClearedForResale: Number(summaryRow.units_cleared_for_resale || 0),
       totalCommissionLiability: formatDecimal(summaryRow.total_commission_liability),
       commissionPayableNow: formatDecimal(summaryRow.commission_payable_now),
       commissionReleased: formatDecimal(summaryRow.commission_released),

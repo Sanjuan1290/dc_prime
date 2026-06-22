@@ -21,6 +21,7 @@ const toneForStatus = (status: string | null | undefined) => {
     case "pending":
     case "pending_cancellation":
     case "pending_settlement":
+    case "approved_for_refund":
     case "reserved":
     case "payable":
     case "late":
@@ -36,6 +37,7 @@ const toneForStatus = (status: string | null | undefined) => {
       }
     case "cancelled":
     case "discontinued":
+    case "approved_as_discontinued":
     case "inactive":
     case "rejected":
     case "absent":
@@ -49,7 +51,9 @@ const toneForStatus = (status: string | null | undefined) => {
       }
     case "advance":
     case "refunded":
+    case "full_refund":
     case "partial_refund":
+    case "refund_released":
     case "sold":
     case "released":
     case "fully_paid":

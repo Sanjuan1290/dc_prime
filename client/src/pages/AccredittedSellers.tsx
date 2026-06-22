@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { FiSearch, FiUserCheck, FiUsers } from "react-icons/fi"
+import { FiEye, FiPrinter, FiSearch, FiUserCheck, FiUsers } from "react-icons/fi"
 import Alert from "../components/ui/Alert"
 import EmptyState from "../components/ui/EmptyState"
 import Input from "../components/ui/Input"
@@ -48,6 +48,21 @@ type SellersResponse = {
 }
 
 const sellerStatuses = ["active", "inactive"]
+
+
+const getLocalDateInput = (date = new Date()) => {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, "0")
+  const day = String(date.getDate()).padStart(2, "0")
+
+  return `${year}-${month}-${day}`
+}
+
+const getMonthStartInput = () => {
+  const date = new Date()
+  date.setDate(1)
+  return getLocalDateInput(date)
+}
 
 const fetchSellers = async (): Promise<AccreditedSeller[]> => {
   const response = await fetch(`${API_URL}/accredited-sellers`, {
@@ -97,6 +112,9 @@ const AccredittedSellers = () => {
   const [statusFilter, setStatusFilter] = useState("all")
   const [page, setPage] = useState(1)
   const [rowsPerPage, setRowsPerPage] = useState(10)
+  const [selectedSeller, setSelectedSeller] = useState<AccreditedSeller | null>(null)
+  const [proofDateFrom, setProofDateFrom] = useState(getMonthStartInput())
+  const [proofDateTo, setProofDateTo] = useState(getLocalDateInput())
 
   const {
     data: sellers = [],
@@ -150,6 +168,32 @@ const AccredittedSellers = () => {
       agents: sellers.filter((seller) => seller.seller_role === "agent").length,
     }
   }, [sellers])
+
+
+  const openSellerDetails = (seller: AccreditedSeller) => {
+    setSelectedSeller(seller)
+    setProofDateFrom(getMonthStartInput())
+    setProofDateTo(getLocalDateInput())
+  }
+
+  const openProofOfIncomePrint = (
+    seller = selectedSeller,
+    dateFrom = proofDateFrom,
+    dateTo = proofDateTo
+  ) => {
+    if (!seller) return
+
+    const params = new URLSearchParams({
+      date_from: dateFrom,
+      date_to: dateTo,
+    })
+
+    window.open(
+      `/accredited-sellers/${seller.id}/proof-of-income/print?${params.toString()}`,
+      "_blank",
+      "noopener,noreferrer"
+    )
+  }
 
   const roleStats = [
     { label: "BNM", value: stats.bnm, role: "Broker Network Manager" },
@@ -281,6 +325,7 @@ const AccredittedSellers = () => {
               <th className="px-4 py-3 text-left">Seller Group / Commission Setup</th>
               <th className="px-4 py-3 text-left">Accreditation</th>
               <th className="px-4 py-3 text-left">Status</th>
+              <th className="px-4 py-3 text-left">Actions</th>
             </tr>
           </thead>
 
@@ -316,12 +361,25 @@ const AccredittedSellers = () => {
                 <td className="px-4 py-3 text-slate-600">{formatDate(seller.accreditation_date)}</td>
 
                 <td className="px-4 py-3"><StatusBadge status={seller.status} /></td>
+
+                <td className="px-4 py-3">
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+                      onClick={() => openSellerDetails(seller)}
+                    >
+                      <FiEye />
+                      Details
+                    </button>
+                  </div>
+                </td>
               </tr>
             ))}
 
             {paginatedSellers.length === 0 ? (
               <tr>
-                <td colSpan={7}>
+                <td colSpan={8}>
                   <EmptyState
                     title="No sellers found"
                     description="Create broker, manager, and agent accounts from User Management. Seller records will be linked automatically."
@@ -340,6 +398,94 @@ const AccredittedSellers = () => {
         onPageChange={setPage}
         onRowsPerPageChange={setRowsPerPage}
       />
+
+      {selectedSeller ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-3xl overflow-hidden rounded-2xl bg-white shadow-[0_28px_90px_rgba(15,23,42,0.45)] ring-1 ring-slate-900/10">
+            <div className="border-b border-slate-200 bg-slate-50 px-6 py-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900">Seller Details</h2>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Review seller profile and print proof of income for a selected date range.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-semibold text-slate-600 transition hover:bg-white"
+                  onClick={() => setSelectedSeller(null)}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+
+            <div className="grid max-h-[72vh] gap-5 overflow-y-auto p-6 lg:grid-cols-[1fr_1fr]">
+              <section className="rounded-xl border border-slate-200 p-4">
+                <h3 className="text-sm font-bold uppercase tracking-wide text-slate-500">Profile</h3>
+                <dl className="mt-4 space-y-3 text-sm">
+                  <div>
+                    <dt className="text-xs font-semibold uppercase text-slate-400">Seller Name</dt>
+                    <dd className="font-semibold text-slate-900">{selectedSeller.full_name}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs font-semibold uppercase text-slate-400">Role</dt>
+                    <dd className="text-slate-700">{formatText(selectedSeller.seller_role)}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs font-semibold uppercase text-slate-400">Reports Under</dt>
+                    <dd className="text-slate-700">{getHierarchyPath(selectedSeller)}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs font-semibold uppercase text-slate-400">Seller Group</dt>
+                    <dd className="text-slate-700">{selectedSeller.seller_group_name || "No seller group"}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs font-semibold uppercase text-slate-400">Accreditation Date</dt>
+                    <dd className="text-slate-700">{formatDate(selectedSeller.accreditation_date)}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs font-semibold uppercase text-slate-400">Status</dt>
+                    <dd className="mt-1"><StatusBadge status={selectedSeller.status} /></dd>
+                  </div>
+                </dl>
+              </section>
+
+              <section className="rounded-xl border border-blue-100 bg-blue-50 p-4">
+                <h3 className="text-sm font-bold uppercase tracking-wide text-blue-700">Proof of Income</h3>
+                <p className="mt-2 text-sm text-blue-700/80">
+                  This printout includes released commissions, cash advance deductions, and cash advances issued within the selected period.
+                </p>
+
+                <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <Input
+                    label="From"
+                    type="date"
+                    value={proofDateFrom}
+                    onChange={(event) => setProofDateFrom(event.target.value)}
+                  />
+                  <Input
+                    label="To"
+                    type="date"
+                    value={proofDateTo}
+                    onChange={(event) => setProofDateTo(event.target.value)}
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700"
+                  onClick={() => openProofOfIncomePrint()}
+                >
+                  <FiPrinter />
+                  Print Proof of Income
+                </button>
+              </section>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
     </div>
   )
 }

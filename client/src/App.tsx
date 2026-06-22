@@ -26,6 +26,7 @@ import MyTeam from "./pages/MyTeam"
 import AvailableUnits from "./pages/AvailableUnits"
 import SellerDashboard from "./pages/SellerDashboard"
 import ChangePassword from "./pages/ChangePassword"
+import ProjectPriceListPrint from "./pages/ProjectPriceListPrint"
 
 
 const App = () => {
@@ -36,7 +37,8 @@ const App = () => {
       </Route>
 
       <Route element={<SystemLayout />}>
-        <Route path="dashboard" element={<Dashboard />} />
+        <Route path="dashboard" element
+        ={<Dashboard />} />
         <Route path="projects" element={<Projects/>} />
         <Route path="listings" element={<Listings/>} />
         <Route path="clients" element={<Clients/>} />
@@ -61,6 +63,7 @@ const App = () => {
 
       <Route path="client/:clientId/units/:clientUnitId/offer-to-buy/print" element={<OfferToBuyPrint />} />
       <Route path="client/:clientId/units/:clientUnitId/statement-of-account/print" element={<StatementOfAccountPrint />} />
+      <Route path="projects/:projectId/price-list/print" element={<ProjectPriceListPrint />} />
 
       <Route path="*" element={<NotFound />}/>
     </>

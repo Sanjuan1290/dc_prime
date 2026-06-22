@@ -179,25 +179,74 @@ const validateDueDay = (dueDay) => {
 const listingStatusFromClientUnitStatus = (status) => {
   if (status === 'reserved') return 'reserved'
   if (status === 'active' || status === 'past_due') return 'sold'
-  if (status === 'pending_cancellation') return 'pending_cancellation'
-  if (status === 'cancelled') return 'cancelled'
+  if (status === 'pending_cancellation' || status === 'cancelled') return 'pending_cancellation'
   if (status === 'fully_paid' || status === 'closed') return 'sold'
 
   return null
 }
 
 const cancellationResults = [
-  'refunded',
+  'pending_settlement',
+  'full_refund',
   'partial_refund',
   'discontinued',
-  'no_refund',
-  'pending_settlement',
+]
+
+const settlementStatuses = [
+  'draft',
+  'pending_review',
+  'approved_for_refund',
+  'refund_released',
+  'approved_as_discontinued',
+  'settled',
+  'voided',
 ]
 
 const normalizeCancellationResult = (value) => {
   if (isMissing(value)) return null
   const normalized = String(value).trim().toLowerCase()
+  if (normalized === 'refunded') return 'full_refund'
+  if (normalized === 'no_refund') return 'discontinued'
   return cancellationResults.includes(normalized) ? normalized : null
+}
+
+const deriveCancellationResult = (totalPaid, refundAmount) => {
+  const safeTotalPaid = normalizeMoney(totalPaid)
+  const safeRefundAmount = normalizeMoney(refundAmount)
+
+  if (safeTotalPaid <= 0 || safeRefundAmount <= 0) return 'discontinued'
+  if (safeRefundAmount >= safeTotalPaid) return 'full_refund'
+  return 'partial_refund'
+}
+
+const getVerifiedPaidTotal = async (connectionOrDb, clientUnitId) => {
+  const [paymentRows] = await connectionOrDb.query(
+    `
+    SELECT COALESCE(SUM(amount), 0) AS total_paid
+    FROM payments
+    WHERE client_unit_id = ?
+      AND status = 'verified'
+    `,
+    [clientUnitId]
+  )
+
+  return normalizeMoney(paymentRows[0]?.total_paid || 0)
+}
+
+const getLatestCancellationSettlement = async (connectionOrDb, clientUnitId) => {
+  const [rows] = await connectionOrDb.query(
+    `
+    SELECT *
+    FROM client_unit_cancellation_settlements
+    WHERE client_unit_id = ?
+      AND settlement_status <> 'voided'
+    ORDER BY id DESC
+    LIMIT 1
+    `,
+    [clientUnitId]
+  )
+
+  return rows[0] || null
 }
 
 const validateClientUnitStatus = (status) => {
@@ -529,13 +578,21 @@ const calculateMonthlyAmortization = ({
   termsMonths,
   interestRate,
 }) => {
-  if (!termsMonths) return null
+  const principal = normalizeMoney(Math.max(Number(balance || 0), 0))
+  const months = Number(termsMonths || 0)
 
-  const balanceWithInterest = normalizeMoney(
-    balance + balance * (Number(interestRate || 0) / 100)
-  )
+  if (!months || months <= 0) return null
+  if (principal <= 0) return 0
 
-  return normalizeMoney(balanceWithInterest / termsMonths)
+  const monthlyRate = Math.max(Number(interestRate || 0), 0) / 100 / 12
+
+  if (monthlyRate <= 0) {
+    return normalizeMoney(principal / months)
+  }
+
+  const growth = Math.pow(1 + monthlyRate, months)
+
+  return normalizeMoney((principal * monthlyRate * growth) / (growth - 1))
 }
 
 const buildReservationTerms = ({
@@ -710,7 +767,7 @@ const buildReservationTerms = ({
     finalPaymentTermsMonths = parsedTermsMonths
 
     const interestRateValidation = validateNonNegativeRate(
-      interestRate,
+      isMissing(interestRate) ? Number(listing.annual_interest_rate || 0) : interestRate,
       'Interest rate'
     )
 
@@ -882,6 +939,26 @@ const clientUnitFields = `
   cu.monthly_amortization,
   cu.contract_processing_status,
   cu.status,
+  COALESCE(cu.cancellation_status, 'none') AS cancellation_status,
+  cu.cancellation_result,
+  DATE_FORMAT(cu.cancellation_date, '%Y-%m-%d') AS cancellation_date,
+  cu.cancellation_reason,
+  COALESCE(cu.total_paid_by_client, 0) AS total_paid_by_client,
+  COALESCE(cu.refund_amount, 0) AS refund_amount,
+  COALESCE(cu.discontinued_amount, 0) AS discontinued_amount,
+  DATE_FORMAT(cu.settlement_date, '%Y-%m-%d') AS settlement_date,
+  cu.cancellation_remarks,
+  cu.refund_released_at,
+  cu.cleared_for_resale_at,
+  settlement.id AS cancellation_settlement_id,
+  settlement.settlement_result,
+  settlement.settlement_status,
+  COALESCE(settlement.total_paid_snapshot, COALESCE(cu.total_paid_by_client, 0)) AS settlement_total_paid_snapshot,
+  COALESCE(settlement.refund_amount, COALESCE(cu.refund_amount, 0)) AS settlement_refund_amount,
+  COALESCE(settlement.discontinued_amount, COALESCE(cu.discontinued_amount, 0)) AS settlement_discontinued_amount,
+  settlement.approved_at AS settlement_approved_at,
+  settlement.refund_released_at AS settlement_refund_released_at,
+  settlement.cleared_for_resale_at AS settlement_cleared_for_resale_at,
   cu.assigned_user_id,
   u.full_name AS assigned_user_name,
   cu.seller_id,
@@ -918,6 +995,17 @@ const clientUnitJoins = `
   LEFT JOIN users u ON u.id = cu.assigned_user_id
   LEFT JOIN accredited_sellers seller ON seller.id = cu.seller_id
   LEFT JOIN accredited_sellers parent_seller ON parent_seller.id = seller.parent_seller_id
+  LEFT JOIN (
+    SELECT s1.*
+    FROM client_unit_cancellation_settlements s1
+    INNER JOIN (
+      SELECT client_unit_id, MAX(id) AS max_id
+      FROM client_unit_cancellation_settlements
+      WHERE settlement_status <> 'voided'
+      GROUP BY client_unit_id
+    ) latest_settlement
+      ON latest_settlement.max_id = s1.id
+  ) settlement ON settlement.client_unit_id = cu.id
   LEFT JOIN client_buyers unit_co_buyer
     ON unit_co_buyer.client_unit_id = cu.id
   LEFT JOIN client_employment_details unit_co_buyer_work
@@ -1498,6 +1586,7 @@ export const getAvailableListings = async (req, res) => {
       l.price_per_sqm,
       l.lot_area_sqm,
       l.legal_misc_rate,
+      COALESCE(l.annual_interest_rate, 0) AS annual_interest_rate,
       l.net_selling_price,
       l.legal_misc_fee,
       l.total_contract_price,
@@ -2450,31 +2539,408 @@ export const cancelClientUnit = async (req, res) => {
     })
   }
 
+  if (existingClientUnit.status === 'pending_cancellation') {
+    return res.status(409).json({
+      message: 'This account is already pending cancellation. Continue the settlement review instead.',
+    })
+  }
+
   const connection = await db.getConnection()
 
   try {
     await connection.beginTransaction()
+
+    const totalPaid = await getVerifiedPaidTotal(connection, id)
+
+    await connection.query(
+      `
+      UPDATE client_units
+      SET
+        status = 'pending_cancellation',
+        cancellation_status = 'pending_settlement',
+        cancellation_result = 'pending_settlement',
+        cancellation_date = COALESCE(cancellation_date, CURDATE()),
+        cancellation_reason = COALESCE(?, cancellation_reason),
+        total_paid_by_client = ?,
+        refund_amount = 0.00,
+        discontinued_amount = 0.00,
+        settlement_date = NULL,
+        cancellation_approved_by = NULL,
+        cancellation_remarks = NULL,
+        refund_released_by = NULL,
+        refund_released_at = NULL,
+        cleared_for_resale_by = NULL,
+        cleared_for_resale_at = NULL
+      WHERE id = ?
+      `,
+      [nullableValue(reason), totalPaid, id]
+    )
+
+    await connection.query(
+      `
+      UPDATE listings
+      SET status = 'pending_cancellation'
+      WHERE id = ?
+      `,
+      [existingClientUnit.listing_id]
+    )
+
+    await connection.query(
+      `
+      INSERT INTO client_unit_cancellation_settlements (
+        client_unit_id,
+        client_id,
+        listing_id,
+        total_paid_snapshot,
+        refund_amount,
+        discontinued_amount,
+        settlement_result,
+        settlement_status,
+        reason
+      ) VALUES (?, ?, ?, ?, 0.00, 0.00, 'pending_settlement', 'pending_review', ?)
+      `,
+      [
+        id,
+        existingClientUnit.client_id,
+        existingClientUnit.listing_id,
+        totalPaid,
+        nullableValue(reason),
+      ]
+    )
+
+    await connection.query(
+      `
+      UPDATE commission_releases cr
+      INNER JOIN commissions cm ON cm.id = cr.commission_id
+      SET cr.status = 'on_hold'
+      WHERE cm.client_unit_id = ?
+        AND cr.status IN ('pending', 'eligible')
+      `,
+      [id]
+    )
+
+    await connection.query(
+      `
+      UPDATE commissions
+      SET status = 'on_hold'
+      WHERE client_unit_id = ?
+        AND status IN ('active', 'pending', 'approved', 'partially_released')
+      `,
+      [id]
+    )
+
+    await connection.commit()
+
+    await safeCreateAuditLog({
+      userId: req.user.id,
+      action: 'start_cancellation',
+      module: 'Client Units',
+      description: `Started cancellation review for client unit ${id}${reason ? `: ${reason}` : ''}`,
+      ipAddress: getClientIp(req),
+    })
+
+    return res.status(200).json({
+      message: 'Cancellation review started. Listing is locked as pending cancellation until settlement is completed.',
+      data: {
+        clientUnitId: Number(id),
+        listing_status: 'pending_cancellation',
+        client_unit_status: 'pending_cancellation',
+        cancellation_status: 'pending_settlement',
+        total_paid: totalPaid,
+      },
+    })
+  } catch (err) {
+    await connection.rollback()
+    throw err
+  } finally {
+    connection.release()
+  }
+}
+
+export const updateCancellationSettlement = async (req, res) => {
+  const { id } = req.params
+  const {
+    refund_amount,
+    cancellation_remarks,
+  } = req.body
+
+  const existingClientUnit = await getClientUnitById(id)
+
+  if (!existingClientUnit) {
+    return res.status(404).json({
+      message: 'Client unit not found',
+    })
+  }
+
+  if (!['pending_cancellation', 'cancelled'].includes(existingClientUnit.status)) {
+    return res.status(400).json({
+      message: 'Start cancellation first before setting refund or discontinued money.',
+    })
+  }
+
+  const totalPaid = await getVerifiedPaidTotal(db, id)
+  const refundValidation = validateNonNegativeMoney(refund_amount, 'Refund amount', {
+    required: true,
+  })
+
+  if (!refundValidation.isValid) {
+    return res.status(400).json({
+      message: refundValidation.message,
+    })
+  }
+
+  const finalRefundAmount = refundValidation.value
+
+  if (finalRefundAmount > totalPaid) {
+    return res.status(400).json({
+      message: 'Refund amount cannot be greater than total verified payments.',
+      data: {
+        total_paid: totalPaid,
+        refund_amount: finalRefundAmount,
+      },
+    })
+  }
+
+  const finalDiscontinuedAmount = normalizeMoney(totalPaid - finalRefundAmount)
+  const resultValue = deriveCancellationResult(totalPaid, finalRefundAmount)
+  const nextSettlementStatus =
+    finalRefundAmount > 0 ? 'approved_for_refund' : 'settled'
+  const nextCancellationStatus =
+    finalRefundAmount > 0 ? 'approved_for_refund' : 'settled'
+  const settlementDate = finalRefundAmount > 0 ? null : new Date().toISOString().slice(0, 10)
+
+  const connection = await db.getConnection()
+
+  try {
+    await connection.beginTransaction()
+
+    let settlement = await getLatestCancellationSettlement(connection, id)
+
+    if (!settlement) {
+      await connection.query(
+        `
+        INSERT INTO client_unit_cancellation_settlements (
+          client_unit_id,
+          client_id,
+          listing_id,
+          total_paid_snapshot,
+          refund_amount,
+          discontinued_amount,
+          settlement_result,
+          settlement_status,
+          reason,
+          remarks,
+          approved_by,
+          approved_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+        `,
+        [
+          id,
+          existingClientUnit.client_id,
+          existingClientUnit.listing_id,
+          totalPaid,
+          finalRefundAmount,
+          finalDiscontinuedAmount,
+          resultValue,
+          nextSettlementStatus,
+          nullableValue(existingClientUnit.cancellation_reason),
+          nullableValue(cancellation_remarks),
+          req.user.id,
+        ]
+      )
+    } else {
+      if (settlement.settlement_status === 'settled') {
+        return res.status(409).json({
+          message: 'This cancellation settlement is already settled.',
+        })
+      }
+
+      await connection.query(
+        `
+        UPDATE client_unit_cancellation_settlements
+        SET
+          total_paid_snapshot = ?,
+          refund_amount = ?,
+          discontinued_amount = ?,
+          settlement_result = ?,
+          settlement_status = ?,
+          remarks = ?,
+          approved_by = ?,
+          approved_at = NOW(),
+          refund_released_by = NULL,
+          refund_released_at = NULL,
+          cleared_for_resale_by = NULL,
+          cleared_for_resale_at = NULL
+        WHERE id = ?
+        `,
+        [
+          totalPaid,
+          finalRefundAmount,
+          finalDiscontinuedAmount,
+          resultValue,
+          nextSettlementStatus,
+          nullableValue(cancellation_remarks),
+          req.user.id,
+          settlement.id,
+        ]
+      )
+    }
+
+    await connection.query(
+      `
+      UPDATE client_units
+      SET
+        status = CASE WHEN ? = 'settled' THEN 'cancelled' ELSE 'pending_cancellation' END,
+        cancellation_status = ?,
+        cancellation_result = ?,
+        total_paid_by_client = ?,
+        refund_amount = ?,
+        discontinued_amount = ?,
+        settlement_date = ?,
+        cancellation_approved_by = ?,
+        cancellation_remarks = ?,
+        refund_released_by = NULL,
+        refund_released_at = NULL
+      WHERE id = ?
+      `,
+      [
+        nextCancellationStatus,
+        nextCancellationStatus,
+        resultValue,
+        totalPaid,
+        finalRefundAmount,
+        finalDiscontinuedAmount,
+        settlementDate,
+        req.user.id,
+        nullableValue(cancellation_remarks),
+        id,
+      ]
+    )
+
+    await connection.query(
+      `
+      UPDATE listings
+      SET status = 'pending_cancellation'
+      WHERE id = ?
+      `,
+      [existingClientUnit.listing_id]
+    )
+
+    if (nextSettlementStatus === 'settled') {
+      await connection.query(
+        `
+        UPDATE commission_releases cr
+        INNER JOIN commissions cm ON cm.id = cr.commission_id
+        SET cr.status = 'cancelled'
+        WHERE cm.client_unit_id = ?
+          AND cr.status <> 'released'
+        `,
+        [id]
+      )
+
+      await connection.query(
+        `
+        UPDATE commissions
+        SET status = 'cancelled'
+        WHERE client_unit_id = ?
+          AND status <> 'released'
+        `,
+        [id]
+      )
+    }
+
+    await connection.commit()
+  } catch (err) {
+    await connection.rollback()
+    throw err
+  } finally {
+    connection.release()
+  }
+
+  await safeCreateAuditLog({
+    userId: req.user.id,
+    action: 'approve_cancellation_settlement',
+    module: 'Client Units',
+    description: `Approved cancellation settlement for client unit ${id}: refund ${finalRefundAmount}, discontinued ${finalDiscontinuedAmount}`,
+    ipAddress: getClientIp(req),
+  })
+
+  return res.status(200).json({
+    message:
+      finalRefundAmount > 0
+        ? 'Refund amount saved. Mark the refund as released before clearing this unit for resale.'
+        : 'Discontinued settlement completed. You may now clear the listing for resale.',
+    data: {
+      clientUnitId: Number(id),
+      total_paid: totalPaid,
+      refund_amount: finalRefundAmount,
+      discontinued_amount: finalDiscontinuedAmount,
+      cancellation_result: resultValue,
+      settlement_status: nextSettlementStatus,
+    },
+  })
+}
+
+export const releaseCancellationRefund = async (req, res) => {
+  const { id } = req.params
+
+  const existingClientUnit = await getClientUnitById(id)
+
+  if (!existingClientUnit) {
+    return res.status(404).json({
+      message: 'Client unit not found',
+    })
+  }
+
+  const connection = await db.getConnection()
+
+  try {
+    await connection.beginTransaction()
+
+    const settlement = await getLatestCancellationSettlement(connection, id)
+
+    if (!settlement) {
+      return res.status(404).json({
+        message: 'Cancellation settlement not found',
+      })
+    }
+
+    if (settlement.settlement_status !== 'approved_for_refund') {
+      return res.status(400).json({
+        message: 'Refund must be approved before it can be marked as released.',
+      })
+    }
+
+    if (Number(settlement.refund_amount || 0) <= 0) {
+      return res.status(400).json({
+        message: 'This settlement has no refund amount to release.',
+      })
+    }
+
+    await connection.query(
+      `
+      UPDATE client_unit_cancellation_settlements
+      SET
+        settlement_status = 'settled',
+        refund_released_by = ?,
+        refund_released_at = NOW()
+      WHERE id = ?
+      `,
+      [req.user.id, settlement.id]
+    )
 
     await connection.query(
       `
       UPDATE client_units
       SET
         status = 'cancelled',
-        cancellation_status = 'cancelled',
-        cancellation_date = COALESCE(cancellation_date, CURDATE()),
-        cancellation_reason = COALESCE(?, cancellation_reason)
+        cancellation_status = 'settled',
+        settlement_date = CURDATE(),
+        refund_released_by = ?,
+        refund_released_at = NOW()
       WHERE id = ?
       `,
-      [nullableValue(reason), id]
-    )
-
-    await connection.query(
-      `
-      UPDATE listings
-      SET status = 'cancelled'
-      WHERE id = ?
-      `,
-      [existingClientUnit.listing_id]
+      [req.user.id, id]
     )
 
     await connection.query(
@@ -2499,143 +2965,26 @@ export const cancelClientUnit = async (req, res) => {
     )
 
     await connection.commit()
-
-    await safeCreateAuditLog({
-      userId: req.user.id,
-      action: 'cancel',
-      module: 'Client Units',
-      description: `Cancelled client unit ${id}${reason ? `: ${reason}` : ''}`,
-      ipAddress: getClientIp(req),
-    })
-
-    return res.status(200).json({
-      message: 'Client unit cancelled successfully. Listing is now cancelled and must be settled before resale.',
-      data: {
-        clientUnitId: Number(id),
-        listing_status: 'cancelled',
-      },
-    })
   } catch (err) {
     await connection.rollback()
     throw err
   } finally {
     connection.release()
   }
-}
-
-export const updateCancellationSettlement = async (req, res) => {
-  const { id } = req.params
-  const {
-    cancellation_result,
-    refund_amount,
-    discontinued_amount,
-    settlement_date,
-    cancellation_remarks,
-  } = req.body
-
-  const resultValue = normalizeCancellationResult(cancellation_result)
-
-  if (!resultValue) {
-    return res.status(400).json({
-      message: 'Valid cancellation result is required',
-    })
-  }
-
-  const existingClientUnit = await getClientUnitById(id)
-
-  if (!existingClientUnit) {
-    return res.status(404).json({
-      message: 'Client unit not found',
-    })
-  }
-
-  const [paymentRows] = await db.query(
-    `
-    SELECT COALESCE(SUM(amount), 0) AS total_paid
-    FROM payments
-    WHERE client_unit_id = ?
-      AND status = 'verified'
-    `,
-    [id]
-  )
-
-  const totalPaid = normalizeMoney(paymentRows[0]?.total_paid || 0)
-  const suppliedRefund = nullableNumber(refund_amount)
-  const suppliedDiscontinued = nullableNumber(discontinued_amount)
-
-  let finalRefundAmount = suppliedRefund ?? 0
-  let finalDiscontinuedAmount = suppliedDiscontinued ?? 0
-
-  if (suppliedRefund !== null && suppliedDiscontinued === null) {
-    finalDiscontinuedAmount = Math.max(normalizeMoney(totalPaid - suppliedRefund), 0)
-  } else if (suppliedRefund === null && suppliedDiscontinued !== null) {
-    finalRefundAmount = Math.max(normalizeMoney(totalPaid - suppliedDiscontinued), 0)
-  }
-
-  if (finalRefundAmount < 0 || finalDiscontinuedAmount < 0) {
-    return res.status(400).json({
-      message: 'Refund and discontinued amounts cannot be negative',
-    })
-  }
-
-  if (normalizeMoney(finalRefundAmount + finalDiscontinuedAmount) !== totalPaid) {
-    return res.status(400).json({
-      message: 'Refund amount plus discontinued amount must equal total verified payments',
-      data: {
-        total_paid: totalPaid,
-        refund_amount: finalRefundAmount,
-        discontinued_amount: finalDiscontinuedAmount,
-      },
-    })
-  }
-
-  await db.query(
-    `
-    UPDATE client_units
-    SET
-      status = 'cancelled',
-      cancellation_status = CASE
-        WHEN ? = 'pending_settlement' THEN 'cancelled'
-        ELSE 'settled'
-      END,
-      cancellation_result = ?,
-      total_paid_by_client = ?,
-      refund_amount = ?,
-      discontinued_amount = ?,
-      settlement_date = ?,
-      cancellation_approved_by = ?,
-      cancellation_remarks = ?
-    WHERE id = ?
-    `,
-    [
-      resultValue,
-      resultValue,
-      totalPaid,
-      finalRefundAmount,
-      finalDiscontinuedAmount,
-      nullableValue(settlement_date),
-      req.user.id,
-      nullableValue(cancellation_remarks),
-      id,
-    ]
-  )
 
   await safeCreateAuditLog({
     userId: req.user.id,
-    action: 'settle_cancellation',
+    action: 'release_cancellation_refund',
     module: 'Client Units',
-    description: `Updated cancellation settlement for client unit ${id}`,
+    description: `Marked cancellation refund as released for client unit ${id}`,
     ipAddress: getClientIp(req),
   })
 
   return res.status(200).json({
-    message: 'Cancellation settlement updated successfully',
+    message: 'Refund marked as released. You may now clear the listing for resale.',
     data: {
       clientUnitId: Number(id),
-      total_paid: totalPaid,
-      refund_amount: finalRefundAmount,
-      discontinued_amount: finalDiscontinuedAmount,
-      cancellation_result: resultValue,
+      settlement_status: 'settled',
     },
   })
 }
@@ -2648,14 +2997,31 @@ export const clearClientUnitForResale = async (req, res) => {
     SELECT
       cu.id,
       cu.listing_id,
-      cu.cancellation_status,
+      cu.status,
+      COALESCE(cu.cancellation_status, 'none') AS cancellation_status,
       cu.cancellation_result,
       cu.settlement_date,
       cu.refund_amount,
       cu.discontinued_amount,
-      l.status AS listing_status
+      cu.cleared_for_resale_at,
+      l.status AS listing_status,
+      settlement.id AS settlement_id,
+      settlement.settlement_status,
+      settlement.settlement_result,
+      settlement.refund_amount AS settlement_refund_amount,
+      settlement.discontinued_amount AS settlement_discontinued_amount
     FROM client_units cu
     INNER JOIN listings l ON l.id = cu.listing_id
+    LEFT JOIN (
+      SELECT s1.*
+      FROM client_unit_cancellation_settlements s1
+      INNER JOIN (
+        SELECT client_unit_id, MAX(id) AS max_id
+        FROM client_unit_cancellation_settlements
+        WHERE settlement_status <> 'voided'
+        GROUP BY client_unit_id
+      ) latest_settlement ON latest_settlement.max_id = s1.id
+    ) settlement ON settlement.client_unit_id = cu.id
     WHERE cu.id = ?
     LIMIT 1
     `,
@@ -2671,16 +3037,18 @@ export const clearClientUnitForResale = async (req, res) => {
   }
 
   const isSettled =
-    clientUnit.cancellation_status === 'settled' &&
-    clientUnit.cancellation_result &&
-    clientUnit.cancellation_result !== 'pending_settlement' &&
-    clientUnit.settlement_date &&
-    (Number(clientUnit.refund_amount || 0) > 0 ||
-      Number(clientUnit.discontinued_amount || 0) >= 0)
+    clientUnit.settlement_status === 'settled' ||
+    clientUnit.cancellation_status === 'settled'
 
   if (!isSettled) {
     return res.status(400).json({
-      message: 'Cancellation must be settled before clearing the listing for resale',
+      message: 'Cancellation settlement must be settled before clearing the listing for resale.',
+    })
+  }
+
+  if (clientUnit.cleared_for_resale_at) {
+    return res.status(409).json({
+      message: 'This listing was already cleared for resale.',
     })
   }
 
@@ -2702,12 +3070,27 @@ export const clearClientUnitForResale = async (req, res) => {
       `
       UPDATE client_units
       SET
+        status = 'cancelled',
+        cancellation_status = 'settled',
         cleared_for_resale_at = NOW(),
         cleared_for_resale_by = ?
       WHERE id = ?
       `,
       [req.user.id, id]
     )
+
+    if (clientUnit.settlement_id) {
+      await connection.query(
+        `
+        UPDATE client_unit_cancellation_settlements
+        SET
+          cleared_for_resale_at = NOW(),
+          cleared_for_resale_by = ?
+        WHERE id = ?
+        `,
+        [req.user.id, clientUnit.settlement_id]
+      )
+    }
 
     await connection.commit()
   } catch (err) {
@@ -2726,7 +3109,7 @@ export const clearClientUnitForResale = async (req, res) => {
   })
 
   return res.status(200).json({
-    message: 'Listing cleared for resale successfully',
+    message: 'Listing cleared for resale successfully. Cancelled buyer account remains as history.',
     data: {
       clientUnitId: Number(id),
       listing_id: Number(clientUnit.listing_id),

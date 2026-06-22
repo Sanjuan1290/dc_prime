@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { Cell, Pie, PieChart, Tooltip } from "recharts";
 import {
   FiEdit2,
@@ -37,8 +38,6 @@ type ListingStatus =
   | "reserved"
   | "sold"
   | "pending_cancellation"
-  | "cancelled"
-  | "inactive"
   | string;
 
 type Listing = {
@@ -58,6 +57,7 @@ type Listing = {
   price_per_sqm: number | string;
   lot_area_sqm: number | string;
   legal_misc_rate: number | string;
+  annual_interest_rate?: number | string | null;
   net_selling_price: number | string;
   legal_misc_fee: number | string;
   total_contract_price: number | string;
@@ -187,6 +187,7 @@ type ListingFormData = {
   price_per_sqm: number;
   lot_area_sqm: number;
   legal_misc_rate: number;
+  annual_interest_rate: number;
   status: ListingStatus;
 };
 
@@ -196,6 +197,18 @@ type ListingsResponse = {
 
 type ProjectsResponse = {
   projects: Project[];
+};
+
+type ClientOption = {
+  id: number;
+  full_name: string;
+  email?: string | null;
+  contact_no?: string | null;
+};
+
+type ClientsResponse = {
+  clients?: ClientOption[];
+  data?: ClientOption[];
 };
 
 const defaultListingFormData: ListingFormData = {
@@ -208,6 +221,7 @@ const defaultListingFormData: ListingFormData = {
   price_per_sqm: 0,
   lot_area_sqm: 0,
   legal_misc_rate: 10,
+  annual_interest_rate: 0,
   status: "available",
 };
 
@@ -217,8 +231,6 @@ const statusFilters = [
   { label: "Reserved", value: "reserved" },
   { label: "Sold", value: "sold" },
   { label: "Pending Cancellation", value: "pending_cancellation" },
-  { label: "Cancelled", value: "cancelled" },
-  { label: "Inactive", value: "inactive" },
 ];
 
 const normalLotTypes = ["inner", "corner", "end"];
@@ -312,9 +324,38 @@ const formulaTooltips: Record<string, string> = {
   "20 Months": "20 Months = 75% Balance ÷ 20.",
   Project: "Project name. Value comes from listing.project_name.",
   Status:
-    "Listing status. Example: available, reserved, sold, pending cancellation, cancelled, inactive.",
+    "Listing status. Example: available, reserved, sold, pending cancellation.",
   Actions: "Row actions: Details, Edit, Delete.",
 };
+
+const isReservedUnitIdentityMessage = (message = "") => {
+  const normalized = message.toLowerCase()
+
+  return (
+    normalized.includes('old unit id') ||
+    normalized.includes('old unit ids') ||
+    normalized.includes('reserved for unit history') ||
+    normalized.includes('cannot be reused') ||
+    normalized.includes('reserved_unit_identity')
+  )
+}
+
+const isDuplicateListingMessage = (message = "") => {
+  const normalized = message.toLowerCase()
+
+  return (
+    normalized.includes('duplicate') ||
+    normalized.includes('already exists') ||
+    normalized.includes('duplicate_listing') ||
+    isReservedUnitIdentityMessage(message)
+  )
+}
+
+const getListingSaveErrorTitle = (message = "") => {
+  if (isReservedUnitIdentityMessage(message)) return "Unit ID cannot be reused"
+  if (isDuplicateListingMessage(message)) return "Listing already exists"
+  return "Unable to save listing"
+}
 
 const FormulaHeader = ({ label }: { label: string }) => {
   return (
@@ -353,6 +394,19 @@ const fetchProjects = async () => {
 
   const data = (await response.json()) as ProjectsResponse;
   return data.projects;
+};
+
+const fetchClients = async () => {
+  const response = await fetch(`${API_URL}/clients`, {
+    credentials: "include",
+  });
+
+  if (!response.ok) {
+    throw new Error(await getErrorMessage(response));
+  }
+
+  const data = (await response.json()) as ClientsResponse;
+  return data.clients || data.data || [];
 };
 
 const fetchListingFullDetails = async (listingId: number) => {
@@ -544,6 +598,7 @@ const listingToFormData = (listing: Listing): ListingFormData => ({
   price_per_sqm: Number(listing.price_per_sqm || 0),
   lot_area_sqm: Number(listing.lot_area_sqm || 0),
   legal_misc_rate: Number(listing.legal_misc_rate || 10),
+  annual_interest_rate: Number(listing.annual_interest_rate || 0),
   status: listing.status,
 });
 
@@ -582,7 +637,7 @@ const calculateListingBreakdown = (listingData: ListingFormData) => {
 const hasAttachedClientUnit = (listing: Listing) => {
   return (
     Boolean(Number(listing.has_active_client_unit || 0)) ||
-    ["reserved", "sold", "pending_cancellation", "cancelled"].includes(String(listing.status))
+    ["reserved", "sold", "pending_cancellation"].includes(String(listing.status))
   );
 };
 
@@ -634,6 +689,7 @@ const getProjectCadastralLots = (projects: Project[], projectId: number) => {
 };
 
 const Listings = () => {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
 
   const [searchInput, setSearchInput] = useState("");
@@ -648,6 +704,8 @@ const Listings = () => {
   );
   const [editListing, setEditListing] = useState<Listing | null>(null);
   const [listingToDelete, setListingToDelete] = useState<Listing | null>(null);
+  const [reserveListing, setReserveListing] = useState<Listing | null>(null);
+  const [reserveClientId, setReserveClientId] = useState<number | "">("");
   const [pendingLmfUpdate, setPendingLmfUpdate] = useState<{
     id: number;
     listingData: ListingFormData;
@@ -689,6 +747,11 @@ const Listings = () => {
   const { data: projects = [] } = useQuery({
     queryKey: ["projects"],
     queryFn: fetchProjects,
+  });
+
+  const { data: clients = [] } = useQuery({
+    queryKey: ["clients", "listing-reserve-options"],
+    queryFn: fetchClients,
   });
 
   const {
@@ -885,10 +948,7 @@ const Listings = () => {
     ];
   }, [listings]);
 
-  const inventoryListings = listings.filter((listing) => {
-    const status = String(listing.status || "").toLowerCase();
-    return status !== "inactive";
-  });
+  const inventoryListings = listings;
 
   const listingStatusData = statusFilters
     .filter((status) => status.value !== "all")
@@ -933,7 +993,7 @@ const Listings = () => {
       ) : null}
       {mutationError ? <Alert variant="error" title={mutationError} /> : null}
 
-      <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3 xl:grid-cols-7">
+      <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3 xl:grid-cols-6">
         <StatCard label="All Listings" value={inventoryListings.length} />
         <StatCard
           label="Available"
@@ -950,10 +1010,6 @@ const Listings = () => {
         <StatCard
           label="Pending Cancellation"
           value={listings.filter((item) => item.status === "pending_cancellation").length}
-        />
-        <StatCard
-          label="Cancelled"
-          value={listings.filter((item) => item.status === "cancelled").length}
         />
         <StatCard label="Total Value" value={formatMoney(totalValue)} />
       </div>
@@ -1067,16 +1123,9 @@ const Listings = () => {
               <FormulaHeader label="Price per SQM" />
               <FormulaHeader label="Net Selling Price" />
               <FormulaHeader label="LMF" />
+              <FormulaHeader label="Interest" />
               <FormulaHeader label="TCP" />
               <FormulaHeader label="RS" />
-              <FormulaHeader label="30%" />
-              <FormulaHeader label="7.5%" />
-              <FormulaHeader label="SPOT DP" />
-              <FormulaHeader label="3 Months" />
-              <FormulaHeader label="75%" />
-              <FormulaHeader label="12 Months" />
-              <FormulaHeader label="18 Months" />
-              <FormulaHeader label="20 Months" />
               <FormulaHeader label="Project" />
               <FormulaHeader label="Status" />
               <FormulaHeader label="Actions" />
@@ -1113,43 +1162,15 @@ const Listings = () => {
                 </td>
 
                 <td className="px-4 py-3 text-slate-600">
+                  {formatNumber(listing.annual_interest_rate || 0)}%
+                </td>
+
+                <td className="px-4 py-3 text-slate-600">
                   {formatMoney(listing.total_contract_price)}
                 </td>
 
                 <td className="px-4 py-3 text-slate-600">
                   {formatMoney(listing.reservation_fee)}
-                </td>
-
-                <td className="px-4 py-3 text-slate-600">
-                  {formatMoney(listing.thirty_percent)}
-                </td>
-
-                <td className="px-4 py-3 text-slate-600">
-                  {formatMoney(listing.spot_dp_discount)}
-                </td>
-
-                <td className="px-4 py-3 text-slate-600">
-                  {formatMoney(listing.spot_dp)}
-                </td>
-
-                <td className="px-4 py-3 text-slate-600">
-                  {formatMoney(listing.three_months)}
-                </td>
-
-                <td className="px-4 py-3 text-slate-600">
-                  {formatMoney(listing.seventy_five_percent)}
-                </td>
-
-                <td className="px-4 py-3 text-slate-600">
-                  {formatMoney(listing.twelve_months)}
-                </td>
-
-                <td className="px-4 py-3 text-slate-600">
-                  {formatMoney(listing.eighteen_months)}
-                </td>
-
-                <td className="px-4 py-3 text-slate-600">
-                  {formatMoney(listing.twenty_months)}
                 </td>
 
                 <td className="px-4 py-3 text-slate-600">
@@ -1177,7 +1198,7 @@ const Listings = () => {
                     </Button>
 
                     <Button
-                      disabled={!["available", "inactive"].includes(listing.status)}
+                      disabled={listing.status !== "available"}
                       icon={<FiTrash2 />}
                       onClick={() => setListingToDelete(listing)}
                       variant="danger"
@@ -1191,7 +1212,7 @@ const Listings = () => {
 
             {paginatedListings.length === 0 ? (
               <tr>
-                <td colSpan={20}>
+                <td colSpan={13}>
                   <EmptyState title="No listings found" />
                 </td>
               </tr>
@@ -1232,6 +1253,9 @@ const Listings = () => {
               : ""
           }
           errorMessage={createListingMutation.error?.message || ""}
+          errorTitle={
+            getListingSaveErrorTitle(createListingMutation.error?.message || "")
+          }
           onEditDocuments={() => setIsAddDocumentsOpen(true)}
           documentSummaryText={
             addDocumentRequirements.length > 0
@@ -1294,6 +1318,9 @@ const Listings = () => {
               : editFormStatusMessage
           }
           errorMessage={updateListingMutation.error?.message || ""}
+          errorTitle={
+            getListingSaveErrorTitle(updateListingMutation.error?.message || "")
+          }
           onEditDocuments={() => setDocumentListingId(editListing.id)}
           documentSummaryText={
             Number(editListing.document_count || 0) > 0
@@ -1332,7 +1359,70 @@ const Listings = () => {
           error={fullDetailsError}
           isLoading={isFullDetailsLoading}
           onClose={() => setViewListingId(null)}
+          onReserve={(listing) => {
+            setReserveListing(listing);
+            setReserveClientId("");
+            setViewListingId(null);
+          }}
         />
+      ) : null}
+
+      {reserveListing ? (
+        <Modal
+          title={`Reserve ${reserveListing.unit_id}`}
+          onClose={() => {
+            setReserveListing(null);
+            setReserveClientId("");
+          }}
+          footer={
+            <div className="flex justify-end gap-2">
+              <Button
+                onClick={() => {
+                  setReserveListing(null);
+                  setReserveClientId("");
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                disabled={!reserveClientId}
+                onClick={() => {
+                  if (!reserveClientId || !reserveListing) return;
+                  navigate(`/client/${reserveClientId}?reserveListingId=${reserveListing.id}`);
+                }}
+                variant="primary"
+              >
+                Continue to Client Profile
+              </Button>
+            </div>
+          }
+        >
+          <div className="space-y-4">
+            <Alert
+              variant="info"
+              title="Select client for reservation"
+              message="The selected unit will be pre-selected in the client's Reserve Listing modal."
+            />
+            <Select
+              label="Client"
+              value={reserveClientId}
+              onChange={(event) => setReserveClientId(Number(event.target.value) || "")}
+            >
+              <option value="">Select client</option>
+              {clients.map((client) => (
+                <option key={client.id} value={client.id}>
+                  {client.full_name}
+                  {client.contact_no ? ` · ${client.contact_no}` : ""}
+                </option>
+              ))}
+            </Select>
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+              <p><strong>Unit:</strong> {reserveListing.unit_id}</p>
+              <p><strong>Project:</strong> {reserveListing.project_name}</p>
+              <p><strong>TCP:</strong> {formatMoney(reserveListing.total_contract_price)}</p>
+            </div>
+          </div>
+        </Modal>
       ) : null}
 
       {documentListingId ? (
@@ -1455,6 +1545,7 @@ type ListingFormModalProps = {
   documentSummaryText?: string;
   statusMessage?: string;
   errorMessage?: string;
+  errorTitle?: string;
 };
 
 const ListingFormModal = ({
@@ -1475,6 +1566,7 @@ const ListingFormModal = ({
   documentSummaryText,
   statusMessage = "",
   errorMessage = "",
+  errorTitle,
 }: ListingFormModalProps) => {
   const formId = `${title.replaceAll(" ", "-").toLowerCase()}-form`;
   const breakdown = calculateListingBreakdown(formData);
@@ -1482,14 +1574,8 @@ const ListingFormModal = ({
     ["Net Selling Price", breakdown.netSellingPrice],
     ["LMF Amount", breakdown.legalMiscFee],
     ["TCP", breakdown.totalContractPrice],
-    ["30% of TCP less RS", breakdown.downPaymentBalance],
-    ["7.5% Discount", breakdown.spotDpDiscount],
-    ["Spot DP", breakdown.spotDp],
-    ["3-month DP", breakdown.threeMonths],
-    ["75% of TCP", breakdown.seventyFivePercent],
-    ["12-month DP", breakdown.twelveMonths],
-    ["18-month DP", breakdown.eighteenMonths],
-    ["20-month DP", breakdown.twentyMonths],
+    ["Reservation Fee", formData.reservation_fee],
+    ["Annual Interest Rate", formData.annual_interest_rate],
   ] as const;
 
   return (
@@ -1516,7 +1602,7 @@ const ListingFormModal = ({
         {errorMessage ? (
           <Alert
             variant="error"
-            title="Unable to save listing"
+            title={errorTitle || getListingSaveErrorTitle(errorMessage)}
             message={errorMessage}
           />
         ) : null}
@@ -1700,6 +1786,25 @@ const ListingFormModal = ({
             </p>
           </div>
 
+          <div>
+            <Input
+              label="Annual Interest Rate (%)"
+              type="number"
+              min={0}
+              step="0.01"
+              value={formData.annual_interest_rate}
+              onChange={(e) =>
+                setFormData({
+                  ...formData,
+                  annual_interest_rate: Number(e.target.value),
+                })
+              }
+            />
+            <p className="mt-1 text-xs text-slate-500">
+              Used for reserve monthly amortization and SOA interest view.
+            </p>
+          </div>
+
           <Select
             label="Status"
             value={formData.status}
@@ -1714,8 +1819,6 @@ const ListingFormModal = ({
             <option value="reserved">Reserved</option>
             <option value="sold">Sold</option>
             <option value="pending_cancellation">Pending Cancellation</option>
-            <option value="cancelled">Cancelled</option>
-            <option value="inactive">Inactive</option>
           </Select>
 
           {onEditDocuments ? (
@@ -1756,7 +1859,9 @@ const ListingFormModal = ({
                     {label}
                   </dt>
                   <dd className="mt-1 text-sm font-bold text-slate-900">
-                    {formatMoney(value)}
+                    {label === "Annual Interest Rate"
+                      ? `${formatNumber(value)}%`
+                      : formatMoney(value)}
                   </dd>
                 </div>
               ))}
@@ -1773,6 +1878,7 @@ type ListingDetailsModalProps = {
   error: unknown;
   isLoading: boolean;
   onClose: () => void;
+  onReserve?: (listing: Listing) => void;
 };
 
 const getRequirementsFromDetails = (details?: ListingFullDetails) =>
@@ -1791,6 +1897,7 @@ const ListingDetailsModal = ({
   error,
   isLoading,
   onClose,
+  onReserve,
 }: ListingDetailsModalProps) => {
   return (
     <Modal
@@ -1802,7 +1909,16 @@ const ListingDetailsModal = ({
       onClose={onClose}
       size="xl"
       footer={
-        <div className="flex justify-end">
+        <div className="flex justify-end gap-2">
+          {details?.listing.status === "available" && onReserve ? (
+            <Button
+              icon={<FiPlus />}
+              onClick={() => onReserve(details.listing)}
+              variant="primary"
+            >
+              Reserve
+            </Button>
+          ) : null}
           <Button onClick={onClose}>Close</Button>
         </div>
       }
@@ -1898,45 +2014,6 @@ const ListingDetailsModal = ({
             <Detail
               label="TCP"
               value={formatMoney(details.listing.total_contract_price)}
-            />
-          </DetailsSection>
-
-          <DetailsSection title="Sample Computation">
-            <Detail
-              label="RS"
-              value={formatMoney(details.listing.reservation_fee)}
-            />
-            <Detail
-              label="30%"
-              value={formatMoney(details.listing.thirty_percent)}
-            />
-            <Detail
-              label="7.5%"
-              value={formatMoney(details.listing.spot_dp_discount)}
-            />
-            <Detail
-              label="SPOT DP"
-              value={formatMoney(details.listing.spot_dp)}
-            />
-            <Detail
-              label="3 Months"
-              value={formatMoney(details.listing.three_months)}
-            />
-            <Detail
-              label="75%"
-              value={formatMoney(details.listing.seventy_five_percent)}
-            />
-            <Detail
-              label="12 Months"
-              value={formatMoney(details.listing.twelve_months)}
-            />
-            <Detail
-              label="18 Months"
-              value={formatMoney(details.listing.eighteen_months)}
-            />
-            <Detail
-              label="20 Months"
-              value={formatMoney(details.listing.twenty_months)}
             />
           </DetailsSection>
 
@@ -2097,6 +2174,7 @@ const ListingDocumentRequirementsModal = ({
   error,
   isLoading,
   onClose,
+  onReserve,
 }: ListingDetailsModalProps) => {
   const queryClient = useQueryClient();
   const [requirements, setRequirements] = useState<

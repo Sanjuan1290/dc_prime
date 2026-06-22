@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   FiArrowLeft,
   FiEdit2,
@@ -238,6 +238,26 @@ type ClientUnit = {
   monthly_amortization?: number | string | null;
   contract_processing_status?: string | null;
   status: string;
+  cancellation_status?: string | null;
+  cancellation_result?: string | null;
+  cancellation_date?: string | null;
+  cancellation_reason?: string | null;
+  total_paid_by_client?: number | string | null;
+  refund_amount?: number | string | null;
+  discontinued_amount?: number | string | null;
+  settlement_date?: string | null;
+  cancellation_remarks?: string | null;
+  refund_released_at?: string | null;
+  cleared_for_resale_at?: string | null;
+  cancellation_settlement_id?: number | string | null;
+  settlement_result?: string | null;
+  settlement_status?: string | null;
+  settlement_total_paid_snapshot?: number | string | null;
+  settlement_refund_amount?: number | string | null;
+  settlement_discontinued_amount?: number | string | null;
+  settlement_approved_at?: string | null;
+  settlement_refund_released_at?: string | null;
+  settlement_cleared_for_resale_at?: string | null;
   assigned_user_id: number | null;
   assigned_user_name: string | null;
   seller_id: number | null;
@@ -275,6 +295,8 @@ type AvailableListing = {
   legal_misc_rate?: number | string;
   legal_misc_fee: number | string;
   total_contract_price: number | string;
+  annual_interest_rate?: number | string | null;
+  interest_rate?: number | string | null;
   reservation_fee: number | string;
   status: string;
 };
@@ -457,8 +479,12 @@ type ChangeUnitData = {
 };
 
 type CancelUnitData = {
-  release_listing: boolean;
   reason: string;
+};
+
+type SettlementData = {
+  refund_amount: string;
+  cancellation_remarks: string;
 };
 
 const createBlankCoBuyerData = (): CoBuyerFormData => ({
@@ -604,8 +630,12 @@ const defaultChangeUnitData: ChangeUnitData = {
 };
 
 const defaultCancelUnitData: CancelUnitData = {
-  release_listing: true,
   reason: "",
+};
+
+const defaultSettlementData: SettlementData = {
+  refund_amount: "0",
+  cancellation_remarks: "",
 };
 
 const emptyPrincipalProfileData = (): PrincipalProfileData => ({
@@ -1270,9 +1300,60 @@ const cancelClientUnit = async ({
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      release_listing: cancelData.release_listing,
       reason: cancelData.reason || null,
     }),
+  });
+
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+
+  return res.json();
+};
+
+const updateCancellationSettlement = async ({
+  clientUnitId,
+  settlementData,
+}: {
+  clientUnitId: number;
+  settlementData: SettlementData;
+}) => {
+  const res = await fetch(
+    `${API_URL}/client-units/${clientUnitId}/cancellation-settlement`,
+    {
+      method: "PATCH",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        refund_amount: Number(settlementData.refund_amount || 0),
+        cancellation_remarks: settlementData.cancellation_remarks || null,
+      }),
+    },
+  );
+
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+
+  return res.json();
+};
+
+const releaseCancellationRefund = async (clientUnitId: number) => {
+  const res = await fetch(
+    `${API_URL}/client-units/${clientUnitId}/cancellation-refund-release`,
+    {
+      method: "PATCH",
+      credentials: "include",
+    },
+  );
+
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+
+  return res.json();
+};
+
+const clearClientUnitForResale = async (clientUnitId: number) => {
+  const res = await fetch(`${API_URL}/client-units/${clientUnitId}/clear-for-resale`, {
+    method: "PATCH",
+    credentials: "include",
   });
 
   if (!res.ok) throw new Error(await getErrorMessage(res));
@@ -1396,6 +1477,11 @@ const isRequired = (value: number | boolean) => {
   return value === true || Number(value) === 1;
 };
 
+const safeMoneyNumber = (value: unknown) => {
+  const numericValue = Number(value ?? 0);
+  return Number.isFinite(numericValue) ? numericValue : 0;
+};
+
 const documentStatusOptions = [
   { label: "Not Submitted", value: "not_submitted" },
   { label: "Submitted", value: "submitted" },
@@ -1431,6 +1517,33 @@ const moneyInputValue = (value: string) => {
   const parsedValue = Number(value);
 
   return Number.isFinite(parsedValue) ? parsedValue : 0;
+};
+
+const calculateAmortizedMonthlyPayment = ({
+  balance,
+  annualInterestRate,
+  months,
+}: {
+  balance: number;
+  annualInterestRate: number;
+  months: number;
+}) => {
+  const principal = Math.max(Number(balance || 0), 0);
+  const termMonths = Math.max(Number(months || 0), 0);
+  const monthlyRate = Math.max(Number(annualInterestRate || 0), 0) / 100 / 12;
+
+  if (principal <= 0 || termMonths <= 0) return 0;
+  if (monthlyRate <= 0) return principal / termMonths;
+
+  const growth = Math.pow(1 + monthlyRate, termMonths);
+
+  return (principal * monthlyRate * growth) / (growth - 1);
+};
+
+const getListingInterestRate = (listing?: AvailableListing | null) => {
+  const parsed = Number(listing?.annual_interest_rate ?? listing?.interest_rate ?? 0);
+
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
 };
 
 const isPresentMoneyInputValid = (value: string) => {
@@ -1472,6 +1585,7 @@ const ClientProfile = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { id: clientId } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { data: currentUserResponse } = useCurrentUser() as {
     data?: CurrentUserResponse | null;
   };
@@ -1496,6 +1610,10 @@ const ClientProfile = () => {
   const [cancelUnit, setCancelUnit] = useState<ClientUnit | null>(null);
   const [cancelUnitData, setCancelUnitData] = useState<CancelUnitData>(
     defaultCancelUnitData,
+  );
+  const [settlementUnit, setSettlementUnit] = useState<ClientUnit | null>(null);
+  const [settlementData, setSettlementData] = useState<SettlementData>(
+    defaultSettlementData,
   );
   const [deleteUnit, setDeleteUnit] = useState<ClientUnit | null>(null);
   const [selectedDocumentsUnit, setSelectedDocumentsUnit] =
@@ -1663,6 +1781,7 @@ const ClientProfile = () => {
     queryClient.invalidateQueries({ queryKey: ["commissions"] });
     queryClient.invalidateQueries({ queryKey: ["commission-summary"] });
     queryClient.invalidateQueries({ queryKey: ["commission-releases"] });
+    queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
 
     if (selectedDocumentsUnit?.id) {
       queryClient.invalidateQueries({
@@ -1720,7 +1839,33 @@ const ClientProfile = () => {
       invalidateClientProfile();
       setCancelUnit(null);
       setCancelUnitData(defaultCancelUnitData);
-      setSuccessMessage("Client unit cancelled successfully");
+      setSuccessMessage("Cancellation review started successfully");
+    },
+  });
+
+  const settlementMutation = useMutation({
+    mutationFn: updateCancellationSettlement,
+    onSuccess: () => {
+      invalidateClientProfile();
+      setSuccessMessage("Cancellation settlement saved successfully");
+    },
+  });
+
+  const refundReleaseMutation = useMutation({
+    mutationFn: releaseCancellationRefund,
+    onSuccess: () => {
+      invalidateClientProfile();
+      setSuccessMessage("Refund marked as released successfully");
+    },
+  });
+
+  const clearForResaleMutation = useMutation({
+    mutationFn: clearClientUnitForResale,
+    onSuccess: () => {
+      invalidateClientProfile();
+      setSettlementUnit(null);
+      setSettlementData(defaultSettlementData);
+      setSuccessMessage("Listing cleared for resale successfully");
     },
   });
 
@@ -1943,22 +2088,25 @@ const ClientProfile = () => {
           36,
         )
       : 0;
-  const reserveInterestRate = moneyInputValue(reserveData.interest_rate);
+  const reserveInterestRate = selectedListing
+    ? getListingInterestRate(selectedListing)
+    : moneyInputValue(reserveData.interest_rate);
   const reserveAmortizedBalance = Math.max(
     reserveOfferBalance - reserveBalloonPayment,
     0,
   );
-  const reserveBalanceWithInterest =
-    reserveAmortizedBalance + reserveAmortizedBalance * (reserveInterestRate / 100);
   const computedMonthlyAmortization =
     reserveData.mode_of_payment === "installment" && reserveTermsMonths > 0
-      ? reserveBalanceWithInterest / reserveTermsMonths
+      ? calculateAmortizedMonthlyPayment({
+          balance: reserveAmortizedBalance,
+          annualInterestRate: reserveInterestRate,
+          months: reserveTermsMonths,
+        })
       : 0;
   const displayedMonthlyAmortization =
-    reserveData.monthly_amortization ||
-    (computedMonthlyAmortization > 0
+    computedMonthlyAmortization > 0
       ? computedMonthlyAmortization.toFixed(2)
-      : "");
+      : "";
 
   const reserveFormulaRows: Array<{
     key: ReserveFormulaKey;
@@ -1974,59 +2122,31 @@ const ClientProfile = () => {
       formula: `TCP from selected listing: Net Selling Price + LMF = ${formatMoney(reservePurchasePrice)}`,
     },
     {
-      key: "dp_gross",
-      label: "DP Gross",
-      value:
-        reserveData.mode_of_payment === "installment"
-          ? formatMoney(reserveDownpaymentGross)
-          : "-",
-      formula: `(${formatMoney(reservePurchasePrice)} × ${formatNumber(reserveDownpaymentPercent)}%) - ${formatMoney(reserveReservationFee)}`,
-      note: "Downpayment target less reservation fee.",
-    },
-    {
-      key: "dp_discount",
-      label: "DP Discount",
-      value: reserveIsSpotDownpayment
-        ? formatMoney(reserveDownpaymentDiscountAmount)
-        : "-",
-      formula: reserveIsSpotDownpayment
-        ? `${formatMoney(reserveDownpaymentGross)} × ${formatNumber(reserveDownpaymentDiscountRate)}%`
-        : "No discount unless Downpayment Gives is Spot Cash.",
-    },
-    {
       key: "net_dp_payable",
-      label: "Net DP Payable",
+      label: "Net Downpayment",
       value:
         reserveData.mode_of_payment === "installment"
           ? formatMoney(reserveDownpayment)
           : "-",
       formula: `${formatMoney(reserveDownpaymentGross)} - ${formatMoney(reserveDownpaymentDiscountAmount)}`,
-      note: "This is the net downpayment after discount.",
-    },
-    {
-      key: "per_give",
-      label: "Per Give",
-      value:
-        reserveData.mode_of_payment === "installment"
-          ? formatMoney(reserveDownpaymentPerGive)
-          : "-",
-      formula: `${formatMoney(reserveDownpayment)} ÷ ${formatNumber(reserveDownpaymentGives || 1)} give(s)`,
+      note: "Downpayment is computed from the selected terms. Spot discount only applies if configured.",
     },
     {
       key: "offer_balance",
-      label: "Offer Balance",
-      value: formatMoney(reserveOfferBalance),
-      formula: `${formatMoney(reservePurchasePrice)} - ${formatMoney(reserveReservationFee)} - ${formatMoney(reserveDownpayment)} - ${formatMoney(reserveDeferredCash)}`,
-      note: "Deferred cash only applies when mode of payment is cash.",
+      label: "Balance for Amortization",
+      value: formatMoney(reserveAmortizedBalance),
+      formula: `${formatMoney(reservePurchasePrice)} - ${formatMoney(reserveReservationFee)} - ${formatMoney(reserveDownpayment)} - ${formatMoney(reserveDeferredCash)} - ${formatMoney(reserveBalloonPayment)} balloon`,
+      note: "Balloon payment is separated from the monthly amortized balance.",
     },
     {
       key: "monthly_preview",
-      label: "Monthly Preview",
+      label: "Monthly Amortization",
       value:
         reserveData.mode_of_payment === "installment"
           ? formatMoney(computedMonthlyAmortization)
           : "-",
-      formula: `(${formatMoney(reserveOfferBalance)} + ${formatMoney(reserveOfferBalance * (reserveInterestRate / 100))} interest) ÷ ${formatNumber(reserveTermsMonths || 1)} month(s)`,
+      formula: `Amortized monthly payment using ${formatNumber(reserveInterestRate)}% annual interest over ${formatNumber(reserveTermsMonths || 1)} month(s).`,
+      note: "Monthly amortization is automatically calculated and cannot be manually edited.",
     },
   ];
 
@@ -2191,9 +2311,6 @@ const ClientProfile = () => {
         return "Interest rate must be a non-negative percentage";
       }
 
-      if (!isPresentMoneyInputValid(reserveData.monthly_amortization)) {
-        return "Monthly amortization must be a non-negative amount";
-      }
     }
 
     if (reserveBalanceRaw < 0) {
@@ -2203,17 +2320,30 @@ const ClientProfile = () => {
     return "";
   };
 
-  const openReserveModal = () => {
+  const openReserveModal = (presetListingId?: number | string) => {
     const defaultSeller = sellers.find(
       (seller) => Number(seller.id) === Number(client?.default_seller_id),
     );
+    const presetListing = availableListings.find(
+      (listing) => Number(listing.id) === Number(presetListingId),
+    );
+    const presetListingLabel = presetListing
+      ? `${presetListing.unit_id} - ${presetListing.project_name} - ${formatMoney(presetListing.total_contract_price)}`
+      : "";
 
     setReserveData({
       ...createDefaultReserveData(),
+      listing_id: presetListing?.id || "",
+      reservation_fee_amount: presetListing
+        ? String(Number(presetListing.reservation_fee || 0))
+        : "",
+      interest_rate: presetListing
+        ? String(getListingInterestRate(presetListing))
+        : "0",
       seller_id: client?.default_seller_id || "",
       direct_to_developer_rate: getSellerDirectToDeveloperRate(defaultSeller),
     });
-    setListingSearch("");
+    setListingSearch(presetListingLabel);
     setSuccessMessage("");
     setReserveValidationMessage("");
     setReserveFormulaKey("");
@@ -2221,6 +2351,34 @@ const ClientProfile = () => {
     setReserveDocumentListingId("");
     setIsReserveOpen(true);
   };
+
+  useEffect(() => {
+    const reserveListingId = searchParams.get("reserveListingId");
+
+    if (hasHandledReserveListingParam || !reserveListingId || !client || availableListings.length === 0) {
+      return;
+    }
+
+    const listingExists = availableListings.some(
+      (listing) => Number(listing.id) === Number(reserveListingId),
+    );
+
+    if (!listingExists) return;
+
+    openReserveModal(reserveListingId);
+    setHasHandledReserveListingParam(true);
+
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete("reserveListingId");
+    setSearchParams(nextParams, { replace: true });
+  }, [
+    availableListings,
+    client,
+    hasHandledReserveListingParam,
+    searchParams,
+    setSearchParams,
+    sellers,
+  ]);
 
   const openEditUnitModal = (unit: ClientUnit) => {
     setEditUnit(unit);
@@ -2264,6 +2422,18 @@ const ClientProfile = () => {
   const openCancelUnitModal = (unit: ClientUnit) => {
     setCancelUnit(unit);
     setCancelUnitData(defaultCancelUnitData);
+    setSuccessMessage("");
+  };
+
+  const openSettlementModal = (unit: ClientUnit) => {
+    const refundValue =
+      unit.settlement_refund_amount ?? unit.refund_amount ?? 0;
+
+    setSettlementUnit(unit);
+    setSettlementData({
+      refund_amount: String(refundValue || 0),
+      cancellation_remarks: unit.cancellation_remarks || "",
+    });
     setSuccessMessage("");
   };
 
@@ -2388,6 +2558,25 @@ const ClientProfile = () => {
     });
   };
 
+  const handleSaveSettlement = () => {
+    if (!settlementUnit) return;
+
+    settlementMutation.mutate({
+      clientUnitId: settlementUnit.id,
+      settlementData,
+    });
+  };
+
+  const handleReleaseRefund = () => {
+    if (!settlementUnit) return;
+    refundReleaseMutation.mutate(settlementUnit.id);
+  };
+
+  const handleClearForResale = () => {
+    if (!settlementUnit) return;
+    clearForResaleMutation.mutate(settlementUnit.id);
+  };
+
   const handleDeleteUnit = () => {
     if (!deleteUnit) return;
 
@@ -2443,7 +2632,7 @@ const ClientProfile = () => {
             </Button>
             <Button
               icon={<FiPlus />}
-              onClick={openReserveModal}
+              onClick={() => openReserveModal()}
               variant="primary"
             >
               Reserve Listing
@@ -2530,6 +2719,39 @@ const ClientProfile = () => {
             cancelUnitMutation.error instanceof Error
               ? cancelUnitMutation.error.message
               : "Failed to cancel unit"
+          }
+        />
+      ) : null}
+
+      {settlementMutation.error ? (
+        <Alert
+          variant="error"
+          title={
+            settlementMutation.error instanceof Error
+              ? settlementMutation.error.message
+              : "Failed to save settlement"
+          }
+        />
+      ) : null}
+
+      {refundReleaseMutation.error ? (
+        <Alert
+          variant="error"
+          title={
+            refundReleaseMutation.error instanceof Error
+              ? refundReleaseMutation.error.message
+              : "Failed to release refund"
+          }
+        />
+      ) : null}
+
+      {clearForResaleMutation.error ? (
+        <Alert
+          variant="error"
+          title={
+            clearForResaleMutation.error instanceof Error
+              ? clearForResaleMutation.error.message
+              : "Failed to clear listing for resale"
           }
         />
       ) : null}
@@ -3095,7 +3317,7 @@ const ClientProfile = () => {
               action={
                 <Button
                   icon={<FiPlus />}
-                  onClick={openReserveModal}
+                  onClick={() => openReserveModal()}
                   variant="primary"
                 >
                   Reserve Listing
@@ -3279,12 +3501,22 @@ const ClientProfile = () => {
                           <Button onClick={() => openChangeUnitModal(unit)}>
                             Change Unit
                           </Button>
-                          <Button
-                            onClick={() => openCancelUnitModal(unit)}
-                            variant="secondary"
-                          >
-                            Cancel
-                          </Button>
+                          {unit.status === "pending_cancellation" ||
+                          unit.status === "cancelled" ? (
+                            <Button
+                              onClick={() => openSettlementModal(unit)}
+                              variant="secondary"
+                            >
+                              Settlement
+                            </Button>
+                          ) : (
+                            <Button
+                              onClick={() => openCancelUnitModal(unit)}
+                              variant="secondary"
+                            >
+                              Start Cancellation
+                            </Button>
+                          )}
                           <Button
                             onClick={() => openDeleteUnitModal(unit)}
                             variant="danger"
@@ -3378,6 +3610,7 @@ const ClientProfile = () => {
                             reservation_fee_amount: String(
                               Number(listing.reservation_fee || 0),
                             ),
+                            interest_rate: String(getListingInterestRate(listing)),
                             monthly_amortization: "",
                             document_requirements: [],
                           });
@@ -3575,7 +3808,7 @@ const ClientProfile = () => {
                         : "",
                     interest_rate:
                       paymentMode === "installment"
-                        ? reserveData.interest_rate || "0"
+                        ? String(reserveInterestRate)
                         : "0",
                     monthly_amortization: "",
                   });
@@ -3877,23 +4110,17 @@ const ClientProfile = () => {
                       />
                     ) : null}
 
-                    <Input
-                      label="Interest Rate (%)"
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      value={reserveData.interest_rate}
-                      onChange={(e) => {
-                        setReserveData({
-                          ...reserveData,
-                          interest_rate: e.target.value,
-                          monthly_amortization: "",
-                        });
-                        setReserveValidationMessage("");
-                      }}
-                    />
-
-
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                      <p className="text-xs font-semibold text-slate-500">
+                        Interest Rate
+                      </p>
+                      <p className="mt-1 text-sm font-bold text-slate-900">
+                        {formatNumber(reserveInterestRate)}%
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        This is set from the selected listing. Edit the listing to change it.
+                      </p>
+                    </div>
 
                     <Input
                       label="Balloon Payment Amount"
@@ -3924,20 +4151,19 @@ const ClientProfile = () => {
                       }}
                     />
 
-                    <Input
-                      label="Monthly Amortization"
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      value={displayedMonthlyAmortization}
-                      onChange={(e) => {
-                        setReserveData({
-                          ...reserveData,
-                          monthly_amortization: e.target.value,
-                        });
-                        setReserveValidationMessage("");
-                      }}
-                    />
+                    <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2">
+                      <p className="text-xs font-semibold text-blue-700">
+                        Monthly Amortization
+                      </p>
+                      <p className="mt-1 text-sm font-bold text-slate-900">
+                        {displayedMonthlyAmortization
+                          ? formatMoney(displayedMonthlyAmortization)
+                          : "-"}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-600">
+                        Automatically calculated from balance, term, balloon, and listing interest rate.
+                      </p>
+                    </div>
                   </>
                 ) : null}
               </div>
@@ -4554,7 +4780,7 @@ const ClientProfile = () => {
 
       {cancelUnit ? (
         <Modal
-          title={`Cancel Unit - ${cancelUnit.unit_id}`}
+          title={`Start Cancellation - ${cancelUnit.unit_id}`}
           onClose={() => setCancelUnit(null)}
           size="md"
           footer={
@@ -4565,7 +4791,7 @@ const ClientProfile = () => {
                 onClick={handleCancelUnit}
                 variant="danger"
               >
-                {cancelUnitMutation.isPending ? "Cancelling..." : "Cancel Unit"}
+                {cancelUnitMutation.isPending ? "Starting..." : "Start Cancellation"}
               </Button>
             </div>
           }
@@ -4573,22 +4799,9 @@ const ClientProfile = () => {
           <div className="space-y-4">
             <Alert
               variant="warning"
-              title="Cancelling keeps payment history but cancels the active account and pending commissions."
+              title="This starts cancellation review only."
+              message="The listing will become Pending Cancellation and cannot be sold again until the refund/discontinued settlement is completed and admin clears it for resale."
             />
-
-            <label className="flex items-center gap-2 rounded-xl border border-slate-200 p-3 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                checked={cancelUnitData.release_listing}
-                onChange={(e) =>
-                  setCancelUnitData({
-                    ...cancelUnitData,
-                    release_listing: e.target.checked,
-                  })
-                }
-              />
-              Return listing to available. Uncheck to keep it on hold.
-            </label>
 
             <Input
               label="Reason"
@@ -4604,6 +4817,148 @@ const ClientProfile = () => {
           </div>
         </Modal>
       ) : null}
+
+      {settlementUnit ? (() => {
+        const totalPaid = safeMoneyNumber(
+          settlementUnit.settlement_total_paid_snapshot ||
+            settlementUnit.total_paid_by_client ||
+            settlementUnit.paid_amount,
+        );
+        const refundAmount = Math.min(
+          Math.max(safeMoneyNumber(settlementData.refund_amount), 0),
+          totalPaid,
+        );
+        const discontinuedAmount = Math.max(totalPaid - refundAmount, 0);
+        const settlementStatus =
+          settlementUnit.settlement_status || settlementUnit.cancellation_status || "none";
+        const needsRefundRelease = settlementStatus === "approved_for_refund";
+        const canClearForResale =
+          settlementStatus === "settled" ||
+          settlementUnit.cancellation_status === "settled";
+
+        return (
+          <Modal
+            title={`Cancellation Settlement - ${settlementUnit.unit_id}`}
+            onClose={() => setSettlementUnit(null)}
+            size="lg"
+            footer={
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button onClick={() => setSettlementUnit(null)}>Close</Button>
+                <Button
+                  disabled={settlementMutation.isPending || settlementStatus === "settled"}
+                  onClick={handleSaveSettlement}
+                >
+                  {settlementMutation.isPending ? "Saving..." : "Save Settlement"}
+                </Button>
+                {needsRefundRelease ? (
+                  <Button
+                    disabled={refundReleaseMutation.isPending}
+                    onClick={handleReleaseRefund}
+                    variant="secondary"
+                  >
+                    {refundReleaseMutation.isPending
+                      ? "Releasing..."
+                      : "Mark Refund Released"}
+                  </Button>
+                ) : null}
+                {canClearForResale ? (
+                  <Button
+                    disabled={
+                      clearForResaleMutation.isPending ||
+                      Boolean(settlementUnit.cleared_for_resale_at)
+                    }
+                    onClick={handleClearForResale}
+                    variant="secondary"
+                  >
+                    {clearForResaleMutation.isPending
+                      ? "Clearing..."
+                      : settlementUnit.cleared_for_resale_at
+                        ? "Already Cleared"
+                        : "Clear for Resale"}
+                  </Button>
+                ) : null}
+              </div>
+            }
+          >
+            <div className="space-y-4">
+              <Alert
+                variant="warning"
+                title="Set the refund amount before completing cancellation."
+                message="Discontinued Money is the verified payment amount that will not be refunded and will remain with the company. The listing can only return to Available after settlement is settled and Clear for Resale is clicked."
+              />
+
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-xs font-semibold uppercase text-slate-500">
+                    Total Verified Paid
+                  </p>
+                  <p className="mt-1 text-lg font-black text-slate-900">
+                    {formatMoney(totalPaid)}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
+                  <p className="text-xs font-semibold uppercase text-blue-700">
+                    Refund Amount
+                  </p>
+                  <p className="mt-1 text-lg font-black text-blue-900">
+                    {formatMoney(refundAmount)}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+                  <p className="text-xs font-semibold uppercase text-amber-700">
+                    Discontinued Money
+                  </p>
+                  <p className="mt-1 text-lg font-black text-amber-900">
+                    {formatMoney(discontinuedAmount)}
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <Input
+                  label="Refund Amount"
+                  min={0}
+                  max={totalPaid}
+                  step="0.01"
+                  type="number"
+                  value={settlementData.refund_amount}
+                  onChange={(e) =>
+                    setSettlementData({
+                      ...settlementData,
+                      refund_amount: e.target.value,
+                    })
+                  }
+                />
+                <div>
+                  <span className="mb-1.5 block text-sm font-semibold text-slate-700">
+                    Settlement Status
+                  </span>
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700">
+                    {formatText(settlementStatus)}
+                  </div>
+                </div>
+              </div>
+
+              <label className="block">
+                <span className="mb-1.5 block text-sm font-semibold text-slate-700">
+                  Remarks / Reason
+                </span>
+                <textarea
+                  className="min-h-24 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  value={settlementData.cancellation_remarks}
+                  onChange={(e) =>
+                    setSettlementData({
+                      ...settlementData,
+                      cancellation_remarks: e.target.value,
+                    })
+                  }
+                  placeholder="Example: Client requested partial refund; reservation fee is discontinued money."
+                />
+              </label>
+            </div>
+          </Modal>
+        );
+      })() : null}
 
       {deleteUnit ? (
         <Modal

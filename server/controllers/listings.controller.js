@@ -26,6 +26,144 @@ const formatDecimal = (value) => {
   return Number(Number(value || 0).toFixed(2))
 }
 
+
+const cleanUnitId = (value) => String(value || '').trim()
+
+const isDuplicateListingError = (error) => {
+  return error?.code === 'ER_DUP_ENTRY' || String(error?.message || '').includes('uq_listing_project_unit')
+}
+
+const getDuplicateListingMessage = ({ unitId, projectName, existingStatus }) => {
+  const projectPart = projectName ? ` in ${projectName}` : ''
+  const statusPart = existingStatus ? ` Current status: ${String(existingStatus).replace(/_/g, ' ')}.` : ''
+
+  return `Cannot save listing ${unitId}. This Unit ID already exists${projectPart}.${statusPart} Use a different Unit ID, or edit the existing listing if this is a geography/renumbering change.`
+}
+
+const getReservedUnitIdentityMessage = ({
+  unitId,
+  projectName,
+  currentUnitId,
+  identitySource,
+}) => {
+  const projectPart = projectName ? ` in ${projectName}` : ''
+  const currentPart = currentUnitId ? ` It belongs to current listing ${currentUnitId}.` : ''
+  const sourceLabel = String(identitySource || '').replace(/_/g, ' ')
+
+  return `Cannot save listing ${unitId}. This Unit ID was already used before${projectPart} as ${sourceLabel}.${currentPart} Old Unit IDs are reserved for unit history and cannot be reused for a new listing.`
+}
+
+const getUnitIdentityConflictMessage = (conflict, unitId) => {
+  if (!conflict) return getDuplicateListingMessage({ unitId })
+
+  if (conflict.conflict_type === 'current_listing') {
+    return getDuplicateListingMessage({
+      unitId,
+      projectName: conflict.project_name,
+      existingStatus: conflict.status,
+    })
+  }
+
+  return getReservedUnitIdentityMessage({
+    unitId,
+    projectName: conflict.project_name,
+    currentUnitId: conflict.current_unit_id || conflict.unit_id,
+    identitySource: conflict.conflict_type,
+  })
+}
+
+const findUnitIdentityConflict = async (executor, { projectId, unitId, excludeListingId = null }) => {
+  const trimmedUnitId = cleanUnitId(unitId)
+
+  if (!trimmedUnitId) return null
+
+  const params = [projectId, trimmedUnitId]
+  const excludeParams = []
+  let excludeClause = ''
+  let excludeClauseForHistory = ''
+  let excludeClauseForAlias = ''
+
+  if (excludeListingId) {
+    excludeClause = 'AND l.id <> ?'
+    excludeClauseForHistory = 'AND luh.listing_id <> ?'
+    excludeClauseForAlias = 'AND lua.listing_id <> ?'
+    excludeParams.push(excludeListingId)
+  }
+
+  const [currentRows] = await executor.query(
+    `
+    SELECT
+      l.id,
+      l.unit_id,
+      l.unit_id AS current_unit_id,
+      l.status,
+      p.name AS project_name,
+      'current_listing' AS conflict_type
+    FROM listings l
+    LEFT JOIN projects p ON p.id = l.project_id
+    WHERE l.project_id = ?
+      AND LOWER(TRIM(l.unit_id)) = LOWER(TRIM(?))
+      ${excludeClause}
+    LIMIT 1
+    `,
+    [...params, ...excludeParams]
+  )
+
+  if (currentRows[0]) return currentRows[0]
+
+  const [historyRows] = await executor.query(
+    `
+    SELECT
+      luh.id,
+      luh.listing_id,
+      l.unit_id AS current_unit_id,
+      l.status,
+      p.name AS project_name,
+      CASE
+        WHEN LOWER(TRIM(luh.old_unit_id)) = LOWER(TRIM(?)) THEN 'old_unit_id'
+        ELSE 'unit_history'
+      END AS conflict_type
+    FROM listing_unit_history luh
+    INNER JOIN listings l ON l.id = luh.listing_id
+    LEFT JOIN projects p ON p.id = l.project_id
+    WHERE l.project_id = ?
+      AND (
+        LOWER(TRIM(luh.old_unit_id)) = LOWER(TRIM(?))
+        OR LOWER(TRIM(luh.new_unit_id)) = LOWER(TRIM(?))
+      )
+      ${excludeClauseForHistory}
+    LIMIT 1
+    `,
+    [trimmedUnitId, projectId, trimmedUnitId, trimmedUnitId, ...excludeParams]
+  )
+
+  if (historyRows[0]) return historyRows[0]
+
+  const [aliasRows] = await executor.query(
+    `
+    SELECT
+      lua.id,
+      lua.listing_id,
+      l.unit_id AS current_unit_id,
+      l.status,
+      p.name AS project_name,
+      COALESCE(lua.alias_type, 'old_unit_id') AS conflict_type
+    FROM listing_unit_aliases lua
+    INNER JOIN listings l ON l.id = lua.listing_id
+    LEFT JOIN projects p ON p.id = l.project_id
+    WHERE l.project_id = ?
+      AND LOWER(TRIM(lua.alias_unit_id)) = LOWER(TRIM(?))
+      ${excludeClauseForAlias}
+    LIMIT 1
+    `,
+    [...params, ...excludeParams]
+  )
+
+  return aliasRows[0] || null
+}
+
+const findDuplicateListing = findUnitIdentityConflict
+
 const computeListingAmounts = ({
   lot_area_sqm,
   price_per_sqm,
@@ -241,15 +379,13 @@ const allowedListingStatuses = [
   'reserved',
   'sold',
   'pending_cancellation',
-  'cancelled',
-  'inactive',
 ]
 
 const normalizeListingStatus = (status, fallback = 'available') => {
   const normalized = String(status || '').trim().toLowerCase()
 
   if (normalized === 'active') return 'sold'
-  if (normalized === 'hold' || normalized === 'superseded') return 'inactive'
+  if (['hold', 'superseded', 'inactive', 'cancelled'].includes(normalized)) return 'available'
   if (allowedListingStatuses.includes(normalized)) return normalized
 
   return fallback
@@ -518,6 +654,7 @@ const listingFields = `
   l.price_per_sqm,
   l.lot_area_sqm,
   l.legal_misc_rate,
+  COALESCE(l.annual_interest_rate, 0) AS annual_interest_rate,
   l.net_selling_price,
   l.legal_misc_fee,
   l.total_contract_price,
@@ -947,6 +1084,7 @@ export const createListing = async (req, res) => {
     price_per_sqm = 0,
     lot_area_sqm = 0,
     legal_misc_rate = 10,
+    annual_interest_rate = 0,
     status = 'available',
     document_requirements,
     documentRequirements
@@ -958,7 +1096,9 @@ export const createListing = async (req, res) => {
     })
   }
 
-  if (isMissing(unit_id)) {
+  const finalUnitId = cleanUnitId(unit_id)
+
+  if (!finalUnitId) {
     return res.status(400).json({
       message: 'Unit ID is required'
     })
@@ -977,6 +1117,22 @@ export const createListing = async (req, res) => {
   if (projects.length === 0) {
     return res.status(404).json({
       message: 'Project not found'
+    })
+  }
+
+  const duplicateListing = await findDuplicateListing(db, {
+    projectId: project_id,
+    unitId: finalUnitId,
+  })
+
+  if (duplicateListing) {
+    return res.status(409).json({
+      message: getUnitIdentityConflictMessage(duplicateListing, finalUnitId),
+      code: duplicateListing.conflict_type === 'current_listing'
+        ? 'DUPLICATE_LISTING'
+        : 'RESERVED_UNIT_IDENTITY',
+      duplicateListingId: duplicateListing.listing_id || duplicateListing.id,
+      conflictType: duplicateListing.conflict_type,
     })
   }
 
@@ -1007,18 +1163,20 @@ export const createListing = async (req, res) => {
         price_per_sqm,
         lot_area_sqm,
         legal_misc_rate,
+        annual_interest_rate,
         status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         project_id,
         nullableValue(cadastral_lot_no),
-        unit_id,
+        finalUnitId,
         nullableValue(lot_type),
         numberValue(reservation_fee),
         numberValue(price_per_sqm),
         numberValue(lot_area_sqm),
         numberValue(legal_misc_rate),
+        numberValue(annual_interest_rate),
         finalStatus
       ]
     )
@@ -1045,6 +1203,14 @@ export const createListing = async (req, res) => {
     await connection.commit()
   } catch (error) {
     await connection.rollback()
+
+    if (isDuplicateListingError(error)) {
+      return res.status(409).json({
+        message: getDuplicateListingMessage({ unitId: finalUnitId }),
+        code: 'DUPLICATE_LISTING',
+      })
+    }
+
     throw error
   } finally {
     connection.release()
@@ -1054,7 +1220,7 @@ export const createListing = async (req, res) => {
     userId: req.user.id,
     action: 'create',
     module: 'Listings',
-    description: `Created listing ${unit_id}${formatOldUnitIdsForAudit(old_unit_ids)}`,
+    description: `Created listing ${finalUnitId}${formatOldUnitIdsForAudit(old_unit_ids)}`,
     ipAddress: getClientIp(req)
   })
 
@@ -1083,6 +1249,7 @@ export const updateListing = async (req, res) => {
     price_per_sqm = 0,
     lot_area_sqm = 0,
     legal_misc_rate = 10,
+    annual_interest_rate = 0,
     status = 'available',
     document_requirements,
     documentRequirements
@@ -1094,7 +1261,9 @@ export const updateListing = async (req, res) => {
     })
   }
 
-  if (isMissing(unit_id)) {
+  const finalUnitId = cleanUnitId(unit_id)
+
+  if (!finalUnitId) {
     return res.status(400).json({
       message: 'Unit ID is required'
     })
@@ -1130,9 +1299,28 @@ export const updateListing = async (req, res) => {
       })
     }
 
+    const duplicateListing = await findDuplicateListing(connection, {
+      projectId: project_id,
+      unitId: finalUnitId,
+      excludeListingId: id,
+    })
+
+    if (duplicateListing) {
+      await connection.rollback()
+
+      return res.status(409).json({
+        message: getUnitIdentityConflictMessage(duplicateListing, finalUnitId),
+        code: duplicateListing.conflict_type === 'current_listing'
+          ? 'DUPLICATE_LISTING'
+          : 'RESERVED_UNIT_IDENTITY',
+        duplicateListingId: duplicateListing.listing_id || duplicateListing.id,
+        conflictType: duplicateListing.conflict_type,
+      })
+    }
+
     const mergedOldUnitIds = [
       ...normalizeUnitAliasList(old_unit_ids),
-      ...(existingListing.unit_id && existingListing.unit_id !== unit_id
+      ...(existingListing.unit_id && existingListing.unit_id !== finalUnitId
         ? [existingListing.unit_id]
         : []),
     ]
@@ -1149,18 +1337,20 @@ export const updateListing = async (req, res) => {
         price_per_sqm = ?,
         lot_area_sqm = ?,
         legal_misc_rate = ?,
+        annual_interest_rate = ?,
         status = ?
       WHERE id = ?
       `,
       [
         project_id,
         nullableValue(cadastral_lot_no),
-        unit_id,
+        finalUnitId,
         nullableValue(lot_type),
         numberValue(reservation_fee),
         numberValue(price_per_sqm),
         numberValue(lot_area_sqm),
         numberValue(legal_misc_rate),
+        numberValue(annual_interest_rate),
         finalStatus,
         id
       ]
@@ -1174,11 +1364,11 @@ export const updateListing = async (req, res) => {
       })
     }
 
-    if (existingListing.unit_id !== unit_id) {
+    if (existingListing.unit_id !== finalUnitId) {
       await insertListingUnitHistory(connection, {
         listingId: id,
         oldUnitId: existingListing.unit_id,
-        newUnitId: unit_id,
+        newUnitId: finalUnitId,
         reason: 'admin_correction',
         changedBy: req.user.id,
         remarks: 'Unit ID changed from listing edit form',
@@ -1194,6 +1384,14 @@ export const updateListing = async (req, res) => {
     await connection.commit()
   } catch (error) {
     await connection.rollback()
+
+    if (isDuplicateListingError(error)) {
+      return res.status(409).json({
+        message: getDuplicateListingMessage({ unitId: finalUnitId }),
+        code: 'DUPLICATE_LISTING',
+      })
+    }
+
     throw error
   } finally {
     connection.release()
@@ -1203,7 +1401,7 @@ export const updateListing = async (req, res) => {
     userId: req.user.id,
     action: 'update',
     module: 'Listings',
-    description: `Updated listing ${unit_id}${formatOldUnitIdsForAudit(old_unit_ids)}`,
+    description: `Updated listing ${finalUnitId}${formatOldUnitIdsForAudit(old_unit_ids)}`,
     ipAddress: getClientIp(req)
   })
 
