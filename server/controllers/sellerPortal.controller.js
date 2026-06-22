@@ -201,6 +201,10 @@ export const getSellerTeam = async (req, res) => {
       seller.seller_role,
       seller.parent_seller_id,
       parent.full_name AS parent_seller_name,
+      seller.seller_group_id,
+      sg.group_name AS seller_group_name,
+      sg.pool_rate AS seller_group_pool_rate,
+      roleDist.approved_rate AS seller_group_role_rate,
       seller.commission_pool_rate,
       seller.personal_commission_rate,
       seller.commission_rate,
@@ -211,6 +215,10 @@ export const getSellerTeam = async (req, res) => {
       COALESCE(SUM(COALESCE(l.total_contract_price, l.net_selling_price + l.legal_misc_fee, 0)), 0) AS total_tcp
     FROM accredited_sellers seller
     LEFT JOIN accredited_sellers parent ON parent.id = seller.parent_seller_id
+    LEFT JOIN seller_groups sg ON sg.id = seller.seller_group_id
+    LEFT JOIN seller_group_rate_distributions roleDist
+      ON roleDist.seller_group_id = seller.seller_group_id
+      AND roleDist.seller_role = seller.seller_role
     LEFT JOIN client_units cu ON cu.seller_id = seller.id
     LEFT JOIN listings l ON l.id = cu.listing_id
     WHERE ${scope.clause}
@@ -225,87 +233,11 @@ export const getSellerTeam = async (req, res) => {
 }
 
 
-const getAllowedEditableRoles = (role) => {
-  if (role === 'broker_network_manager') return ['broker']
-  if (role === 'broker') return ['manager']
-  if (role === 'manager') return ['agent']
-  return []
-}
 
-const normalizeRate = (value) => {
-  if (value === undefined || value === null || value === '') return null
-  const parsed = Number(value)
-  if (Number.isNaN(parsed)) return null
-  return Number(parsed.toFixed(2))
-}
-
-const getSellerById = async (sellerId) => {
-  const [rows] = await db.query(
-    `SELECT * FROM accredited_sellers WHERE id = ? LIMIT 1`,
-    [sellerId]
-  )
-  return rows[0] || null
-}
-
-export const updateSellerTeamRate = async (req, res) => {
-  const access = await requireSellerAccess(req, res)
-  if (!access || access.isOffice) {
-    return res.status(403).json({ message: 'Only seller accounts can manage team rates from this page.' })
-  }
-
-  const { sellerId } = req.params
-  const rate = normalizeRate(req.body.rate)
-
-  if (rate === null || rate < 0 || rate > 100) {
-    return res.status(400).json({ message: 'Rate must be between 0 and 100' })
-  }
-
-  const targetSeller = await getSellerById(sellerId)
-  if (!targetSeller) return res.status(404).json({ message: 'Seller not found' })
-
-  const visibleIds = await getVisibleSellerIdsForUser(req.user)
-  if (!visibleIds.includes(Number(targetSeller.id)) || Number(targetSeller.id) === Number(access.seller.id)) {
-    return res.status(403).json({ message: 'You can only edit sellers under your team.' })
-  }
-
-  const allowedRoles = getAllowedEditableRoles(req.user.role)
-  if (!allowedRoles.includes(targetSeller.seller_role)) {
-    return res.status(403).json({ message: `You cannot edit ${targetSeller.seller_role} rates.` })
-  }
-
-  if (targetSeller.seller_role === 'broker') {
-    const parentBnm = access.seller.seller_role === 'broker_network_manager' ? access.seller : null
-    if (parentBnm?.commission_pool_rate !== null && parentBnm?.commission_pool_rate !== undefined && rate > Number(parentBnm.commission_pool_rate)) {
-      return res.status(400).json({ message: `Broker pool cannot exceed your BNM pool of ${parentBnm.commission_pool_rate}%` })
-    }
-
-    await db.query(
-      `UPDATE accredited_sellers SET commission_pool_rate = ?, rate_set_by = ?, rate_updated_at = NOW() WHERE id = ?`,
-      [rate, req.user.id, targetSeller.id]
-    )
-  } else if (targetSeller.seller_role === 'manager') {
-    const broker = await getSellerById(targetSeller.parent_seller_id)
-    if (broker?.commission_pool_rate !== null && broker?.commission_pool_rate !== undefined && rate > Number(broker.commission_pool_rate)) {
-      return res.status(400).json({ message: `Manager rate cannot exceed broker pool of ${broker.commission_pool_rate}%` })
-    }
-
-    await db.query(
-      `UPDATE accredited_sellers SET commission_rate = ?, personal_commission_rate = ?, override_commission_rate = NULL, rate_set_by = ?, rate_updated_at = NOW() WHERE id = ?`,
-      [rate, rate, req.user.id, targetSeller.id]
-    )
-  } else if (targetSeller.seller_role === 'agent') {
-    const manager = await getSellerById(targetSeller.parent_seller_id)
-    if (manager?.personal_commission_rate !== null && manager?.personal_commission_rate !== undefined && rate > Number(manager.personal_commission_rate)) {
-      return res.status(400).json({ message: `Agent rate cannot exceed manager rate of ${manager.personal_commission_rate}%` })
-    }
-
-    await db.query(
-      `UPDATE accredited_sellers SET commission_rate = ?, personal_commission_rate = ?, direct_to_developer_rate = ?, rate_set_by = ?, rate_updated_at = NOW() WHERE id = ?`,
-      [rate, rate, rate, req.user.id, targetSeller.id]
-    )
-  }
-
-  res.status(200).json({ message: 'Team rate updated successfully' })
+export const updateSellerTeamRate = async (_req, res) => {
+  return res.status(403).json({
+    message: 'Rate editing is disabled in seller accounts. Admin now manages pool and role rates per Seller Group.',
+  })
 }
 
 export const getSellerSales = async (req, res) => {
@@ -342,5 +274,3 @@ export const getSellerSales = async (req, res) => {
 
   res.status(200).json({ message: 'Sales fetched successfully', sales: rows, data: rows })
 }
-
-

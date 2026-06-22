@@ -35,11 +35,10 @@ import { paginateRows } from "../utils/pagination";
 type ListingStatus =
   | "available"
   | "reserved"
-  | "active"
-  | "hold"
   | "sold"
+  | "pending_cancellation"
+  | "cancelled"
   | "inactive"
-  | "superseded"
   | string;
 
 type Listing = {
@@ -155,8 +154,21 @@ type LibraryDocument = {
   status: string;
 };
 
+type ListingUnitHistory = {
+  id: number;
+  old_unit_id: string;
+  new_unit_id: string;
+  reason: string;
+  effective_date: string | null;
+  changed_by?: number | null;
+  changed_by_name?: string | null;
+  remarks?: string | null;
+  created_at: string;
+};
+
 type ListingFullDetails = {
   listing: Listing;
+  unitHistory?: ListingUnitHistory[];
   clientUnit: ClientUnitFullDetails | null;
   paymentSummary: PaymentSummary;
   commissionSummary: CommissionSummary;
@@ -203,11 +215,10 @@ const statusFilters = [
   { label: "All", value: "all" },
   { label: "Available", value: "available" },
   { label: "Reserved", value: "reserved" },
-  { label: "Active", value: "active" },
-  { label: "Hold", value: "hold" },
   { label: "Sold", value: "sold" },
+  { label: "Pending Cancellation", value: "pending_cancellation" },
+  { label: "Cancelled", value: "cancelled" },
   { label: "Inactive", value: "inactive" },
-  { label: "Superseded", value: "superseded" },
 ];
 
 const normalLotTypes = ["inner", "corner", "end"];
@@ -301,7 +312,7 @@ const formulaTooltips: Record<string, string> = {
   "20 Months": "20 Months = 75% Balance ÷ 20.",
   Project: "Project name. Value comes from listing.project_name.",
   Status:
-    "Listing status. Example: available, reserved, active, hold, sold, inactive, superseded.",
+    "Listing status. Example: available, reserved, sold, pending cancellation, cancelled, inactive.",
   Actions: "Row actions: Details, Edit, Delete.",
 };
 
@@ -571,7 +582,7 @@ const calculateListingBreakdown = (listingData: ListingFormData) => {
 const hasAttachedClientUnit = (listing: Listing) => {
   return (
     Boolean(Number(listing.has_active_client_unit || 0)) ||
-    ["reserved", "active", "sold"].includes(String(listing.status))
+    ["reserved", "sold", "pending_cancellation", "cancelled"].includes(String(listing.status))
   );
 };
 
@@ -876,12 +887,8 @@ const Listings = () => {
 
   const inventoryListings = listings.filter((listing) => {
     const status = String(listing.status || "").toLowerCase();
-    return status !== "inactive" && status !== "superseded";
+    return status !== "inactive";
   });
-
-  const supersededCount = listings.filter(
-    (listing) => String(listing.status || "").toLowerCase() === "superseded",
-  ).length;
 
   const listingStatusData = statusFilters
     .filter((status) => status.value !== "all")
@@ -937,14 +944,17 @@ const Listings = () => {
           value={listings.filter((item) => item.status === "reserved").length}
         />
         <StatCard
-          label="Active"
-          value={listings.filter((item) => item.status === "active").length}
+          label="Sold"
+          value={listings.filter((item) => item.status === "sold").length}
         />
         <StatCard
-          label="Hold"
-          value={listings.filter((item) => item.status === "hold").length}
+          label="Pending Cancellation"
+          value={listings.filter((item) => item.status === "pending_cancellation").length}
         />
-        <StatCard label="Superseded" value={supersededCount} />
+        <StatCard
+          label="Cancelled"
+          value={listings.filter((item) => item.status === "cancelled").length}
+        />
         <StatCard label="Total Value" value={formatMoney(totalValue)} />
       </div>
 
@@ -1167,7 +1177,7 @@ const Listings = () => {
                     </Button>
 
                     <Button
-                      disabled={!["available", "hold"].includes(listing.status)}
+                      disabled={!["available", "inactive"].includes(listing.status)}
                       icon={<FiTrash2 />}
                       onClick={() => setListingToDelete(listing)}
                       variant="danger"
@@ -1702,11 +1712,10 @@ const ListingFormModal = ({
           >
             <option value="available">Available</option>
             <option value="reserved">Reserved</option>
-            <option value="active">Active</option>
-            <option value="hold">Hold</option>
             <option value="sold">Sold</option>
+            <option value="pending_cancellation">Pending Cancellation</option>
+            <option value="cancelled">Cancelled</option>
             <option value="inactive">Inactive</option>
-            <option value="superseded">Superseded</option>
           </Select>
 
           {onEditDocuments ? (
@@ -1836,6 +1845,33 @@ const ListingDetailsModal = ({
               label="Listing Status"
               value={formatText(details.listing.status)}
             />
+          </DetailsSection>
+
+          <DetailsSection title="Unit Number History">
+            {details.unitHistory && details.unitHistory.length > 0 ? (
+              <div className="space-y-2 text-sm text-slate-700">
+                {details.unitHistory.map((item) => (
+                  <div
+                    key={item.id}
+                    className="rounded-lg border border-slate-200 bg-slate-50 p-3"
+                  >
+                    <p className="font-semibold text-slate-900">
+                      {item.old_unit_id} → {item.new_unit_id}
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      {formatText(item.reason)}
+                      {item.effective_date ? ` • ${formatDate(item.effective_date)}` : ""}
+                      {item.changed_by_name ? ` • ${item.changed_by_name}` : ""}
+                    </p>
+                    {item.remarks ? (
+                      <p className="mt-1 text-xs text-slate-500">{item.remarks}</p>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-slate-500">No unit number changes recorded.</p>
+            )}
           </DetailsSection>
 
           <DetailsSection title="Lot Pricing">
@@ -2707,4 +2743,3 @@ const Detail = ({
 };
 
 export default Listings;
-

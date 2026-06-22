@@ -2,10 +2,11 @@ import express from 'express'
 import {
   getClientUnits,
   getClientUnit,
-  getClientUnitPaymentSchedules,
   updateClientUnit,
   changeClientUnitListing,
   cancelClientUnit,
+  updateCancellationSettlement,
+  clearClientUnitForResale,
   deleteClientUnit,
   getClientUnitsByClient,
   getAvailableListings,
@@ -21,10 +22,11 @@ router.use(auth, adminOnly)
 router.get('/client-units', getClientUnits)
 router.get('/client-units/search', searchClientUnits)
 router.get('/client-units/:id', getClientUnit)
-router.get('/client-units/:id/payment-schedules', getClientUnitPaymentSchedules)
 router.patch('/client-units/:id', updateClientUnit)
 router.patch('/client-units/:id/change-listing', changeClientUnitListing)
 router.patch('/client-units/:id/cancel', cancelClientUnit)
+router.patch('/client-units/:id/cancellation-settlement', updateCancellationSettlement)
+router.patch('/client-units/:id/clear-for-resale', clearClientUnitForResale)
 router.delete('/client-units/:id', deleteClientUnit)
 router.get('/clients/:clientId/units', getClientUnitsByClient)
 router.get('/available-listings', getAvailableListings)

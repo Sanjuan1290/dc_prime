@@ -80,6 +80,10 @@ const sellerFields = `
   seller.seller_role,
   seller.parent_seller_id,
   parent.full_name AS parent_seller_name,
+  seller.seller_group_id,
+  sg.group_name AS seller_group_name,
+  sg.pool_rate AS seller_group_pool_rate,
+  roleDist.approved_rate AS seller_group_role_rate,
   seller.custom_reports_under,
   COALESCE(parent.full_name, seller.custom_reports_under, 'None') AS reports_under_display,
   seller.status,
@@ -102,6 +106,10 @@ const sellerJoins = `
   FROM accredited_sellers seller
   LEFT JOIN users user ON user.id = seller.user_id
   LEFT JOIN accredited_sellers parent ON parent.id = seller.parent_seller_id
+  LEFT JOIN seller_groups sg ON sg.id = seller.seller_group_id
+  LEFT JOIN seller_group_rate_distributions roleDist
+    ON roleDist.seller_group_id = seller.seller_group_id
+    AND roleDist.seller_role = seller.seller_role
   LEFT JOIN users rateSetter ON rateSetter.id = seller.rate_set_by
 `
 

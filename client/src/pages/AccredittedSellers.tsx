@@ -28,6 +28,10 @@ type AccreditedSeller = {
   reports_under_display: string | null
   status: string
   accreditation_date: string | null
+  seller_group_id?: number | null
+  seller_group_name?: string | null
+  seller_group_pool_rate?: number | string | null
+  seller_group_role_rate?: number | string | null
   commission_rate: number | string | null
   commission_pool_rate?: number | string | null
   personal_commission_rate?: number | string | null
@@ -70,23 +74,19 @@ const getHierarchyPath = (seller: AccreditedSeller) => {
 }
 
 const getCommissionSetup = (seller: AccreditedSeller) => {
-  if (seller.seller_role === "broker_network_manager") {
-    return <>BNM Pool: <span className="font-semibold text-slate-900">{formatRate(seller.commission_pool_rate)}</span></>
-  }
+  const roleRate = seller.seller_group_role_rate ?? seller.personal_commission_rate ?? seller.commission_rate ?? seller.commission_pool_rate
 
-  if (seller.seller_role === "broker") {
-    return <>Broker Pool: <span className="font-semibold text-slate-900">{formatRate(seller.commission_pool_rate)}</span></>
-  }
-
-  if (seller.seller_role === "manager") {
-    return <>Manager Rate: <span className="font-semibold text-slate-900">{formatRate(seller.personal_commission_rate || seller.commission_rate)}</span></>
+  if (!seller.seller_group_name) {
+    return <span className="font-semibold text-amber-600">No seller group</span>
   }
 
   return (
     <>
-      Agent Rate: <span className="font-semibold text-slate-900">{formatRate(seller.personal_commission_rate || seller.commission_rate)}</span>
+      Group: <span className="font-semibold text-slate-900">{seller.seller_group_name}</span>
       <br />
-      Direct Developer: <span className="font-semibold text-slate-900">{formatRate(seller.direct_to_developer_rate || seller.personal_commission_rate || seller.commission_rate)}</span>
+      Pool: <span className="font-semibold text-slate-900">{formatRate(seller.seller_group_pool_rate)}</span>
+      <br />
+      {formatText(seller.seller_role)} Rate: <span className="font-semibold text-slate-900">{formatRate(roleRate)}</span>
     </>
   )
 }
@@ -119,6 +119,7 @@ const AccredittedSellers = () => {
         seller.parent_seller_name,
         seller.reports_under_display,
         seller.user_full_name,
+        seller.seller_group_name,
         seller.status,
       ]
         .filter(Boolean)
@@ -162,7 +163,7 @@ const AccredittedSellers = () => {
       <PageHeader
         icon={<FiUsers />}
         title="Accredited Sellers"
-        subtitle="Read-only seller directory. Edit accounts, basic info, hierarchy, and commission rates in User Management."
+        subtitle="Read-only seller directory. Rates are managed by Seller Groups in User Management."
       />
 
       {error ? (
@@ -231,7 +232,7 @@ const AccredittedSellers = () => {
       <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-[1fr_220px_220px]">
         <Input
           icon={<FiSearch />}
-          placeholder="Search sellers, users, roles, or reports under..."
+          placeholder="Search sellers, users, roles, reports under, or group..."
           value={searchInput}
           onChange={(event) => {
             setSearchInput(event.target.value)
@@ -277,7 +278,7 @@ const AccredittedSellers = () => {
               <th className="px-4 py-3 text-left">Contact</th>
               <th className="px-4 py-3 text-left">Role</th>
               <th className="px-4 py-3 text-left">Reports Under</th>
-              <th className="px-4 py-3 text-left">Commission Setup</th>
+              <th className="px-4 py-3 text-left">Seller Group / Commission Setup</th>
               <th className="px-4 py-3 text-left">Accreditation</th>
               <th className="px-4 py-3 text-left">Status</th>
             </tr>

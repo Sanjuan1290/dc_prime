@@ -4,6 +4,16 @@ import { useParams } from "react-router-dom"
 import { API_URL } from "../utils/api"
 import { formatDate, formatDateOnly, formatMoney } from "../utils/formatters"
 
+type ScheduleReferenceDetail = {
+  payment_id?: number
+  reference_id?: string
+  reference_no?: string
+  reference?: string
+  applied_amount?: number | string
+  payment_date?: string | null
+  payment_type?: string | null
+}
+
 type ScheduleRow = {
   due_date: string | null
   description: string
@@ -12,6 +22,8 @@ type ScheduleRow = {
   date_paid: string | null
   amount_paid: number | string | null
   reference: string | null
+  reference_no?: string | null
+  reference_details?: ScheduleReferenceDetail[] | string | null
   running_balance: number | string
   status?: string | null
 }
@@ -62,6 +74,71 @@ const display = (value: unknown) => {
   return String(value)
 }
 
+const stripReferenceAmount = (value: string) => {
+  return value
+    .replace(/\s*\(₱[\d,]+(?:\.\d{2})?\)/g, "")
+    .replace(/\s*\(PHP\s*[\d,]+(?:\.\d{2})?\)/gi, "")
+    .trim()
+}
+
+const getReferenceValue = (detail: ScheduleReferenceDetail) => {
+  return String(
+    detail.reference_id ||
+      detail.reference_no ||
+      detail.reference ||
+      ""
+  ).trim()
+}
+
+const parseReferenceDetails = (
+  referenceDetails?: ScheduleReferenceDetail[] | string | null
+) => {
+  if (!referenceDetails) return []
+
+  if (Array.isArray(referenceDetails)) {
+    return referenceDetails
+  }
+
+  if (typeof referenceDetails === "string") {
+    try {
+      const parsed = JSON.parse(referenceDetails)
+
+      if (Array.isArray(parsed)) {
+        return parsed as ScheduleReferenceDetail[]
+      }
+
+      if (parsed && typeof parsed === "object") {
+        return [parsed as ScheduleReferenceDetail]
+      }
+    } catch {
+      return []
+    }
+  }
+
+  return []
+}
+
+const displayReference = (row: ScheduleRow) => {
+  const details = parseReferenceDetails(row.reference_details)
+
+  if (details.length > 0) {
+    const references = details
+      .map(getReferenceValue)
+      .map(stripReferenceAmount)
+      .filter(Boolean)
+
+    const uniqueReferences = Array.from(new Set(references))
+
+    if (uniqueReferences.length > 0) {
+      return uniqueReferences.join(", ")
+    }
+  }
+
+  const fallbackReference = row.reference || row.reference_no || ""
+
+  return stripReferenceAmount(display(fallbackReference))
+}
+
 const StatementOfAccountPrint = () => {
   const { clientUnitId = "" } = useParams()
 
@@ -99,7 +176,8 @@ const StatementOfAccountPrint = () => {
 
       <section className="sheet sheet-landscape">
         <header className="soa-header">
-          <div>
+          <div className="company-block">
+            <img className="soa-logo" src="/logo.png" alt="D&C Prime Realty" />
             <h1>D&amp;C PRIME REALTY</h1>
             <p>Matagás na Lupa, Indang, Cavite.</p>
             <p>4122 Philippines</p>
@@ -110,7 +188,9 @@ const StatementOfAccountPrint = () => {
             <table>
               <tbody>
                 <tr>
-                  <th colSpan={2} className="title">STATEMENT OF ACCOUNT</th>
+                  <th colSpan={2} className="title">
+                    STATEMENT OF ACCOUNT
+                  </th>
                 </tr>
                 <tr>
                   <td>Statement Date</td>
@@ -134,7 +214,9 @@ const StatementOfAccountPrint = () => {
             <table>
               <tbody>
                 <tr>
-                  <th colSpan={2} className="title">AMOUNT DETAILS</th>
+                  <th colSpan={2} className="title">
+                    AMOUNT DETAILS
+                  </th>
                 </tr>
                 <tr>
                   <td>Total Contract Price</td>
@@ -176,7 +258,7 @@ const StatementOfAccountPrint = () => {
                 <td className="money">{Number(row.penalty || 0).toFixed(2)}</td>
                 <td>{formatDateOnly(row.date_paid)}</td>
                 <td className="money">{row.amount_paid ? amount(row.amount_paid) : ""}</td>
-                <td>{display(row.reference)}</td>
+                <td className="reference-cell">{displayReference(row)}</td>
                 <td>{display(row.status)}</td>
                 <td className="money strong">{amount(row.running_balance)}</td>
               </tr>
@@ -191,12 +273,16 @@ const StatementOfAccountPrint = () => {
 
         <footer className="soa-footer">
           <div>
-            <p>Prepared by: <span className="line"></span></p>
+            <p>
+              Prepared by: <span className="line"></span>
+            </p>
             <p className="role">Administration Head</p>
             <p>Date:</p>
           </div>
           <div>
-            <p>Acknowledged by: <span className="line"></span></p>
+            <p>
+              Acknowledged by: <span className="line"></span>
+            </p>
             <p className="role">Client Name and Signature</p>
             <p>Date:</p>
           </div>
@@ -215,6 +301,8 @@ const printStyles = `
   .sheet { margin: 16px auto; background: white; padding: 8mm; box-shadow: 0 0 0 1px #e5e7eb; }
   .sheet-landscape { width: 297mm; min-height: 210mm; }
   .soa-header { display: flex; justify-content: space-between; gap: 24px; margin-bottom: 26px; }
+  .company-block { min-width: 250px; }
+  .soa-logo { width: 86px; height: 86px; object-fit: contain; margin-bottom: 8px; }
   .soa-header h1 { margin: 0 0 10px; font-family: Georgia, serif; font-size: 26px; letter-spacing: .5px; }
   .soa-header p { margin: 3px 0; font-size: 14px; }
   .top-tables { width: 47%; display: flex; flex-direction: column; gap: 14px; }
@@ -226,6 +314,7 @@ const printStyles = `
   .soa-table th { height: 42px; border: 2px solid #111; padding: 7px; text-align: center; }
   .soa-table td { border: 1px solid #222; padding: 7px; height: 21px; text-align: center; }
   .soa-table td:nth-child(2) { text-align: left; }
+  .reference-cell { max-width: 185px; word-break: break-word; font-size: 11px; }
   .money { text-align: right !important; white-space: nowrap; }
   .strong { font-weight: 800; }
   .soa-total-row { display: flex; justify-content: flex-end; gap: 80px; margin: 28px 0 24px; font-size: 16px; }

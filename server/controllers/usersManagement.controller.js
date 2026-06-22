@@ -19,6 +19,8 @@ const sellerParentRoleMap = {
 const isMissing = (value) => value === undefined || value === null || value === ''
 const nullableValue = (value) => (isMissing(value) ? null : value)
 const normalizeText = (value) => (typeof value === 'string' ? value.trim() : value)
+const isSellerRole = (role) => sellerRoles.includes(role)
+const roleLabel = (role) => String(role || '').replaceAll('_', ' ')
 
 const normalizeRate = (value) => {
   if (isMissing(value)) return null
@@ -32,10 +34,6 @@ const validateRate = (value, label) => {
   if (value < 0 || value > 100) return `${label} must be between 0 and 100`
   return null
 }
-
-const isSellerRole = (role) => sellerRoles.includes(role)
-
-const roleLabel = (role) => String(role || '').replaceAll('_', ' ')
 
 const userFields = `
   user.id,
@@ -59,6 +57,19 @@ const userFields = `
   parent.seller_role AS parent_seller_role,
   seller.status AS seller_status,
   seller.accreditation_date,
+  seller.seller_group_id,
+  sg.group_name AS seller_group_name,
+  sg.pool_rate AS seller_group_pool_rate,
+  sg.closing_seller_rate AS seller_group_closing_seller_rate,
+  sg.bnm_override_rate AS seller_group_bnm_override_rate,
+  sg.broker_override_rate AS seller_group_broker_override_rate,
+  sg.manager_override_rate AS seller_group_manager_override_rate,
+  sg.status AS seller_group_status,
+  CASE
+    WHEN seller.seller_role = 'broker_network_manager' THEN sg.pool_rate
+    ELSE sg.closing_seller_rate
+  END AS seller_group_role_rate,
+  roleDist.requested_rate AS seller_group_requested_rate,
   seller.commission_rate,
   seller.commission_pool_rate,
   seller.personal_commission_rate,
@@ -70,6 +81,11 @@ const userFields = `
   rateSetter.full_name AS rate_set_by_name,
   seller.rate_updated_at
 `
+
+const defaultCommissionRows = [
+  ['bnm_pool_rate', 'Legacy Broker Network Manager Rate', 'broker_network_manager', 'legacy', 0],
+  ['broker_pool_rate', 'Legacy Broker Rate', 'broker', 'legacy', 0],
+]
 
 const getUserById = async (userId, connectionOrDb = db) => {
   const [rows] = await connectionOrDb.query(
@@ -89,28 +105,16 @@ const getSellerById = async (sellerId, connectionOrDb = db) => {
       seller.*,
       parent.full_name AS parent_seller_name,
       parent.seller_role AS parent_seller_role,
-      broker.id AS broker_id,
-      broker.full_name AS broker_name,
-      broker.commission_pool_rate AS broker_pool_rate,
-      bnm.id AS broker_network_manager_id,
-      bnm.full_name AS broker_network_manager_name,
-      bnm.commission_pool_rate AS broker_network_manager_pool_rate
+      sg.group_name AS seller_group_name,
+      sg.pool_rate AS seller_group_pool_rate,
+      sg.closing_seller_rate AS seller_group_closing_seller_rate,
+      sg.bnm_override_rate AS seller_group_bnm_override_rate,
+      sg.broker_override_rate AS seller_group_broker_override_rate,
+      sg.manager_override_rate AS seller_group_manager_override_rate,
+      sg.status AS seller_group_status
     FROM accredited_sellers seller
     LEFT JOIN accredited_sellers parent ON parent.id = seller.parent_seller_id
-    LEFT JOIN accredited_sellers broker
-      ON broker.id = CASE
-        WHEN seller.seller_role = 'manager' THEN seller.parent_seller_id
-        WHEN seller.seller_role = 'agent' THEN parent.parent_seller_id
-        WHEN seller.seller_role = 'broker' THEN seller.id
-        ELSE NULL
-      END
-    LEFT JOIN accredited_sellers bnm
-      ON bnm.id = CASE
-        WHEN seller.seller_role = 'broker' THEN seller.parent_seller_id
-        WHEN seller.seller_role = 'manager' THEN broker.parent_seller_id
-        WHEN seller.seller_role = 'agent' THEN broker.parent_seller_id
-        ELSE NULL
-      END
+    LEFT JOIN seller_groups sg ON sg.id = seller.seller_group_id
     WHERE seller.id = ?
     LIMIT 1
     `,
@@ -129,11 +133,33 @@ const getSellerByUserId = async (userId, connectionOrDb = db) => {
   return rows[0] || null
 }
 
+const getSellerGroupById = async (sellerGroupId, connectionOrDb = db) => {
+  if (isMissing(sellerGroupId)) return null
 
-const defaultCommissionRows = [
-  ['bnm_pool_rate', 'Broker Network Manager Pool Rate', 'broker_network_manager', 'pool', 8],
-  ['broker_pool_rate', 'Broker Pool Rate', 'broker', 'pool', 7],
-]
+  const [rows] = await connectionOrDb.query(
+    `SELECT * FROM seller_groups WHERE id = ? LIMIT 1`,
+    [sellerGroupId]
+  )
+
+  return rows[0] || null
+}
+
+const getGroupRoleRate = async ({ sellerGroupId, role, connectionOrDb = db }) => {
+  if (isMissing(sellerGroupId)) return null
+
+  const [rows] = await connectionOrDb.query(
+    `
+    SELECT approved_rate
+    FROM seller_group_rate_distributions
+    WHERE seller_group_id = ?
+      AND seller_role = ?
+    LIMIT 1
+    `,
+    [sellerGroupId, role]
+  )
+
+  return normalizeRate(rows[0]?.approved_rate)
+}
 
 const seedCommissionDefaults = async (connectionOrDb = db) => {
   for (const [settingKey, label, role, rateType, defaultRate] of defaultCommissionRows) {
@@ -170,17 +196,6 @@ const getCommissionDefaultsMap = async (connectionOrDb = db) => {
     map[row.setting_key] = row
     return map
   }, {})
-}
-
-const getDefaultRateForSellerRole = async (role, key, connectionOrDb = db) => {
-  const defaults = await getCommissionDefaultsMap(connectionOrDb)
-
-  if (key && defaults[key]) return normalizeRate(defaults[key].default_rate)
-
-  if (role === 'broker_network_manager') return normalizeRate(defaults.bnm_pool_rate?.default_rate || 0)
-  if (role === 'broker') return normalizeRate(defaults.broker_pool_rate?.default_rate || 0)
-
-  return null
 }
 
 const validateParentSeller = async ({ role, parentSellerId, connection }) => {
@@ -226,37 +241,10 @@ const validateParentSeller = async ({ role, parentSellerId, connection }) => {
 
 const normalizeSellerProfile = ({ role, body, userFullName, userEmail, userStatus }) => {
   const sellerProfile = body?.seller_profile || {}
-
   const finalStatus = sellerProfile.status || userStatus || 'active'
+
   if (!allowedStatuses.includes(finalStatus)) {
     return { isValid: false, message: 'Invalid seller status' }
-  }
-
-  const commissionPoolRate = ['broker_network_manager', 'broker'].includes(role)
-    ? normalizeRate(sellerProfile.commission_pool_rate)
-    : null
-  const managerAssignedRate = role === 'manager'
-    ? normalizeRate(sellerProfile.manager_rate ?? sellerProfile.personal_commission_rate ?? sellerProfile.override_commission_rate)
-    : null
-  const agentCommissionRate = role === 'agent'
-    ? normalizeRate(sellerProfile.agent_commission_rate ?? sellerProfile.personal_commission_rate)
-    : null
-  const directToDeveloperRate = role === 'agent'
-    ? agentCommissionRate
-    : role === 'manager'
-      ? managerAssignedRate
-      : null
-  const maxDownlineRate = normalizeRate(sellerProfile.max_downline_rate)
-
-  const rateErrors = [
-    validateRate(commissionPoolRate, 'Commission pool rate'),
-    validateRate(managerAssignedRate, 'Manager rate'),
-    validateRate(agentCommissionRate, 'Agent commission rate'),
-    validateRate(maxDownlineRate, 'Max downline rate'),
-  ].filter(Boolean)
-
-  if (rateErrors.length > 0) {
-    return { isValid: false, message: rateErrors.join('. ') }
   }
 
   return {
@@ -267,58 +255,96 @@ const normalizeSellerProfile = ({ role, body, userFullName, userEmail, userStatu
       contact_no: normalizeText(sellerProfile.contact_no) || null,
       seller_role: role,
       parent_seller_id: nullableValue(sellerProfile.parent_seller_id),
+      seller_group_id: nullableValue(sellerProfile.seller_group_id),
       status: finalStatus,
       accreditation_date: nullableValue(sellerProfile.accreditation_date),
-      commission_rate: role === 'manager' ? managerAssignedRate : agentCommissionRate,
-      commission_pool_rate: commissionPoolRate,
-      personal_commission_rate: role === 'manager' ? managerAssignedRate : agentCommissionRate,
+      commission_rate: null,
+      commission_pool_rate: null,
+      personal_commission_rate: null,
       override_commission_rate: null,
-      direct_to_developer_rate: directToDeveloperRate,
-      max_downline_rate: maxDownlineRate,
+      direct_to_developer_rate: null,
+      max_downline_rate: null,
     },
   }
 }
 
-const validateSellerRatesAgainstParent = async ({ role, sellerProfile, parentSeller, connection }) => {
-  if (role === 'broker' && parentSeller?.commission_pool_rate !== null && parentSeller?.commission_pool_rate !== undefined) {
-    const parentPool = Number(parentSeller.commission_pool_rate || 0)
-    const brokerPool = Number(sellerProfile.commission_pool_rate || 0)
-    if (brokerPool > parentPool) {
-      return {
-        isValid: false,
-        message: `Broker pool cannot exceed the BNM pool of ${parentPool}%`,
-      }
-    }
-  }
-
-  if (role === 'manager' && parentSeller?.commission_pool_rate !== null && parentSeller?.commission_pool_rate !== undefined) {
-    const brokerPool = Number(parentSeller.commission_pool_rate || 0)
-    const managerRate = Number(sellerProfile.personal_commission_rate || 0)
-    if (managerRate > brokerPool) {
-      return {
-        isValid: false,
-        message: `Manager rate cannot exceed the broker pool of ${brokerPool}%`,
-      }
-    }
-  }
+const resolveSellerGroupId = async ({ role, sellerProfile, parentSeller, connection }) => {
+  if (parentSeller?.seller_group_id) return parentSeller.seller_group_id
+  if (!isMissing(sellerProfile.seller_group_id)) return sellerProfile.seller_group_id
 
   if (role === 'agent') {
-    const manager = parentSeller
+    return null
+  }
 
-    if (manager?.personal_commission_rate !== null && manager?.personal_commission_rate !== undefined) {
-      const managerRate = Number(manager.personal_commission_rate || 0)
-      const agentRate = Number(sellerProfile.personal_commission_rate || 0)
+  return null
+}
 
-      if (agentRate > managerRate) {
-        return {
-          isValid: false,
-          message: `Agent rate cannot exceed manager rate. Manager rate: ${managerRate}%, max agent rate: ${managerRate}%`,
-        }
-      }
+const applyGroupRateToSellerProfile = async ({ role, sellerProfile, connection }) => {
+  const sellerGroupId = sellerProfile.seller_group_id
+
+  if (isMissing(sellerGroupId)) {
+    return {
+      ...sellerProfile,
+      commission_rate: null,
+      commission_pool_rate: null,
+      personal_commission_rate: null,
+      override_commission_rate: null,
+      direct_to_developer_rate: null,
+      max_downline_rate: null,
     }
   }
 
-  return { isValid: true }
+  const group = await getSellerGroupById(sellerGroupId, connection)
+  if (!group) {
+    throw Object.assign(new Error('Selected seller group was not found'), { statusCode: 400 })
+  }
+
+  if (group.status !== 'active') {
+    throw Object.assign(new Error('Selected seller group is inactive'), { statusCode: 400 })
+  }
+
+  const roleRate = await getGroupRoleRate({ sellerGroupId, role, connectionOrDb: connection })
+  const finalRate = roleRate ?? 0
+
+  return {
+    ...sellerProfile,
+    commission_rate: finalRate,
+    commission_pool_rate: ['broker_network_manager', 'broker'].includes(role) ? finalRate : null,
+    personal_commission_rate: finalRate,
+    override_commission_rate: null,
+    direct_to_developer_rate: role === 'agent' ? finalRate : null,
+    max_downline_rate: null,
+  }
+}
+
+const syncSellerGroupMembership = async ({ connection, sellerId, sellerGroupId }) => {
+  await connection.query(
+    `
+    UPDATE seller_group_members
+    SET status = 'inactive', ended_at = COALESCE(ended_at, NOW())
+    WHERE seller_id = ?
+      AND status = 'active'
+      AND (seller_group_id <> ? OR ? IS NULL)
+    `,
+    [sellerId, sellerGroupId, sellerGroupId]
+  )
+
+  if (isMissing(sellerGroupId)) return
+
+  await connection.query(
+    `
+    INSERT INTO seller_group_members (seller_group_id, seller_id, status, joined_at)
+    SELECT ?, ?, 'active', NOW()
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM seller_group_members
+      WHERE seller_group_id = ?
+        AND seller_id = ?
+        AND status = 'active'
+    )
+    `,
+    [sellerGroupId, sellerId, sellerGroupId, sellerId]
+  )
 }
 
 const createLinkedSeller = async ({ connection, userId, role, sellerProfile, actingUserId }) => {
@@ -331,6 +357,7 @@ const createLinkedSeller = async ({ connection, userId, role, sellerProfile, act
       contact_no,
       seller_role,
       parent_seller_id,
+      seller_group_id,
       custom_reports_under,
       status,
       accreditation_date,
@@ -342,7 +369,7 @@ const createLinkedSeller = async ({ connection, userId, role, sellerProfile, act
       max_downline_rate,
       rate_set_by,
       rate_updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
     `,
     [
       userId,
@@ -351,6 +378,7 @@ const createLinkedSeller = async ({ connection, userId, role, sellerProfile, act
       sellerProfile.contact_no,
       role,
       sellerProfile.parent_seller_id,
+      sellerProfile.seller_group_id,
       sellerProfile.status,
       sellerProfile.accreditation_date,
       sellerProfile.commission_rate,
@@ -363,6 +391,7 @@ const createLinkedSeller = async ({ connection, userId, role, sellerProfile, act
     ]
   )
 
+  await syncSellerGroupMembership({ connection, sellerId: result.insertId, sellerGroupId: sellerProfile.seller_group_id })
   return result.insertId
 }
 
@@ -382,6 +411,7 @@ const updateLinkedSeller = async ({ connection, userId, role, sellerProfile, act
       contact_no = ?,
       seller_role = ?,
       parent_seller_id = ?,
+      seller_group_id = ?,
       custom_reports_under = NULL,
       status = ?,
       accreditation_date = ?,
@@ -401,6 +431,7 @@ const updateLinkedSeller = async ({ connection, userId, role, sellerProfile, act
       sellerProfile.contact_no,
       role,
       sellerProfile.parent_seller_id,
+      sellerProfile.seller_group_id,
       sellerProfile.status,
       sellerProfile.accreditation_date,
       sellerProfile.commission_rate,
@@ -414,15 +445,53 @@ const updateLinkedSeller = async ({ connection, userId, role, sellerProfile, act
     ]
   )
 
+  await syncSellerGroupMembership({ connection, sellerId: existingSeller.id, sellerGroupId: sellerProfile.seller_group_id })
   return existingSeller.id
 }
 
+const updateSellerRatesFromGroup = async ({ connection, sellerId, sellerGroupId, role, actingUserId }) => {
+  const rate = await getGroupRoleRate({ sellerGroupId, role, connectionOrDb: connection })
+  const finalRate = rate ?? 0
+
+  await connection.query(
+    `
+    UPDATE accredited_sellers
+    SET
+      commission_rate = ?,
+      commission_pool_rate = CASE WHEN seller_role IN ('broker_network_manager', 'broker') THEN ? ELSE NULL END,
+      personal_commission_rate = ?,
+      override_commission_rate = NULL,
+      direct_to_developer_rate = CASE WHEN seller_role = 'agent' THEN ? ELSE direct_to_developer_rate END,
+      rate_set_by = ?,
+      rate_updated_at = NOW()
+    WHERE id = ?
+    `,
+    [finalRate, finalRate, finalRate, finalRate, actingUserId, sellerId]
+  )
+}
+
+const propagateSellerGroupToDownline = async ({ connection, sellerId, sellerGroupId, actingUserId }) => {
+  const [children] = await connection.query(
+    `SELECT id, seller_role FROM accredited_sellers WHERE parent_seller_id = ?`,
+    [sellerId]
+  )
+
+  for (const child of children) {
+    await connection.query(
+      `UPDATE accredited_sellers SET seller_group_id = ? WHERE id = ?`,
+      [sellerGroupId, child.id]
+    )
+    await syncSellerGroupMembership({ connection, sellerId: child.id, sellerGroupId })
+    await updateSellerRatesFromGroup({ connection, sellerId: child.id, sellerGroupId, role: child.seller_role, actingUserId })
+    await propagateSellerGroupToDownline({ connection, sellerId: child.id, sellerGroupId, actingUserId })
+  }
+}
 
 export const getCommissionRoleDefaults = async (req, res) => {
   const defaultsMap = await getCommissionDefaultsMap()
   const defaults = Object.values(defaultsMap)
   res.status(200).json({
-    message: 'Commission role defaults fetched successfully',
+    message: 'Legacy commission role defaults fetched successfully. New rates are controlled by Seller Groups.',
     defaults,
     defaultsMap,
     data: defaults,
@@ -468,7 +537,7 @@ export const updateCommissionRoleDefaults = async (req, res) => {
       userId: req.user.id,
       action: 'update',
       module: 'Commission Defaults',
-      description: 'Updated role default commission rates',
+      description: 'Updated legacy role default commission rates',
       ipAddress: getClientIp(req),
     })
 
@@ -494,6 +563,10 @@ export const getUsers = async (req, res) => {
     FROM users user
     LEFT JOIN accredited_sellers seller ON seller.user_id = user.id
     LEFT JOIN accredited_sellers parent ON parent.id = seller.parent_seller_id
+    LEFT JOIN seller_groups sg ON sg.id = seller.seller_group_id
+    LEFT JOIN seller_group_rate_distributions roleDist
+      ON roleDist.seller_group_id = seller.seller_group_id
+      AND roleDist.seller_role = seller.seller_role
     LEFT JOIN users rateSetter ON rateSetter.id = seller.rate_set_by
     ORDER BY user.id DESC
     `
@@ -503,12 +576,7 @@ export const getUsers = async (req, res) => {
 }
 
 export const createUser = async (req, res) => {
-  const {
-    full_name,
-    email,
-    role = 'agent',
-    status = 'active',
-  } = req.body
+  const { full_name, email, role = 'agent', status = 'active' } = req.body
 
   const finalFullName = normalizeText(full_name)
   const finalEmail = normalizeText(email)
@@ -519,22 +587,15 @@ export const createUser = async (req, res) => {
     return res.status(400).json({ message: 'Full name and email are required' })
   }
 
-  if (!allowedRoles.includes(finalRole)) {
-    return res.status(400).json({ message: 'Invalid role' })
-  }
-
-  if (!allowedStatuses.includes(finalStatus)) {
-    return res.status(400).json({ message: 'Invalid user status' })
-  }
+  if (!allowedRoles.includes(finalRole)) return res.status(400).json({ message: 'Invalid role' })
+  if (!allowedStatuses.includes(finalStatus)) return res.status(400).json({ message: 'Invalid user status' })
 
   if (req.user.role !== 'super_admin' && ['super_admin', 'admin'].includes(finalRole)) {
     return res.status(403).json({ message: 'Only super admin can create admin or super admin accounts' })
   }
 
   const [existing] = await db.query(`SELECT id FROM users WHERE email = ? LIMIT 1`, [finalEmail])
-  if (existing.length > 0) {
-    return res.status(400).json({ message: 'Email is already used' })
-  }
+  if (existing.length > 0) return res.status(400).json({ message: 'Email is already used' })
 
   const connection = await db.getConnection()
 
@@ -560,16 +621,6 @@ export const createUser = async (req, res) => {
 
       normalizedSeller = sellerProfileResult.sellerProfile
 
-      if (finalRole === 'broker_network_manager' && normalizedSeller.commission_pool_rate === null) {
-        normalizedSeller.commission_pool_rate = await getDefaultRateForSellerRole(finalRole, 'bnm_pool_rate', connection)
-      }
-      if (finalRole === 'broker' && normalizedSeller.commission_pool_rate === null) {
-        normalizedSeller.commission_pool_rate = await getDefaultRateForSellerRole(finalRole, 'broker_pool_rate', connection)
-      }
-      if (finalRole === 'agent') {
-        normalizedSeller.direct_to_developer_rate = normalizedSeller.personal_commission_rate
-      }
-
       const parentValidation = await validateParentSeller({
         role: finalRole,
         parentSellerId: normalizedSeller.parent_seller_id,
@@ -582,18 +633,8 @@ export const createUser = async (req, res) => {
       }
 
       parentSeller = parentValidation.parentSeller
-
-      const rateValidation = await validateSellerRatesAgainstParent({
-        role: finalRole,
-        sellerProfile: normalizedSeller,
-        parentSeller,
-        connection,
-      })
-
-      if (!rateValidation.isValid) {
-        await connection.rollback()
-        return res.status(400).json({ message: rateValidation.message })
-      }
+      normalizedSeller.seller_group_id = await resolveSellerGroupId({ role: finalRole, sellerProfile: normalizedSeller, parentSeller, connection })
+      normalizedSeller = await applyGroupRateToSellerProfile({ role: finalRole, sellerProfile: normalizedSeller, connection })
     }
 
     const temporaryPassword = generateTemporaryPassword()
@@ -634,10 +675,7 @@ export const createUser = async (req, res) => {
     })
 
     if (emailResult.sent) {
-      await db.query(
-        `UPDATE users SET temp_password_sent_at = NOW() WHERE id = ?`,
-        [result.insertId]
-      )
+      await db.query(`UPDATE users SET temp_password_sent_at = NOW() WHERE id = ?`, [result.insertId])
     }
 
     await safeCreateAuditLog({
@@ -645,7 +683,7 @@ export const createUser = async (req, res) => {
       action: 'create',
       module: 'Users',
       description: sellerId
-        ? `Created user ${finalFullName} and linked seller profile ${sellerId}`
+        ? `Created user ${finalFullName}, linked seller profile ${sellerId}, and resolved seller group automatically`
         : `Created user ${finalFullName}`,
       ipAddress: getClientIp(req),
     })
@@ -682,13 +720,8 @@ export const updateUser = async (req, res) => {
   const finalRole = isMissing(role) ? existingUser.role : normalizeText(role)
   const finalStatus = isMissing(status) ? existingUser.status : status
 
-  if (!allowedRoles.includes(finalRole)) {
-    return res.status(400).json({ message: 'Invalid role' })
-  }
-
-  if (!allowedStatuses.includes(finalStatus)) {
-    return res.status(400).json({ message: 'Invalid user status' })
-  }
+  if (!allowedRoles.includes(finalRole)) return res.status(400).json({ message: 'Invalid role' })
+  if (!allowedStatuses.includes(finalStatus)) return res.status(400).json({ message: 'Invalid user status' })
 
   if (req.user.role !== 'super_admin' && (['super_admin', 'admin'].includes(existingUser.role) || ['super_admin', 'admin'].includes(finalRole))) {
     return res.status(403).json({ message: 'Only super admin can edit admin or super admin accounts' })
@@ -699,9 +732,7 @@ export const updateUser = async (req, res) => {
       `SELECT id FROM users WHERE email = ? AND id <> ? LIMIT 1`,
       [finalEmail, id]
     )
-    if (duplicateRows.length > 0) {
-      return res.status(400).json({ message: 'Email is already used' })
-    }
+    if (duplicateRows.length > 0) return res.status(400).json({ message: 'Email is already used' })
   }
 
   const connection = await db.getConnection()
@@ -711,6 +742,7 @@ export const updateUser = async (req, res) => {
 
     let normalizedSeller = null
     let parentSeller = null
+    let sellerId = null
 
     if (isSellerRole(finalRole)) {
       const sellerProfileResult = normalizeSellerProfile({
@@ -728,16 +760,6 @@ export const updateUser = async (req, res) => {
 
       normalizedSeller = sellerProfileResult.sellerProfile
 
-      if (finalRole === 'broker_network_manager' && normalizedSeller.commission_pool_rate === null) {
-        normalizedSeller.commission_pool_rate = await getDefaultRateForSellerRole(finalRole, 'bnm_pool_rate', connection)
-      }
-      if (finalRole === 'broker' && normalizedSeller.commission_pool_rate === null) {
-        normalizedSeller.commission_pool_rate = await getDefaultRateForSellerRole(finalRole, 'broker_pool_rate', connection)
-      }
-      if (finalRole === 'agent') {
-        normalizedSeller.direct_to_developer_rate = normalizedSeller.personal_commission_rate
-      }
-
       const parentValidation = await validateParentSeller({
         role: finalRole,
         parentSellerId: normalizedSeller.parent_seller_id,
@@ -750,26 +772,11 @@ export const updateUser = async (req, res) => {
       }
 
       parentSeller = parentValidation.parentSeller
-
-      const rateValidation = await validateSellerRatesAgainstParent({
-        role: finalRole,
-        sellerProfile: normalizedSeller,
-        parentSeller,
-        connection,
-      })
-
-      if (!rateValidation.isValid) {
-        await connection.rollback()
-        return res.status(400).json({ message: rateValidation.message })
-      }
+      normalizedSeller.seller_group_id = await resolveSellerGroupId({ role: finalRole, sellerProfile: normalizedSeller, parentSeller, connection })
+      normalizedSeller = await applyGroupRateToSellerProfile({ role: finalRole, sellerProfile: normalizedSeller, connection })
     }
 
-    const fields = [
-      'full_name = ?',
-      'email = ?',
-      'role = ?',
-      'status = ?',
-    ]
+    const fields = ['full_name = ?', 'email = ?', 'role = ?', 'status = ?']
     const params = [finalFullName, finalEmail, finalRole, finalStatus]
 
     if (!isMissing(password)) {
@@ -778,10 +785,7 @@ export const updateUser = async (req, res) => {
     }
 
     params.push(id)
-
     await connection.query(`UPDATE users SET ${fields.join(', ')} WHERE id = ?`, params)
-
-    let sellerId = null
 
     if (normalizedSeller) {
       sellerId = await updateLinkedSeller({
@@ -791,11 +795,9 @@ export const updateUser = async (req, res) => {
         sellerProfile: normalizedSeller,
         actingUserId: req.user.id,
       })
+      await propagateSellerGroupToDownline({ connection, sellerId, sellerGroupId: normalizedSeller.seller_group_id, actingUserId: req.user.id })
     } else {
-      await connection.query(
-        `UPDATE accredited_sellers SET user_id = NULL WHERE user_id = ?`,
-        [id]
-      )
+      await connection.query(`UPDATE accredited_sellers SET user_id = NULL WHERE user_id = ?`, [id])
     }
 
     await connection.commit()
@@ -804,9 +806,7 @@ export const updateUser = async (req, res) => {
       userId: req.user.id,
       action: 'update',
       module: 'Users',
-      description: sellerId
-        ? `Updated user ${id} and linked seller profile ${sellerId}`
-        : `Updated user ${id}`,
+      description: sellerId ? `Updated user ${id}, seller ${sellerId}, and group inheritance` : `Updated user ${id}`,
       ipAddress: getClientIp(req),
     })
 
@@ -837,10 +837,8 @@ export const deactivateUser = async (req, res) => {
 
   try {
     await connection.beginTransaction()
-
     await connection.query(`UPDATE users SET status = 'inactive' WHERE id = ?`, [id])
     await connection.query(`UPDATE accredited_sellers SET status = 'inactive' WHERE user_id = ?`, [id])
-
     await connection.commit()
 
     await safeCreateAuditLog({
@@ -859,7 +857,6 @@ export const deactivateUser = async (req, res) => {
     connection.release()
   }
 }
-
 
 export const resetUserTemporaryPassword = async (req, res) => {
   const { id } = req.params
@@ -916,23 +913,15 @@ export const linkUserToSeller = async (req, res) => {
   const { id } = req.params
   const { seller_id } = req.body
 
-  if (isMissing(seller_id)) {
-    return res.status(400).json({ message: 'seller_id is required' })
-  }
+  if (isMissing(seller_id)) return res.status(400).json({ message: 'seller_id is required' })
 
   const existingUser = await getUserById(id)
   if (!existingUser) return res.status(404).json({ message: 'User not found' })
-
-  if (!isSellerRole(existingUser.role)) {
-    return res.status(400).json({ message: 'Only seller role users can be linked to accredited seller profiles' })
-  }
+  if (!isSellerRole(existingUser.role)) return res.status(400).json({ message: 'Only seller role users can be linked to accredited seller profiles' })
 
   const seller = await getSellerById(seller_id)
   if (!seller) return res.status(404).json({ message: 'Seller not found' })
-
-  if (seller.seller_role !== existingUser.role) {
-    return res.status(400).json({ message: 'Seller role must match the user role' })
-  }
+  if (seller.seller_role !== existingUser.role) return res.status(400).json({ message: 'Seller role must match the user role' })
 
   await db.query(`UPDATE accredited_sellers SET user_id = NULL WHERE user_id = ?`, [id])
   await db.query(`UPDATE accredited_sellers SET user_id = ? WHERE id = ?`, [id, seller_id])

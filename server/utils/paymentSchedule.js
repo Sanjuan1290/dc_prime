@@ -23,8 +23,6 @@ const addMonths = (dateValue, months) => {
   const day = date.getDate()
   date.setMonth(date.getMonth() + months)
 
-  // If JS rolled into the following month because the target month is shorter,
-  // use the last valid day of the intended month.
   if (date.getDate() < day) {
     date.setDate(0)
   }
@@ -111,6 +109,27 @@ const getVerifiedPayments = async (connectionOrDb, clientUnitId) => {
   return rows
 }
 
+const pushReferenceDetail = (row, detail) => {
+  const appliedAmount = money(detail.applied_amount)
+  if (appliedAmount <= 0) return
+
+  row.reference_details = [
+    ...(Array.isArray(row.reference_details) ? row.reference_details : []),
+    {
+      payment_id: Number(detail.payment_id),
+      reference_id: detail.reference_id,
+      applied_amount: appliedAmount,
+      payment_date: detail.payment_date,
+      payment_type: detail.payment_type,
+    },
+  ]
+
+  const nextReference = `${detail.reference_id} (${appliedAmount.toFixed(2)})`
+  row.reference_no = row.reference_no
+    ? `${row.reference_no}, ${nextReference}`
+    : nextReference
+}
+
 const buildBaseRows = (unit) => {
   const totalContractPrice = firstPositive(
     unit.offer_purchase_price,
@@ -129,6 +148,9 @@ const buildBaseRows = (unit) => {
   const deferredCashAmount = money(unit.deferred_cash_amount)
   const terms = Math.max(Number(unit.payment_terms_months || 0), 0)
   const monthlyAmortization = money(unit.monthly_amortization)
+  const plannedBalloonAmount = unit.mode_of_payment === 'installment'
+    ? money(unit.balloon_payment_amount)
+    : 0
   const startingDate = toDateOnly(unit.starting_date) || toDateOnly(unit.created_at) || toDateOnly(new Date())
   const firstDueDate = toDateOnly(unit.due_date) || startingDate
   const rows = []
@@ -150,6 +172,7 @@ const buildBaseRows = (unit) => {
       balance: due,
       date_paid: null,
       reference_no: null,
+      reference_details: [],
       status: 'not_due',
       running_balance: totalContractPrice,
       sort_order: sortOrder,
@@ -207,9 +230,11 @@ const buildBaseRows = (unit) => {
   const monthlyBase = monthlyAmortization > 0
     ? monthlyAmortization
     : terms > 0
-      ? money((totalContractPrice - reservationFee - downpaymentNet - deferredCashAmount) / terms)
+      ? money((totalContractPrice - reservationFee - downpaymentNet - deferredCashAmount - plannedBalloonAmount) / terms)
       : 0
-  let remainingMonthlyTotal = money(totalContractPrice - reservationFee - downpaymentNet - deferredCashAmount)
+  let remainingMonthlyTotal = money(
+    totalContractPrice - reservationFee - downpaymentNet - deferredCashAmount - plannedBalloonAmount
+  )
 
   for (let index = 1; index <= terms; index += 1) {
     if (remainingMonthlyTotal <= 0) break
@@ -229,6 +254,21 @@ const buildBaseRows = (unit) => {
     remainingMonthlyTotal = money(remainingMonthlyTotal - amount)
   }
 
+  if (plannedBalloonAmount > 0) {
+    const fallbackBalloonDueDate = terms > 0
+      ? addMonths(monthlyStart, terms)
+      : monthlyStart
+    const balloonDueDate = toDateOnly(unit.balloon_due_date) || toDateOnly(fallbackBalloonDueDate)
+
+    pushRow({
+      dueDate: balloonDueDate,
+      description: 'Balloon Payment',
+      scheduleType: 'balloon',
+      totalDue: plannedBalloonAmount,
+      sortOrder: sortOrder++,
+    })
+  }
+
   return rows
 }
 
@@ -236,19 +276,18 @@ const preferredScheduleTypes = (paymentType) => {
   switch (paymentType) {
     case 'reservation':
     case 'reservation_fee':
-      return ['reservation', 'downpayment', 'monthly', 'full_payment']
+      return ['reservation', 'downpayment', 'monthly', 'balloon', 'full_payment']
     case 'downpayment':
-      return ['downpayment', 'monthly', 'full_payment']
+      return ['downpayment', 'monthly', 'balloon', 'full_payment']
     case 'monthly':
-    case 'advance_payment':
+      return ['monthly', 'downpayment', 'balloon', 'full_payment']
     case 'balloon':
-      return ['monthly', 'downpayment', 'full_payment']
+      return ['balloon', 'monthly', 'downpayment', 'full_payment']
     case 'full_payment':
-      return ['reservation', 'downpayment', 'monthly', 'full_payment']
-    case 'legal_misc':
+      return ['reservation', 'downpayment', 'monthly', 'balloon', 'full_payment']
     case 'other':
     default:
-      return ['reservation', 'downpayment', 'monthly', 'full_payment']
+      return ['reservation', 'downpayment', 'monthly', 'balloon', 'full_payment']
   }
 }
 
@@ -267,14 +306,13 @@ const findNextRowIndex = (rows, paymentType) => {
 }
 
 const applyPaymentsToRows = (rows, payments, totalContractPrice) => {
-  let totalApplied = 0
-
   for (const payment of payments) {
     let remainingPayment = money(payment.amount)
     const paymentDate = toDateOnly(payment.payment_date)
     const paymentReference = payment.reference_id || payment.payment_method || `Payment #${payment.id}`
     const paymentType = payment.payment_type || 'other'
-    const isAdvanceLike = ['balloon', 'advance_payment'].includes(paymentType)
+    const firstTargetRowIndex = findNextRowIndex(rows, paymentType)
+    let alreadyAppliedToFirstRow = false
 
     while (remainingPayment > 0) {
       const rowIndex = findNextRowIndex(rows, paymentType)
@@ -285,27 +323,38 @@ const applyPaymentsToRows = (rows, payments, totalContractPrice) => {
       if (rowBalance <= 0) break
 
       const applied = Math.min(rowBalance, remainingPayment)
+      const isOffsetApplication = alreadyAppliedToFirstRow || rowIndex !== firstTargetRowIndex
+      const isAdvanceApplication = !isOffsetApplication && isFutureDate(row.due_date, paymentDate)
+
       row.amount_paid = money(row.amount_paid + applied)
 
-      if (isAdvanceLike || (paymentType === 'monthly' && rowIndex > rows.findIndex((item) => money(item.balance) > 0))) {
+      if (isOffsetApplication) {
         row.advance_applied = money(row.advance_applied + applied)
       }
 
       row.balance = money(row.total_due - row.amount_paid)
       row.date_paid = row.balance <= 0 ? paymentDate : row.date_paid || paymentDate
-      row.reference_no = row.reference_no
-        ? `${row.reference_no}, ${paymentReference}`
-        : paymentReference
+      pushReferenceDetail(row, {
+        payment_id: payment.id,
+        reference_id: paymentReference,
+        applied_amount: applied,
+        payment_date: paymentDate,
+        payment_type: paymentType,
+      })
 
-      totalApplied = money(totalApplied + applied)
       remainingPayment = money(remainingPayment - applied)
+      alreadyAppliedToFirstRow = true
 
       if (row.balance <= 0) {
-        row.status = isFutureDate(row.due_date, paymentDate)
-          ? 'paid_ahead'
-          : 'paid'
+        if (isOffsetApplication) {
+          row.status = 'offset'
+        } else if (isAdvanceApplication) {
+          row.status = 'advance'
+        } else {
+          row.status = 'paid'
+        }
       } else {
-        row.status = 'partial'
+        row.status = isOffsetApplication ? 'offset' : 'partial'
       }
     }
   }
@@ -320,7 +369,9 @@ const applyPaymentsToRows = (rows, payments, totalContractPrice) => {
           ? 'due'
           : 'not_due'
     } else if (money(row.balance) <= 0) {
-      row.status = row.status === 'paid_ahead' ? 'paid_ahead' : 'paid'
+      row.status = ['advance', 'offset'].includes(row.status) ? row.status : 'paid'
+    } else if (money(row.advance_applied) > 0) {
+      row.status = 'offset'
     } else {
       row.status = 'partial'
     }
@@ -361,6 +412,7 @@ const replacePaymentSchedules = async (connectionOrDb, clientUnitId, rows) => {
       balance,
       date_paid,
       reference_no,
+      reference_details,
       status,
       running_balance,
       sort_order
@@ -380,6 +432,7 @@ const replacePaymentSchedules = async (connectionOrDb, clientUnitId, rows) => {
       row.balance,
       row.date_paid,
       row.reference_no,
+      JSON.stringify(row.reference_details || []),
       row.status,
       row.running_balance,
       row.sort_order,
@@ -429,6 +482,7 @@ export const getPaymentScheduleRows = async (connectionOrDb, clientUnitId) => {
       balance,
       DATE_FORMAT(date_paid, '%Y-%m-%d') AS date_paid,
       reference_no,
+      reference_details,
       status,
       running_balance,
       sort_order
@@ -439,7 +493,17 @@ export const getPaymentScheduleRows = async (connectionOrDb, clientUnitId) => {
     [clientUnitId]
   )
 
-  return rows
+  return rows.map((row) => ({
+    ...row,
+    reference_details: (() => {
+      if (!row.reference_details) return []
+      try {
+        return JSON.parse(row.reference_details)
+      } catch {
+        return []
+      }
+    })(),
+  }))
 }
 
 export const rebuildAndGetPaymentScheduleRows = async (connectionOrDb, clientUnitId) => {
@@ -467,6 +531,7 @@ export const mapScheduleRowForPrint = (row) => ({
   date_paid: row.date_paid,
   amount_paid: row.amount_paid,
   reference: row.reference_no,
+  reference_details: row.reference_details || [],
   running_balance: row.running_balance,
   status: row.status,
 })

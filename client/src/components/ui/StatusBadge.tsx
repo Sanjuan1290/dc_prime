@@ -14,13 +14,13 @@ const toneForStatus = (status: string | null | undefined) => {
     case "submitted":
     case "verified":
     case "converted":
-    case "paid":
-    case "paid_ahead":
       return {
         badge: "border-emerald-200 bg-emerald-50 text-emerald-700",
         dot: "bg-emerald-500",
       }
     case "pending":
+    case "pending_cancellation":
+    case "pending_settlement":
     case "reserved":
     case "payable":
     case "late":
@@ -29,11 +29,13 @@ const toneForStatus = (status: string | null | undefined) => {
     case "partially_paid":
     case "partially_released":
     case "partially_deducted":
+    case "offset":
       return {
         badge: "border-amber-200 bg-amber-50 text-amber-700",
         dot: "bg-amber-500",
       }
     case "cancelled":
+    case "discontinued":
     case "inactive":
     case "rejected":
     case "absent":
@@ -45,6 +47,9 @@ const toneForStatus = (status: string | null | undefined) => {
         badge: "border-red-200 bg-red-50 text-red-700",
         dot: "bg-red-500",
       }
+    case "advance":
+    case "refunded":
+    case "partial_refund":
     case "sold":
     case "released":
     case "fully_paid":
@@ -55,9 +60,9 @@ const toneForStatus = (status: string | null | undefined) => {
         dot: "bg-blue-500",
       }
     case "hold":
+    case "no_refund":
     case "unpaid":
     case "overdue":
-    case "past_due":
       return {
         badge: "border-orange-200 bg-orange-50 text-orange-700",
         dot: "bg-orange-500",

@@ -319,19 +319,32 @@ const getSeller = async (connectionOrDb, sellerId) => {
   const [rows] = await connectionOrDb.query(
     `
       SELECT
-        id,
-        full_name,
-        seller_role,
-        parent_seller_id,
-        commission_rate,
-        commission_pool_rate,
-        personal_commission_rate,
-        override_commission_rate,
-        direct_to_developer_rate,
-        max_downline_rate,
-        status
-      FROM accredited_sellers
-      WHERE id = ?
+        seller.id,
+        seller.full_name,
+        seller.seller_role,
+        seller.parent_seller_id,
+        seller.seller_group_id,
+        seller.commission_rate,
+        seller.commission_pool_rate,
+        seller.personal_commission_rate,
+        seller.override_commission_rate,
+        seller.direct_to_developer_rate,
+        seller.max_downline_rate,
+        seller.status,
+        sg.group_name AS seller_group_name,
+        sg.pool_rate AS seller_group_pool_rate,
+        sg.closing_seller_rate AS seller_group_closing_seller_rate,
+        sg.bnm_override_rate AS seller_group_bnm_override_rate,
+        sg.broker_override_rate AS seller_group_broker_override_rate,
+        sg.manager_override_rate AS seller_group_manager_override_rate,
+        sg.agent_sale_split_json AS seller_group_agent_sale_split_json,
+        sg.manager_sale_split_json AS seller_group_manager_sale_split_json,
+        sg.broker_sale_split_json AS seller_group_broker_sale_split_json,
+        sg.bnm_sale_split_json AS seller_group_bnm_sale_split_json,
+        sg.rollover_policy AS seller_group_rollover_policy
+      FROM accredited_sellers seller
+      LEFT JOIN seller_groups sg ON sg.id = seller.seller_group_id
+      WHERE seller.id = ?
       LIMIT 1
       `,
     [sellerId],
@@ -348,6 +361,14 @@ const getClientUnitCommissionBase = async (connectionOrDb, clientUnitId) => {
         cu.client_id,
         cu.listing_id,
         cu.seller_id,
+        cu.seller_group_id,
+        cu.seller_group_name_snapshot,
+        cu.seller_group_pool_rate_snapshot,
+        cu.seller_group_closing_rate_snapshot,
+        cu.seller_group_bnm_override_snapshot,
+        cu.seller_group_broker_override_snapshot,
+        cu.seller_group_manager_override_snapshot,
+        cu.seller_group_rate_snapshot_json,
         cu.sale_type,
         cu.status AS client_unit_status,
         client.full_name AS client_name,
@@ -1464,7 +1485,208 @@ const getAssignedSaleRate = (seller) => {
   );
 };
 
-export const buildHierarchyCommissionPreview = async ({
+const sellerRoleOrder = {
+  broker_network_manager: 0,
+  broker: 1,
+  manager: 2,
+  agent: 3,
+};
+
+const getSellerRoleIndex = (seller) => {
+  return sellerRoleOrder[seller?.seller_role] ?? 99;
+};
+
+const getNearestUpline = (chain) => chain[1] || chain[0] || null;
+
+const getPlanRate = (value) => normalizeRate(value || 0);
+
+const parseJsonMaybe = (value) => {
+  if (!value) return null;
+  if (typeof value === "object") return value;
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  return null;
+};
+
+const normalizeSplit = (value, fallback = {}) => {
+  const parsed = parseJsonMaybe(value) || fallback || {};
+  return Object.entries(parsed).reduce((split, [role, rate]) => {
+    split[role] = normalizeRate(rate);
+    return split;
+  }, {});
+};
+
+const getDefaultSaleSplitsFromSeller = (seller) => {
+  const closing = getPlanRate(seller.seller_group_closing_seller_rate);
+  const bnm = getPlanRate(seller.seller_group_bnm_override_rate);
+  const broker = getPlanRate(seller.seller_group_broker_override_rate);
+  const manager = getPlanRate(seller.seller_group_manager_override_rate);
+  const pool = getPlanRate(seller.seller_group_pool_rate);
+
+  return {
+    agent: {
+      broker_network_manager: bnm,
+      broker,
+      manager,
+      agent: closing,
+    },
+    manager: {
+      broker_network_manager: bnm,
+      broker: normalizeRate(broker + manager),
+      manager: closing,
+    },
+    broker: {
+      broker_network_manager: normalizeRate(bnm + broker + manager),
+      broker: closing,
+    },
+    broker_network_manager: {
+      broker_network_manager: normalizeRate(pool || closing + bnm + broker + manager),
+    },
+  };
+};
+
+const getSellerGroupPlanFromSeller = (seller) => {
+  if (!seller?.seller_group_id) return null;
+
+  const poolRate = getPlanRate(seller.seller_group_pool_rate);
+  const defaults = getDefaultSaleSplitsFromSeller(seller);
+
+  const saleSplits = {
+    agent: normalizeSplit(seller.seller_group_agent_sale_split_json, defaults.agent),
+    manager: normalizeSplit(seller.seller_group_manager_sale_split_json, defaults.manager),
+    broker: normalizeSplit(seller.seller_group_broker_sale_split_json, defaults.broker),
+    broker_network_manager: normalizeSplit(seller.seller_group_bnm_sale_split_json, defaults.broker_network_manager),
+  };
+
+  const hasAnySplit = Object.values(saleSplits).some((split) =>
+    Object.values(split).some((rate) => normalizeRate(rate) > 0),
+  );
+
+  if (poolRate <= 0 && !hasAnySplit) return null;
+
+  return {
+    seller_group_id: seller.seller_group_id,
+    group_name: seller.seller_group_name,
+    pool_rate: poolRate,
+    sale_splits: saleSplits,
+  };
+};
+
+const addCommissionPreviewRate = ({ rowsBySellerId, seller, rate, sourceType, label }) => {
+  const normalizedRate = normalizeRate(rate);
+  if (!seller || normalizedRate <= 0) return;
+
+  const key = Number(seller.id);
+  const existing = rowsBySellerId.get(key);
+
+  if (existing) {
+    existing.rate = normalizeRate(Number(existing.rate || 0) + normalizedRate);
+    existing.label = `${existing.label}; ${label}`;
+    if (sourceType === "main") existing.sourceType = "main";
+    return;
+  }
+
+  rowsBySellerId.set(key, {
+    seller,
+    rate: normalizedRate,
+    sourceType,
+    commissionRole: seller.seller_role,
+    label,
+  });
+};
+
+const splitKeyBySellerRole = {
+  agent: "agent",
+  manager: "manager",
+  broker: "broker",
+  broker_network_manager: "broker_network_manager",
+};
+
+const getSplitRecipient = ({ targetRole, chain, sellingSeller }) => {
+  if (targetRole === sellingSeller.seller_role) return sellingSeller;
+
+  const exactRecipient = chain.find((seller) => seller.seller_role === targetRole);
+  if (exactRecipient) return exactRecipient;
+
+  const targetIndex = sellerRoleOrder[targetRole] ?? 99;
+
+  const nearestUpline = chain
+    .slice(1)
+    .filter((seller) => (sellerRoleOrder[seller.seller_role] ?? 99) <= targetIndex)
+    .sort((a, b) => (sellerRoleOrder[b.seller_role] ?? 99) - (sellerRoleOrder[a.seller_role] ?? 99))[0];
+
+  return nearestUpline || getNearestUpline(chain) || sellingSeller;
+};
+
+const buildGroupPlanCommissionPreview = ({ chain, plan }) => {
+  const sellingSeller = chain[0];
+  const rowsBySellerId = new Map();
+  const warnings = [];
+  const splitKey = splitKeyBySellerRole[sellingSeller.seller_role];
+  const split = plan.sale_splits?.[splitKey];
+
+  if (!split) {
+    return {
+      rows: [],
+      totalRate: 0,
+      warnings: [`No seller group split found for ${sellerDisplayRole(sellingSeller.seller_role)} sale`],
+    };
+  }
+
+  for (const [targetRole, rawRate] of Object.entries(split)) {
+    const rate = normalizeRate(rawRate);
+    if (rate <= 0) continue;
+
+    const recipient = getSplitRecipient({
+      targetRole,
+      chain,
+      sellingSeller,
+    });
+
+    const sourceType = Number(recipient?.id) === Number(sellingSeller.id) ? "main" : "override";
+
+    addCommissionPreviewRate({
+      rowsBySellerId,
+      seller: recipient,
+      rate,
+      sourceType,
+      label: `${sellerDisplayRole(targetRole)} allocation for ${sellerDisplayRole(sellingSeller.seller_role)} sale`,
+    });
+  }
+
+  const rows = Array.from(rowsBySellerId.values()).filter(
+    (row) => normalizeRate(row.rate) > 0,
+  );
+
+  const totalRate = normalizeRate(
+    rows.reduce((sum, row) => sum + normalizeRate(row.rate), 0),
+  );
+
+  if (plan.pool_rate > 0 && totalRate > plan.pool_rate) {
+    throw new Error(
+      `Commission split exceeds seller group pool. Pool is ${plan.pool_rate}%, but computed split is ${totalRate}%.`,
+    );
+  }
+
+  if (plan.pool_rate > 0 && totalRate < plan.pool_rate) {
+    warnings.push(
+      `This split leaves ${normalizeRate(plan.pool_rate - totalRate)}% undistributed from the seller group pool.`,
+    );
+  }
+
+  return {
+    rows,
+    totalRate,
+    warnings,
+  };
+};
+
+const buildLegacyHierarchyCommissionPreview = async ({
   connectionOrDb = db,
   sellerId,
 }) => {
@@ -1602,6 +1824,37 @@ export const buildHierarchyCommissionPreview = async ({
       rows.reduce((sum, row) => sum + normalizeRate(row.rate), 0),
     ),
     warnings,
+  };
+};
+
+export const buildHierarchyCommissionPreview = async ({
+  connectionOrDb = db,
+  sellerId,
+}) => {
+  const chain = await getSellerChain(connectionOrDb, sellerId);
+
+  if (chain.length === 0) {
+    return {
+      chain: [],
+      rows: [],
+      totalRate: 0,
+      warnings: ["Seller hierarchy was not found"],
+    };
+  }
+
+  const plan = getSellerGroupPlanFromSeller(chain[0]);
+
+  if (!plan) {
+    return buildLegacyHierarchyCommissionPreview({ connectionOrDb, sellerId });
+  }
+
+  const preview = buildGroupPlanCommissionPreview({ chain, plan });
+
+  return {
+    chain,
+    rows: preview.rows,
+    totalRate: preview.totalRate,
+    warnings: preview.warnings,
   };
 };
 
@@ -3485,3 +3738,7 @@ export const getApprovedCashAdvancesBySeller = async (req, res) => {
     data: rows,
   });
 };
+
+
+
+--------------------------------------------------------------------------------

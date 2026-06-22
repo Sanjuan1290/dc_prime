@@ -136,7 +136,7 @@ const recomputeListingClientUnitBalances = async (
       nextListingStatus = 'sold'
     } else if (activePaymentPaid > 0) {
       nextStatus = 'active'
-      nextListingStatus = 'active'
+      nextListingStatus = 'sold'
     } else if (reservationPaid > 0 || paidAmount >= reservationFee) {
       nextStatus = 'reserved'
       nextListingStatus = 'reserved'
@@ -234,6 +234,72 @@ const syncListingUnitAliases = async (connectionOrDb, listingId, aliases = []) =
 const formatOldUnitIdsForAudit = (oldUnitIds) => {
   const aliases = normalizeUnitAliasList(oldUnitIds)
   return aliases.length ? ` | Old Unit IDs: ${aliases.join(', ')}` : ''
+}
+
+const allowedListingStatuses = [
+  'available',
+  'reserved',
+  'sold',
+  'pending_cancellation',
+  'cancelled',
+  'inactive',
+]
+
+const normalizeListingStatus = (status, fallback = 'available') => {
+  const normalized = String(status || '').trim().toLowerCase()
+
+  if (normalized === 'active') return 'sold'
+  if (normalized === 'hold' || normalized === 'superseded') return 'inactive'
+  if (allowedListingStatuses.includes(normalized)) return normalized
+
+  return fallback
+}
+
+const insertListingUnitHistory = async (connectionOrDb, {
+  listingId,
+  oldUnitId,
+  newUnitId,
+  reason = 'admin_correction',
+  changedBy = null,
+  remarks = null,
+}) => {
+  const previousUnitId = String(oldUnitId || '').trim()
+  const nextUnitId = String(newUnitId || '').trim()
+
+  if (!previousUnitId || !nextUnitId || previousUnitId === nextUnitId) {
+    return null
+  }
+
+  const [existingRows] = await connectionOrDb.query(
+    `
+    SELECT id
+    FROM listing_unit_history
+    WHERE listing_id = ?
+      AND old_unit_id = ?
+      AND new_unit_id = ?
+    LIMIT 1
+    `,
+    [listingId, previousUnitId, nextUnitId]
+  )
+
+  if (existingRows[0]) return existingRows[0].id
+
+  const [result] = await connectionOrDb.query(
+    `
+    INSERT INTO listing_unit_history (
+      listing_id,
+      old_unit_id,
+      new_unit_id,
+      reason,
+      effective_date,
+      changed_by,
+      remarks
+    ) VALUES (?, ?, ?, ?, CURDATE(), ?, ?)
+    `,
+    [listingId, previousUnitId, nextUnitId, reason, changedBy, remarks]
+  )
+
+  return result.insertId
 }
 
 
@@ -433,6 +499,20 @@ const listingFields = `
     INNER JOIN listings child_listing ON child_listing.id = lul.child_listing_id
     WHERE lul.parent_listing_id = l.id
   ) AS derived_unit_ids,
+  (
+    SELECT JSON_ARRAYAGG(
+      JSON_OBJECT(
+        'old_unit_id', luh.old_unit_id,
+        'new_unit_id', luh.new_unit_id,
+        'reason', luh.reason,
+        'effective_date', luh.effective_date,
+        'remarks', luh.remarks,
+        'created_at', luh.created_at
+      )
+    )
+    FROM listing_unit_history luh
+    WHERE luh.listing_id = l.id
+  ) AS unit_history_json,
   l.lot_type,
   l.reservation_fee,
   l.price_per_sqm,
@@ -824,8 +904,29 @@ export const getListingFullDetails = async (req, res) => {
     }
   }
 
+  const [unitHistoryRows] = await db.query(
+    `
+    SELECT
+      luh.id,
+      luh.old_unit_id,
+      luh.new_unit_id,
+      luh.reason,
+      luh.effective_date,
+      luh.changed_by,
+      u.full_name AS changed_by_name,
+      luh.remarks,
+      luh.created_at
+    FROM listing_unit_history luh
+    LEFT JOIN users u ON u.id = luh.changed_by
+    WHERE luh.listing_id = ?
+    ORDER BY luh.effective_date DESC, luh.id DESC
+    `,
+    [id]
+  )
+
   return res.status(200).json({
     listing: mappedListing,
+    unitHistory: unitHistoryRows,
     clientUnit,
     paymentSummary,
     commissionSummary,
@@ -879,6 +980,8 @@ export const createListing = async (req, res) => {
     })
   }
 
+  const finalStatus = normalizeListingStatus(status)
+
   const computedAmounts = computeListingAmounts({
     lot_area_sqm,
     price_per_sqm,
@@ -916,7 +1019,7 @@ export const createListing = async (req, res) => {
         numberValue(price_per_sqm),
         numberValue(lot_area_sqm),
         numberValue(legal_misc_rate),
-        status
+        finalStatus
       ]
     )
 
@@ -997,6 +1100,8 @@ export const updateListing = async (req, res) => {
     })
   }
 
+  const finalStatus = normalizeListingStatus(status)
+
   const computedAmounts = computeListingAmounts({
     lot_area_sqm,
     price_per_sqm,
@@ -1011,7 +1116,7 @@ export const updateListing = async (req, res) => {
     await connection.beginTransaction()
 
     const [existingListingRows] = await connection.query(
-      `SELECT id, unit_id FROM listings WHERE id = ? LIMIT 1`,
+      `SELECT id, unit_id, status FROM listings WHERE id = ? LIMIT 1`,
       [id]
     )
 
@@ -1056,7 +1161,7 @@ export const updateListing = async (req, res) => {
         numberValue(price_per_sqm),
         numberValue(lot_area_sqm),
         numberValue(legal_misc_rate),
-        status,
+        finalStatus,
         id
       ]
     )
@@ -1066,6 +1171,17 @@ export const updateListing = async (req, res) => {
 
       return res.status(404).json({
         message: 'Listing not found'
+      })
+    }
+
+    if (existingListing.unit_id !== unit_id) {
+      await insertListingUnitHistory(connection, {
+        listingId: id,
+        oldUnitId: existingListing.unit_id,
+        newUnitId: unit_id,
+        reason: 'admin_correction',
+        changedBy: req.user.id,
+        remarks: 'Unit ID changed from listing edit form',
       })
     }
 
@@ -1306,7 +1422,7 @@ export const deleteListing = async (req, res) => {
     return res.status(404).json({ message: 'Listing not found' })
   }
 
-  if (['reserved', 'sold'].includes(listing.status)) {
+  if (['reserved', 'sold', 'pending_cancellation', 'cancelled'].includes(listing.status)) {
     return res.status(400).json({
       message: 'Cannot delete a listing that has been reserved or sold.'
     })

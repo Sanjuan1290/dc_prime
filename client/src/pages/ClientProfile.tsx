@@ -415,6 +415,8 @@ type ReserveListingData = {
   downpayment_discount_rate_option: string;
   downpayment_discount_rate_custom: string;
   deferred_cash_amount: string;
+  balloon_payment_amount: string;
+  balloon_due_date: string;
   payment_terms_months: number | "";
   payment_terms_months_option: string;
   payment_terms_months_custom: string;
@@ -515,6 +517,8 @@ const createDefaultReserveData = (): ReserveListingData => ({
   downpayment_discount_rate_option: "0",
   downpayment_discount_rate_custom: "",
   deferred_cash_amount: "0",
+  balloon_payment_amount: "0",
+  balloon_due_date: "",
   payment_terms_months: 36,
   payment_terms_months_option: "36",
   payment_terms_months_custom: "",
@@ -1014,6 +1018,14 @@ const reserveListing = async ({
         reserveData.mode_of_payment === "cash"
           ? Number(reserveData.deferred_cash_amount || 0)
           : 0,
+      balloon_payment_amount:
+        reserveData.mode_of_payment === "installment"
+          ? Number(reserveData.balloon_payment_amount || 0)
+          : 0,
+      balloon_due_date:
+        reserveData.mode_of_payment === "installment" && reserveData.balloon_due_date
+          ? reserveData.balloon_due_date
+          : null,
       payment_terms_months:
         reserveData.mode_of_payment === "installment"
           ? getSelectedNumber(
@@ -1913,6 +1925,10 @@ const ClientProfile = () => {
     reserveData.mode_of_payment === "cash"
       ? moneyInputValue(reserveData.deferred_cash_amount)
       : 0;
+  const reserveBalloonPayment =
+    reserveData.mode_of_payment === "installment"
+      ? moneyInputValue(reserveData.balloon_payment_amount)
+      : 0;
   const reserveBalanceRaw =
     reservePurchasePrice -
     reserveReservationFee -
@@ -1928,8 +1944,12 @@ const ClientProfile = () => {
         )
       : 0;
   const reserveInterestRate = moneyInputValue(reserveData.interest_rate);
+  const reserveAmortizedBalance = Math.max(
+    reserveOfferBalance - reserveBalloonPayment,
+    0,
+  );
   const reserveBalanceWithInterest =
-    reserveOfferBalance + reserveOfferBalance * (reserveInterestRate / 100);
+    reserveAmortizedBalance + reserveAmortizedBalance * (reserveInterestRate / 100);
   const computedMonthlyAmortization =
     reserveData.mode_of_payment === "installment" && reserveTermsMonths > 0
       ? reserveBalanceWithInterest / reserveTermsMonths
@@ -3537,6 +3557,14 @@ const ClientProfile = () => {
                       paymentMode === "cash"
                         ? reserveData.deferred_cash_amount
                         : "0",
+                    balloon_payment_amount:
+                      paymentMode === "installment"
+                        ? reserveData.balloon_payment_amount || "0"
+                        : "0",
+                    balloon_due_date:
+                      paymentMode === "installment"
+                        ? reserveData.balloon_due_date
+                        : "",
                     payment_terms_months:
                       paymentMode === "installment"
                         ? getSelectedNumber(
@@ -3860,6 +3888,37 @@ const ClientProfile = () => {
                           ...reserveData,
                           interest_rate: e.target.value,
                           monthly_amortization: "",
+                        });
+                        setReserveValidationMessage("");
+                      }}
+                    />
+
+
+
+                    <Input
+                      label="Balloon Payment Amount"
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={reserveData.balloon_payment_amount}
+                      onChange={(e) => {
+                        setReserveData({
+                          ...reserveData,
+                          balloon_payment_amount: e.target.value,
+                          monthly_amortization: "",
+                        });
+                        setReserveValidationMessage("");
+                      }}
+                    />
+
+                    <Input
+                      label="Balloon Due Date"
+                      type="date"
+                      value={reserveData.balloon_due_date}
+                      onChange={(e) => {
+                        setReserveData({
+                          ...reserveData,
+                          balloon_due_date: e.target.value,
                         });
                         setReserveValidationMessage("");
                       }}

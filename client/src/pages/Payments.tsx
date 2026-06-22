@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   FiCreditCard,
   FiEdit2,
+  FiRefreshCw,
   FiPlus,
   FiSearch,
   FiTrash2,
@@ -130,8 +131,6 @@ const paymentTypes = [
   "downpayment",
   "monthly",
   "balloon",
-  "advance_payment",
-  "legal_misc",
   "full_payment",
   "other",
 ]
@@ -309,10 +308,6 @@ const getSuggestionHelpText = (paymentType: string) => {
     return "Balloon payment pays future dues and shortens the duration"
   }
 
-  if (paymentType === "advance_payment") {
-    return "Advance payment applies to the next unpaid monthly due"
-  }
-
   if (paymentType === "full_payment") {
     return "Suggested amount based on remaining balance"
   }
@@ -343,6 +338,8 @@ const Payments = () => {
   const [clientUnitSearch, setClientUnitSearch] = useState("")
   const [editClientUnitSearch, setEditClientUnitSearch] = useState("")
   const [paymentToDelete, setPaymentToDelete] = useState<Payment | null>(null)
+  const [statusPayment, setStatusPayment] = useState<Payment | null>(null)
+  const [statusFormData, setStatusFormData] = useState<PaymentFormData>(emptyFormData)
 
   const [page, setPage] = useState(1)
   const [rowsPerPage, setRowsPerPage] = useState(10)
@@ -389,7 +386,9 @@ const Payments = () => {
     onSuccess: () => {
       invalidateAfterPaymentChange()
       setEditPayment(null)
+      setStatusPayment(null)
       setEditFormData(emptyFormData)
+      setStatusFormData(emptyFormData)
       setEditClientUnitSearch("")
       setSuccessMessage("Payment updated successfully")
     },
@@ -554,6 +553,12 @@ const Payments = () => {
     setSuccessMessage("")
   }
 
+  const openStatusModal = (payment: Payment) => {
+    setStatusPayment(payment)
+    setStatusFormData(paymentToFormData(payment))
+    setSuccessMessage("")
+  }
+
   const handleCreatePayment = () => {
     createPaymentMutation.mutate(formData)
   }
@@ -564,6 +569,15 @@ const Payments = () => {
     updatePaymentMutation.mutate({
       id: editPayment.id,
       paymentData: editFormData,
+    })
+  }
+
+  const handleUpdatePaymentStatus = () => {
+    if (!statusPayment) return
+
+    updatePaymentMutation.mutate({
+      id: statusPayment.id,
+      paymentData: statusFormData,
     })
   }
 
@@ -761,6 +775,13 @@ const Payments = () => {
                       Edit
                     </Button>
 
+                    <Button
+                      icon={<FiRefreshCw />}
+                      onClick={() => openStatusModal(payment)}
+                    >
+                      Status
+                    </Button>
+
                     {payment.status !== "verified" ? (
                       <Button
                         icon={<FiTrash2 />}
@@ -829,6 +850,17 @@ const Payments = () => {
         </Modal>
       ) : null}
 
+      {statusPayment ? (
+        <PaymentStatusModal
+          payment={statusPayment}
+          formData={statusFormData}
+          setFormData={setStatusFormData}
+          onClose={() => setStatusPayment(null)}
+          onSave={handleUpdatePaymentStatus}
+          isPending={updatePaymentMutation.isPending}
+        />
+      ) : null}
+
       {editPayment ? (
         <PaymentModal
           title="Edit Payment"
@@ -845,6 +877,78 @@ const Payments = () => {
         />
       ) : null}
     </div>
+  )
+}
+
+
+type PaymentStatusModalProps = {
+  payment: Payment
+  formData: PaymentFormData
+  setFormData: (data: PaymentFormData) => void
+  onClose: () => void
+  onSave: () => void
+  isPending: boolean
+}
+
+const PaymentStatusModal = ({
+  payment,
+  formData,
+  setFormData,
+  onClose,
+  onSave,
+  isPending,
+}: PaymentStatusModalProps) => {
+  return (
+    <Modal
+      title="Change Payment Status"
+      onClose={onClose}
+      size="md"
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button onClick={onClose}>Cancel</Button>
+          <Button disabled={isPending} onClick={onSave} variant="primary">
+            {isPending ? "Saving..." : "Save Status"}
+          </Button>
+        </div>
+      }
+    >
+      <div className="space-y-4">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <MiniDetail label="Client" value={payment.client_name} />
+          <MiniDetail label="Unit" value={payment.unit_id} />
+          <MiniDetail label="Amount" value={formatMoney(payment.amount)} />
+          <MiniDetail label="Current Status" value={formatText(payment.status)} />
+        </div>
+
+        <Select
+          label="New Status"
+          value={formData.status}
+          onChange={(e) =>
+            setFormData({
+              ...formData,
+              status: e.target.value,
+            })
+          }
+        >
+          {paymentStatuses.map((status) => (
+            <option key={status} value={status}>
+              {formatText(status)}
+            </option>
+          ))}
+        </Select>
+
+        {formData.status === "verified" && formData.payment_method !== "cash" && !formData.reference_id ? (
+          <Alert
+            variant="warning"
+            title="Verified non-cash payments need a reference ID. Use Edit if you need to add the reference first."
+          />
+        ) : null}
+
+        <p className="text-sm text-slate-500">
+          Changing status recalculates the client balance, SOA, listing status, and commission eligibility.
+        </p>
+      </div>
+    </Modal>
   )
 }
 

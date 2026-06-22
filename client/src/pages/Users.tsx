@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { FiPlus, FiSearch, FiSettings, FiUserPlus } from "react-icons/fi"
+import { FiEdit2, FiPlus, FiSearch, FiSettings, FiUserPlus, FiUsers } from "react-icons/fi"
 import Alert from "../components/ui/Alert"
 import Button from "../components/ui/Button"
 import EmptyState from "../components/ui/EmptyState"
@@ -35,12 +35,19 @@ type User = {
   parent_seller_role: string | null
   seller_status: string | null
   accreditation_date: string | null
+  seller_group_id: number | null
+  seller_group_name: string | null
+  seller_group_pool_rate: number | string | null
+  seller_group_closing_seller_rate?: number | string | null
+  seller_group_bnm_override_rate?: number | string | null
+  seller_group_broker_override_rate?: number | string | null
+  seller_group_manager_override_rate?: number | string | null
+  seller_group_role_rate: number | string | null
+  seller_group_status: string | null
   commission_rate: number | string | null
   commission_pool_rate: number | string | null
   personal_commission_rate: number | string | null
-  override_commission_rate: number | string | null
   direct_to_developer_rate?: number | string | null
-  max_downline_rate: number | string | null
   must_change_password?: boolean | number
   temp_password_sent_at?: string | null
 }
@@ -53,10 +60,55 @@ type AccreditedSeller = {
   parent_seller_name: string | null
   reports_under_display: string | null
   status: string
-  commission_pool_rate: number | string | null
-  personal_commission_rate: number | string | null
-  override_commission_rate: number | string | null
-  direct_to_developer_rate?: number | string | null
+  seller_group_id?: number | null
+  seller_group_name?: string | null
+  seller_group_pool_rate?: number | string | null
+  seller_group_closing_seller_rate?: number | string | null
+  seller_group_bnm_override_rate?: number | string | null
+  seller_group_broker_override_rate?: number | string | null
+  seller_group_manager_override_rate?: number | string | null
+  seller_group_role_rate?: number | string | null
+}
+
+type SaleSplitRole = "broker_network_manager" | "broker" | "manager" | "agent"
+
+type SaleSplit = Partial<Record<SaleSplitRole, number | string | null>>
+
+type SaleSplitForm = Record<SaleSplitRole, string>
+
+type SellerGroupDistribution = {
+  seller_group_id?: number
+  seller_role: string
+  requested_rate: number | string | null
+  approved_rate: number | string | null
+  status?: string
+  remarks?: string | null
+}
+
+type SellerGroup = {
+  id: number
+  group_name: string
+  group_code: string | null
+  pool_rate: number | string
+  closing_seller_rate: number | string
+  bnm_override_rate: number | string
+  broker_override_rate: number | string
+  manager_override_rate: number | string
+  agent_sale_split_json?: SaleSplit | string | null
+  manager_sale_split_json?: SaleSplit | string | null
+  broker_sale_split_json?: SaleSplit | string | null
+  bnm_sale_split_json?: SaleSplit | string | null
+  rollover_policy?: string | null
+  group_head_seller_id: number | null
+  group_head_name: string | null
+  status: string
+  notes: string | null
+  active_member_count: number | string
+  bnm_count: number | string
+  broker_count: number | string
+  manager_count: number | string
+  agent_count: number | string
+  distribution: SellerGroupDistribution[]
 }
 
 type CurrentUserResponse = {
@@ -67,29 +119,13 @@ type CurrentUserResponse = {
 
 type UsersResponse = { users?: User[]; data?: User[] }
 type SellersResponse = { accreditedSellers?: AccreditedSeller[]; sellers?: AccreditedSeller[]; data?: AccreditedSeller[] }
-
-type CommissionDefault = {
-  setting_key: string
-  label: string
-  role: string
-  rate_type: string
-  default_rate: number | string
-}
-
-type DefaultsResponse = {
-  defaults?: CommissionDefault[]
-  data?: CommissionDefault[]
-  defaultsMap?: Record<string, CommissionDefault>
-}
+type GroupsResponse = { groups?: SellerGroup[]; data?: SellerGroup[] }
 
 type SellerProfileForm = {
   contact_no: string
   accreditation_date: string
   parent_seller_id: string
-  commission_pool_rate: string
-  manager_rate: string
-  agent_commission_rate: string
-  max_downline_rate: string
+  seller_group_id: string
 }
 
 type UserForm = {
@@ -100,9 +136,21 @@ type UserForm = {
   seller_profile: SellerProfileForm
 }
 
-type DefaultsForm = {
-  bnm_pool_rate: string
-  broker_pool_rate: string
+type SellerGroupForm = {
+  group_name: string
+  group_code: string
+  pool_rate: string
+  closing_seller_rate: string
+  bnm_override_rate: string
+  broker_override_rate: string
+  manager_override_rate: string
+  agent_sale_split: SaleSplitForm
+  manager_sale_split: SaleSplitForm
+  broker_sale_split: SaleSplitForm
+  bnm_sale_split: SaleSplitForm
+  group_head_seller_id: string
+  status: string
+  notes: string
 }
 
 const allRoles: UserRole[] = ["super_admin", "admin", "broker_network_manager", "broker", "manager", "agent"]
@@ -110,19 +158,62 @@ const adminCreatableRoles: UserRole[] = ["broker_network_manager", "broker", "ma
 const sellerRoles: UserRole[] = ["broker_network_manager", "broker", "manager", "agent"]
 const statuses = ["active", "inactive"]
 
-const defaultDefaultsForm: DefaultsForm = {
-  bnm_pool_rate: "8",
-  broker_pool_rate: "7",
-}
+const saleSplitSections: Array<{
+  key: "agent_sale_split" | "manager_sale_split" | "broker_sale_split" | "bnm_sale_split"
+  payloadKey: "agent_sale_split" | "manager_sale_split" | "broker_sale_split" | "bnm_sale_split"
+  label: string
+  description: string
+  roles: Array<{ key: SaleSplitRole; label: string }>
+}> = [
+  {
+    key: "agent_sale_split",
+    payloadKey: "agent_sale_split",
+    label: "Agent sale",
+    description: "Agent closed the sale. Edit exact allocation for BNM, Broker, Manager, and Agent.",
+    roles: [
+      { key: "broker_network_manager", label: "BNM" },
+      { key: "broker", label: "Broker" },
+      { key: "manager", label: "Manager" },
+      { key: "agent", label: "Agent" },
+    ],
+  },
+  {
+    key: "manager_sale_split",
+    payloadKey: "manager_sale_split",
+    label: "Manager sale",
+    description: "Manager personally closed the sale. Edit BNM, Broker, and Manager split.",
+    roles: [
+      { key: "broker_network_manager", label: "BNM" },
+      { key: "broker", label: "Broker" },
+      { key: "manager", label: "Manager" },
+    ],
+  },
+  {
+    key: "broker_sale_split",
+    payloadKey: "broker_sale_split",
+    label: "Broker sale",
+    description: "Broker personally closed the sale. Edit BNM and Broker split.",
+    roles: [
+      { key: "broker_network_manager", label: "BNM" },
+      { key: "broker", label: "Broker" },
+    ],
+  },
+  {
+    key: "bnm_sale_split",
+    payloadKey: "bnm_sale_split",
+    label: "BNM sale",
+    description: "BNM personally closed the sale.",
+    roles: [
+      { key: "broker_network_manager", label: "BNM" },
+    ],
+  },
+]
 
 const emptySellerProfile: SellerProfileForm = {
   contact_no: "",
   accreditation_date: "",
   parent_seller_id: "",
-  commission_pool_rate: "",
-  manager_rate: "",
-  agent_commission_rate: "",
-  max_downline_rate: "",
+  seller_group_id: "",
 }
 
 const emptyForm: UserForm = {
@@ -133,9 +224,59 @@ const emptyForm: UserForm = {
   seller_profile: emptySellerProfile,
 }
 
+const blankSaleSplit = (): SaleSplitForm => ({
+  broker_network_manager: "0",
+  broker: "0",
+  manager: "0",
+  agent: "0",
+})
+
+const defaultSaleSplits = {
+  agent_sale_split: {
+    broker_network_manager: "1",
+    broker: "1",
+    manager: "1",
+    agent: "5",
+  },
+  manager_sale_split: {
+    broker_network_manager: "1",
+    broker: "2",
+    manager: "5",
+    agent: "0",
+  },
+  broker_sale_split: {
+    broker_network_manager: "3",
+    broker: "5",
+    manager: "0",
+    agent: "0",
+  },
+  bnm_sale_split: {
+    broker_network_manager: "8",
+    broker: "0",
+    manager: "0",
+    agent: "0",
+  },
+} satisfies Record<string, SaleSplitForm>
+
+const emptyGroupForm: SellerGroupForm = {
+  group_name: "",
+  group_code: "",
+  pool_rate: "8",
+  closing_seller_rate: "5",
+  bnm_override_rate: "1",
+  broker_override_rate: "1",
+  manager_override_rate: "1",
+  agent_sale_split: { ...defaultSaleSplits.agent_sale_split },
+  manager_sale_split: { ...defaultSaleSplits.manager_sale_split },
+  broker_sale_split: { ...defaultSaleSplits.broker_sale_split },
+  bnm_sale_split: { ...defaultSaleSplits.bnm_sale_split },
+  group_head_seller_id: "",
+  status: "active",
+  notes: "",
+}
+
 const isSellerRole = (role: string) => sellerRoles.includes(role as UserRole)
 const isOfficeRole = (role: string) => ["super_admin", "admin"].includes(String(role))
-const toNumberOrNull = (value: string) => (value === "" ? null : Number(value))
 
 const fetchUsers = async () => {
   const res = await fetch(`${API_URL}/users`, { credentials: "include" })
@@ -151,29 +292,11 @@ const fetchSellers = async () => {
   return data.accreditedSellers || data.sellers || data.data || []
 }
 
-const fetchDefaults = async () => {
-  const res = await fetch(`${API_URL}/commission-role-defaults`, { credentials: "include" })
+const fetchSellerGroups = async () => {
+  const res = await fetch(`${API_URL}/seller-groups`, { credentials: "include" })
   if (!res.ok) throw new Error(await getErrorMessage(res))
-  const data = (await res.json()) as DefaultsResponse
-  return data.defaults || data.data || []
-}
-
-const getDefaultsFormFromRows = (rows: CommissionDefault[]): DefaultsForm => {
-  const next = { ...defaultDefaultsForm }
-  rows.forEach((row) => {
-    if (row.setting_key in next) {
-      next[row.setting_key as keyof DefaultsForm] = String(row.default_rate ?? "")
-    }
-  })
-  return next
-}
-
-const getDefaultForRole = (role: UserRole, defaults: DefaultsForm): Partial<SellerProfileForm> => {
-  if (role === "broker_network_manager") return { commission_pool_rate: defaults.bnm_pool_rate }
-  if (role === "broker") return { commission_pool_rate: defaults.broker_pool_rate }
-  if (role === "manager") return {}
-  if (role === "agent") return {}
-  return {}
+  const data = (await res.json()) as GroupsResponse
+  return data.groups || data.data || []
 }
 
 const getPayload = (form: UserForm) => {
@@ -191,16 +314,7 @@ const getPayload = (form: UserForm) => {
       contact_no: form.seller_profile.contact_no.trim() || null,
       accreditation_date: form.seller_profile.accreditation_date || null,
       parent_seller_id: form.seller_profile.parent_seller_id || null,
-      commission_pool_rate: toNumberOrNull(form.seller_profile.commission_pool_rate),
-      manager_rate: toNumberOrNull(form.seller_profile.manager_rate),
-      agent_commission_rate: toNumberOrNull(form.seller_profile.agent_commission_rate),
-      personal_commission_rate: form.role === "manager"
-        ? toNumberOrNull(form.seller_profile.manager_rate)
-        : toNumberOrNull(form.seller_profile.agent_commission_rate),
-      direct_to_developer_rate: form.role === "agent"
-        ? toNumberOrNull(form.seller_profile.agent_commission_rate)
-        : null,
-      max_downline_rate: toNumberOrNull(form.seller_profile.max_downline_rate),
+      seller_group_id: form.seller_profile.seller_group_id || null,
       status: form.status,
     }
   }
@@ -219,12 +333,37 @@ const saveUser = async ({ id, form }: { id?: number; form: UserForm }) => {
   return res.json()
 }
 
-const saveDefaults = async (defaults: DefaultsForm) => {
-  const res = await fetch(`${API_URL}/commission-role-defaults`, {
-    method: "PATCH",
+const saveSellerGroup = async ({ id, form }: { id?: number; form: SellerGroupForm }) => {
+  const res = await fetch(id ? `${API_URL}/seller-groups/${id}` : `${API_URL}/seller-groups`, {
+    method: id ? "PATCH" : "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ defaults }),
+    body: JSON.stringify({
+      group_name: form.group_name.trim(),
+      group_code: form.group_code.trim() || null,
+      pool_rate: Number(form.pool_rate || 0),
+      closing_seller_rate: Number(form.agent_sale_split.agent || form.closing_seller_rate || 0),
+      bnm_override_rate: Number(form.agent_sale_split.broker_network_manager || form.bnm_override_rate || 0),
+      broker_override_rate: Number(form.agent_sale_split.broker || form.broker_override_rate || 0),
+      manager_override_rate: Number(form.agent_sale_split.manager || form.manager_override_rate || 0),
+      agent_sale_split: getSplitPayload(form.agent_sale_split, saleSplitSections[0].roles.map((role) => role.key)),
+      manager_sale_split: getSplitPayload(form.manager_sale_split, saleSplitSections[1].roles.map((role) => role.key)),
+      broker_sale_split: getSplitPayload(form.broker_sale_split, saleSplitSections[2].roles.map((role) => role.key)),
+      bnm_sale_split: getSplitPayload(form.bnm_sale_split, saleSplitSections[3].roles.map((role) => role.key)),
+      rollover_policy: "custom_sale_type_splits",
+      group_head_seller_id: form.group_head_seller_id || null,
+      status: form.status,
+      notes: form.notes.trim() || null,
+    }),
+  })
+  if (!res.ok) throw new Error(await getErrorMessage(res))
+  return res.json()
+}
+
+const recalculateSellerGroup = async (id: number) => {
+  const res = await fetch(`${API_URL}/seller-groups/${id}/recalculate-members`, {
+    method: "POST",
+    credentials: "include",
   })
   if (!res.ok) throw new Error(await getErrorMessage(res))
   return res.json()
@@ -267,10 +406,10 @@ const getParentLabel = (role: string) => {
 }
 
 const getSellerSetupNote = (role: string) => {
-  if (role === "broker_network_manager") return "BNM has no parent. Only the BNM pool rate is needed."
-  if (role === "broker") return "Select BNM only if this broker belongs to a network. Independent brokers can stay Company / No BNM."
-  if (role === "manager") return "Reports Under is optional. Leave it blank for a company/direct-to-developer manager. If under a broker, manager rate cannot exceed the broker pool."
-  if (role === "agent") return "Reports Under Manager is required. Agent rate cannot exceed the manager rate. Direct-to-developer creates no override release."
+  if (role === "broker_network_manager") return "Select a seller group. Closing and override rates are inherited from the group, not edited on this account."
+  if (role === "broker") return "If you select a BNM, this broker inherits the BNM's seller group. Independent brokers may select a group manually."
+  if (role === "manager") return "If you select a broker, this manager inherits that broker's seller group. Direct-to-developer managers may select a group manually."
+  if (role === "agent") return "Select the manager. The agent automatically inherits that manager's seller group and closing seller rate."
   return ""
 }
 
@@ -278,32 +417,105 @@ const sellerProfileFromUser = (user: User): SellerProfileForm => ({
   contact_no: user.seller_contact_no || "",
   accreditation_date: user.accreditation_date ? user.accreditation_date.slice(0, 10) : "",
   parent_seller_id: user.parent_seller_id ? String(user.parent_seller_id) : "",
-  commission_pool_rate: user.commission_pool_rate === null || user.commission_pool_rate === undefined ? "" : String(user.commission_pool_rate),
-  manager_rate: user.role === "manager"
-    ? user.personal_commission_rate === null || user.personal_commission_rate === undefined
-      ? user.commission_rate === null || user.commission_rate === undefined
-        ? ""
-        : String(user.commission_rate)
-      : String(user.personal_commission_rate)
-    : "",
-  agent_commission_rate: user.role === "agent"
-    ? user.personal_commission_rate === null || user.personal_commission_rate === undefined
-      ? user.commission_rate === null || user.commission_rate === undefined
-        ? ""
-        : String(user.commission_rate)
-      : String(user.personal_commission_rate)
-    : "",
-  max_downline_rate: user.max_downline_rate === null || user.max_downline_rate === undefined ? "" : String(user.max_downline_rate),
+  seller_group_id: user.seller_group_id ? String(user.seller_group_id) : "",
 })
+
+const parseGroupSplit = (value: SaleSplit | string | null | undefined, fallback: SaleSplitForm) => {
+  const normalized = { ...blankSaleSplit(), ...fallback }
+
+  if (!value) return normalized
+
+  let parsed: SaleSplit | null = null
+
+  if (typeof value === "string") {
+    try {
+      parsed = JSON.parse(value) as SaleSplit
+    } catch {
+      parsed = null
+    }
+  } else {
+    parsed = value
+  }
+
+  if (!parsed || typeof parsed !== "object") return normalized
+
+  for (const role of Object.keys(normalized) as SaleSplitRole[]) {
+    const rawValue = parsed[role]
+    if (rawValue !== null && rawValue !== undefined && rawValue !== "") {
+      normalized[role] = String(rawValue)
+    }
+  }
+
+  return normalized
+}
+
+const getSplitPayload = (split: SaleSplitForm, roles: SaleSplitRole[]) => {
+  return roles.reduce<Record<string, number>>((payload, role) => {
+    payload[role] = Number(split[role] || 0)
+    return payload
+  }, {})
+}
+
+const getSplitTotal = (split: SaleSplitForm, roles: SaleSplitRole[]) => {
+  return roles.reduce((total, role) => total + Number(split[role] || 0), 0)
+}
+
+const groupFormFromGroup = (group: SellerGroup): SellerGroupForm => ({
+  group_name: group.group_name || "",
+  group_code: group.group_code || "",
+  pool_rate: String(group.pool_rate ?? "0"),
+  closing_seller_rate: String(group.closing_seller_rate ?? "5"),
+  bnm_override_rate: String(group.bnm_override_rate ?? "1"),
+  broker_override_rate: String(group.broker_override_rate ?? "1"),
+  manager_override_rate: String(group.manager_override_rate ?? "1"),
+  agent_sale_split: parseGroupSplit(group.agent_sale_split_json, defaultSaleSplits.agent_sale_split),
+  manager_sale_split: parseGroupSplit(group.manager_sale_split_json, defaultSaleSplits.manager_sale_split),
+  broker_sale_split: parseGroupSplit(group.broker_sale_split_json, defaultSaleSplits.broker_sale_split),
+  bnm_sale_split: parseGroupSplit(group.bnm_sale_split_json, defaultSaleSplits.bnm_sale_split),
+  group_head_seller_id: group.group_head_seller_id ? String(group.group_head_seller_id) : "",
+  status: group.status || "active",
+  notes: group.notes || "",
+})
+
+const getGroupRateForRole = (group: SellerGroup | null | undefined, role: string) => {
+  if (!group) return null
+
+  if (role === "broker_network_manager") {
+    return parseGroupSplit(group.bnm_sale_split_json, defaultSaleSplits.bnm_sale_split).broker_network_manager
+  }
+
+  if (role === "broker") {
+    return parseGroupSplit(group.broker_sale_split_json, defaultSaleSplits.broker_sale_split).broker
+  }
+
+  if (role === "manager") {
+    return parseGroupSplit(group.manager_sale_split_json, defaultSaleSplits.manager_sale_split).manager
+  }
+
+  if (role === "agent") {
+    return parseGroupSplit(group.agent_sale_split_json, defaultSaleSplits.agent_sale_split).agent
+  }
+
+  return group.closing_seller_rate
+}
+
+const getGroupSplitTotals = (form: SellerGroupForm) => {
+  return saleSplitSections.reduce<Record<string, number>>((totals, section) => {
+    totals[section.key] = getSplitTotal(form[section.key], section.roles.map((role) => role.key))
+    return totals
+  }, {})
+}
+
 
 const Users = () => {
   const queryClient = useQueryClient()
   const [search, setSearch] = useState("")
   const [isOpen, setIsOpen] = useState(false)
-  const [isDefaultsOpen, setIsDefaultsOpen] = useState(false)
+  const [isGroupsOpen, setIsGroupsOpen] = useState(false)
   const [editUser, setEditUser] = useState<User | null>(null)
   const [form, setForm] = useState<UserForm>(emptyForm)
-  const [defaultsForm, setDefaultsForm] = useState<DefaultsForm>(defaultDefaultsForm)
+  const [editingGroup, setEditingGroup] = useState<SellerGroup | null>(null)
+  const [groupForm, setGroupForm] = useState<SellerGroupForm>(emptyGroupForm)
   const [message, setMessage] = useState("")
   const [roleFilter, setRoleFilter] = useState("all")
   const [statusFilter, setStatusFilter] = useState("all")
@@ -313,8 +525,8 @@ const Users = () => {
 
   const { data: currentUserData } = useCurrentUser()
   const currentUser = (currentUserData as CurrentUserResponse | null)?.user
-  const canEditDefaults = currentUser?.role === "super_admin"
-  const availableRoles = canEditDefaults ? allRoles : adminCreatableRoles
+  const canEditAdminUsers = currentUser?.role === "super_admin"
+  const availableRoles = canEditAdminUsers ? allRoles : adminCreatableRoles
 
   const { data: users = [], isLoading, error } = useQuery<User[]>({
     queryKey: ["users"],
@@ -326,14 +538,10 @@ const Users = () => {
     queryFn: fetchSellers,
   })
 
-  const { data: defaults = [] } = useQuery<CommissionDefault[]>({
-    queryKey: ["commission-role-defaults"],
-    queryFn: fetchDefaults,
+  const { data: sellerGroups = [] } = useQuery<SellerGroup[]>({
+    queryKey: ["seller-groups"],
+    queryFn: fetchSellerGroups,
   })
-
-  useEffect(() => {
-    setDefaultsForm(getDefaultsFormFromRows(defaults))
-  }, [defaults])
 
   const filteredUsers = useMemo(() => {
     const term = search.toLowerCase().trim()
@@ -347,6 +555,7 @@ const Users = () => {
         user.seller_full_name,
         user.parent_seller_name,
         user.seller_role,
+        user.seller_group_name,
       ]
         .filter(Boolean)
         .join(" ")
@@ -376,24 +585,58 @@ const Users = () => {
     return sellers.find((seller) => String(seller.id) === form.seller_profile.parent_seller_id) || null
   }, [form.seller_profile.parent_seller_id, sellers])
 
+  const selectedGroup = useMemo(() => {
+    const inheritedGroupId = selectedParent?.seller_group_id ? String(selectedParent.seller_group_id) : ""
+    const chosenGroupId = inheritedGroupId || form.seller_profile.seller_group_id
+    if (!chosenGroupId) return null
+    return sellerGroups.find((group) => String(group.id) === chosenGroupId) || null
+  }, [form.seller_profile.seller_group_id, selectedParent, sellerGroups])
+
+  const activeSellerGroups = sellerGroups.filter((group) => group.status === "active")
+  const groupHeadOptions = sellers.filter((seller) => seller.seller_role === "broker_network_manager" && seller.status === "active")
+  const groupPoolRate = Number(groupForm.pool_rate || 0)
+  const groupSplitTotals = getGroupSplitTotals(groupForm)
+  const groupRateOverPool = Object.values(groupSplitTotals).some((total) => total > groupPoolRate)
+
+  useEffect(() => {
+    if (message) {
+      const timeout = window.setTimeout(() => setMessage(""), 5000)
+      return () => window.clearTimeout(timeout)
+    }
+  }, [message])
+
+  const invalidateUserData = () => {
+    queryClient.invalidateQueries({ queryKey: ["users"] })
+    queryClient.invalidateQueries({ queryKey: ["accredited-sellers-for-user-management"] })
+    queryClient.invalidateQueries({ queryKey: ["accredited-sellers"] })
+    queryClient.invalidateQueries({ queryKey: ["seller-groups"] })
+  }
+
   const saveMutation = useMutation({
     mutationFn: saveUser,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["users"] })
-      queryClient.invalidateQueries({ queryKey: ["accredited-sellers-for-user-management"] })
-      queryClient.invalidateQueries({ queryKey: ["accredited-sellers"] })
+      invalidateUserData()
       setIsOpen(false)
       setEditUser(null)
-      setMessage("User saved successfully. Temporary password was emailed for new users.")
+      setMessage("User saved successfully. Seller group and rates were resolved automatically.")
     },
   })
 
-  const defaultsMutation = useMutation({
-    mutationFn: saveDefaults,
+  const saveGroupMutation = useMutation({
+    mutationFn: saveSellerGroup,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["commission-role-defaults"] })
-      setIsDefaultsOpen(false)
-      setMessage("Default commission rates updated successfully.")
+      invalidateUserData()
+      setEditingGroup(null)
+      setGroupForm(emptyGroupForm)
+      setMessage("Seller group saved successfully. Closing and override rates were applied to group members.")
+    },
+  })
+
+  const recalculateGroupMutation = useMutation({
+    mutationFn: recalculateSellerGroup,
+    onSuccess: () => {
+      invalidateUserData()
+      setMessage("Seller group members and rates recalculated successfully.")
     },
   })
 
@@ -408,7 +651,7 @@ const Users = () => {
   const deactivateMutation = useMutation({
     mutationFn: deactivateUser,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["users"] })
+      invalidateUserData()
       setMessage("User deactivated successfully.")
     },
   })
@@ -420,34 +663,37 @@ const Users = () => {
       seller_profile: { ...prev.seller_profile, ...values },
     }))
 
-  const handleRoleChange = (role: UserRole) => {
-    const defaultsForRole = getDefaultForRole(role, defaultsForm)
-    setForm((prev) => ({
+  const updateGroupSaleSplit = (
+    splitKey: "agent_sale_split" | "manager_sale_split" | "broker_sale_split" | "bnm_sale_split",
+    role: SaleSplitRole,
+    value: string
+  ) => {
+    setGroupForm((prev) => ({
       ...prev,
-      role,
-      seller_profile: {
-        ...emptySellerProfile,
-        ...defaultsForRole,
+      [splitKey]: {
+        ...prev[splitKey],
+        [role]: value,
       },
     }))
   }
 
-  const openCreate = () => {
-    const role = canEditDefaults ? "admin" : "agent"
-    setEditUser(null)
-    setForm({
-      ...emptyForm,
+  const handleRoleChange = (role: UserRole) => {
+    setForm((prev) => ({
+      ...prev,
       role,
-      seller_profile: {
-        ...emptySellerProfile,
-        ...getDefaultForRole(role, defaultsForm),
-      },
-    })
+      seller_profile: { ...emptySellerProfile },
+    }))
+  }
+
+  const openCreate = () => {
+    const role = canEditAdminUsers ? "admin" : "agent"
+    setEditUser(null)
+    setForm({ ...emptyForm, role })
     setIsOpen(true)
   }
 
   const openEdit = (user: User) => {
-    if (!canEditDefaults && ["super_admin", "admin"].includes(String(user.role))) {
+    if (!canEditAdminUsers && ["super_admin", "admin"].includes(String(user.role))) {
       setMessage("Only super admin can edit admin or super admin accounts.")
       return
     }
@@ -463,7 +709,19 @@ const Users = () => {
     setIsOpen(true)
   }
 
-  const canResetOrDeactivateUser = (user: User) => canEditDefaults || !isOfficeRole(String(user.role))
+  const openCreateGroup = () => {
+    setEditingGroup(null)
+    setGroupForm(emptyGroupForm)
+    setIsGroupsOpen(true)
+  }
+
+  const openEditGroup = (group: SellerGroup) => {
+    setEditingGroup(group)
+    setGroupForm(groupFormFromGroup(group))
+    setIsGroupsOpen(true)
+  }
+
+  const canResetOrDeactivateUser = (user: User) => canEditAdminUsers || !isOfficeRole(String(user.role))
 
   const handleResetPassword = (user: User) => {
     if (!canResetOrDeactivateUser(user)) {
@@ -475,9 +733,7 @@ const Users = () => {
       `Are you sure you want to reset the password for ${user.full_name}? A new temporary password will be emailed and the user must change it on first login.`
     )
 
-    if (confirmed) {
-      resetPasswordMutation.mutate(user.id)
-    }
+    if (confirmed) resetPasswordMutation.mutate(user.id)
   }
 
   const handleDeactivate = (user: User) => {
@@ -486,38 +742,29 @@ const Users = () => {
       return
     }
 
-    const confirmed = window.confirm(
-      `Are you sure you want to deactivate ${user.full_name}? They will no longer be able to login.`
-    )
-
-    if (confirmed) {
-      deactivateMutation.mutate(user.id)
-    }
+    const confirmed = window.confirm(`Are you sure you want to deactivate ${user.full_name}? They will no longer be able to login.`)
+    if (confirmed) deactivateMutation.mutate(user.id)
   }
 
   const rateSummary = (user: User) => {
-    if (user.role === "broker_network_manager") return `BNM Pool: ${formatRate(user.commission_pool_rate)}`
-    if (user.role === "broker") return `Broker Pool: ${formatRate(user.commission_pool_rate)}`
-    if (user.role === "manager") return `Manager Rate: ${formatRate(user.personal_commission_rate || user.commission_rate)}`
-    if (user.role === "agent") {
-      return `Agent Rate: ${formatRate(user.personal_commission_rate || user.commission_rate)}`
-    }
-    return "-"
+    if (!isSellerRole(String(user.role))) return "-"
+    if (!user.seller_group_name) return "No seller group"
+    return `Pool ${formatRate(user.seller_group_pool_rate)} / Closing ${formatRate(user.seller_group_closing_seller_rate ?? user.seller_group_role_rate ?? user.personal_commission_rate ?? user.commission_rate)}`
   }
+
+  const shouldShowGroupSelect = isSellerRole(form.role) && !selectedParent && ["broker_network_manager", "broker", "manager"].includes(form.role)
 
   return (
     <div className="p-6">
       <PageHeader
         icon={<FiUserPlus />}
         title="User Management"
-        subtitle="Create accounts, link seller profiles, and set hierarchy rates."
+        subtitle="Create accounts and set hierarchy. Commission rates are controlled by Seller Groups, not individual accounts."
         actions={
           <div className="flex flex-wrap gap-2">
-            {canEditDefaults ? (
-              <Button icon={<FiSettings />} onClick={() => setIsDefaultsOpen(true)} variant="secondary">
-                Commission Defaults
-              </Button>
-            ) : null}
+            <Button icon={<FiUsers />} onClick={openCreateGroup} variant="secondary">
+              Seller Groups
+            </Button>
             <Button icon={<FiPlus />} onClick={openCreate} variant="primary">
               Create User
             </Button>
@@ -528,14 +775,15 @@ const Users = () => {
       {message ? <Alert variant="success" title={message} /> : null}
       {error ? <Alert variant="error" title={error instanceof Error ? error.message : "Failed to load users"} /> : null}
       {saveMutation.error ? <Alert variant="error" title={saveMutation.error instanceof Error ? saveMutation.error.message : "Failed to save user"} /> : null}
+      {saveGroupMutation.error ? <Alert variant="error" title={saveGroupMutation.error instanceof Error ? saveGroupMutation.error.message : "Failed to save seller group"} /> : null}
+      {recalculateGroupMutation.error ? <Alert variant="error" title={recalculateGroupMutation.error instanceof Error ? recalculateGroupMutation.error.message : "Failed to recalculate seller group"} /> : null}
       {deactivateMutation.error ? <Alert variant="error" title={deactivateMutation.error instanceof Error ? deactivateMutation.error.message : "Failed to deactivate user"} /> : null}
       {resetPasswordMutation.error ? <Alert variant="error" title={resetPasswordMutation.error instanceof Error ? resetPasswordMutation.error.message : "Failed to reset password"} /> : null}
-      {defaultsMutation.error ? <Alert variant="error" title={defaultsMutation.error instanceof Error ? defaultsMutation.error.message : "Failed to save defaults"} /> : null}
 
       <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-[1fr_220px_220px_220px]">
         <Input
           icon={<FiSearch />}
-          placeholder="Search users, email, seller, or parent..."
+          placeholder="Search users, email, seller, parent, or group..."
           value={search}
           onChange={(e) => {
             setSearch(e.target.value)
@@ -594,9 +842,9 @@ const Users = () => {
                 <th className="px-4 py-3 text-left">Role</th>
                 <th className="px-4 py-3 text-left">Seller Profile</th>
                 <th className="px-4 py-3 text-left">Reports Under</th>
+                <th className="px-4 py-3 text-left">Seller Group</th>
                 <th className="px-4 py-3 text-left">Commission Setup</th>
                 <th className="px-4 py-3 text-left">Status</th>
-                <th className="px-4 py-3 text-left">Last Login</th>
                 <th className="px-4 py-3 text-left">Action</th>
               </tr>
             </thead>
@@ -606,6 +854,7 @@ const Users = () => {
                   <td className="px-4 py-3">
                     <p className="font-semibold text-slate-900">{user.full_name}</p>
                     <p className="text-xs text-slate-500">{user.email}</p>
+                    <p className="text-xs text-slate-400">Created {formatDate(user.created_at)}</p>
                   </td>
                   <td className="px-4 py-3 text-slate-700">{formatText(user.role)}</td>
                   <td className="px-4 py-3 text-slate-600">
@@ -626,15 +875,24 @@ const Users = () => {
                       </>
                     ) : isSellerRole(user.role) ? "Company / None" : "-"}
                   </td>
+                  <td className="px-4 py-3 text-slate-600">
+                    {user.seller_group_name ? (
+                      <>
+                        <p className="font-semibold text-slate-900">{user.seller_group_name}</p>
+                        <p className="text-xs text-slate-500">Pool {formatRate(user.seller_group_pool_rate)}</p>
+                      </>
+                    ) : isSellerRole(user.role) ? (
+                      <span className="text-amber-600">No group</span>
+                    ) : "-"}
+                  </td>
                   <td className="px-4 py-3 text-slate-600">{rateSummary(user)}</td>
                   <td className="px-4 py-3">
                     <StatusBadge status={user.status} />
                     {user.must_change_password ? <p className="mt-1 text-xs font-semibold text-amber-600">Password change required</p> : null}
                     {user.temp_password_sent_at ? <p className="mt-1 text-xs text-slate-400">Temp sent {formatDate(user.temp_password_sent_at)}</p> : null}
                   </td>
-                  <td className="px-4 py-3 text-slate-600">{formatDate(user.last_login)}</td>
                   <td className="px-4 py-3">
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2">
                       <Button onClick={() => openEdit(user)}>Edit</Button>
                       {canResetOrDeactivateUser(user) ? (
                         <>
@@ -680,9 +938,7 @@ const Users = () => {
             </div>
           }
         >
-          {!editUser ? (
-            <Alert variant="info" title="A temporary password will be generated and emailed to this user. They must change it on first login." />
-          ) : null}
+          {!editUser ? <Alert variant="info" title="A temporary password will be generated and emailed. Commission rates are inherited from the selected seller group." /> : null}
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <Input label="Full Name" value={form.full_name} onChange={(e) => updateForm({ full_name: e.target.value })} required />
@@ -707,74 +963,209 @@ const Users = () => {
                 <Input label="Accreditation Date" type="date" value={form.seller_profile.accreditation_date} onChange={(e) => updateSellerProfile({ accreditation_date: e.target.value })} />
 
                 {form.role !== "broker_network_manager" ? (
-                  <Select label={getParentLabel(form.role)} value={form.seller_profile.parent_seller_id} onChange={(e) => updateSellerProfile({ parent_seller_id: e.target.value })}>
-                    {form.role === "broker" ? (
-                      <option value="">Company / No BNM</option>
-                    ) : form.role === "manager" ? (
-                      <option value="">Company / Direct to Developer</option>
-                    ) : (
-                      <option value="">Select Manager</option>
-                    )}
+                  <Select
+                    label={getParentLabel(form.role)}
+                    value={form.seller_profile.parent_seller_id}
+                    onChange={(e) => updateSellerProfile({ parent_seller_id: e.target.value, seller_group_id: e.target.value ? "" : form.seller_profile.seller_group_id })}
+                  >
+                    {form.role === "broker" ? <option value="">Company / No BNM</option> : form.role === "manager" ? <option value="">Company / Direct to Developer</option> : <option value="">Select Manager</option>}
                     {parentOptions.map((seller) => (
                       <option key={seller.id} value={seller.id}>
-                        {seller.full_name} {seller.reports_under_display ? `— under ${seller.reports_under_display}` : ""}
+                        {seller.full_name} {seller.seller_group_name ? `— ${seller.seller_group_name}` : ""}
                       </option>
                     ))}
                   </Select>
                 ) : null}
 
-                {form.role === "broker_network_manager" ? (
-                  <Input label="BNM Pool Rate (%)" type="number" min={0} max={100} step="0.01" value={form.seller_profile.commission_pool_rate} onChange={(e) => updateSellerProfile({ commission_pool_rate: e.target.value })} />
-                ) : null}
-
-                {form.role === "broker" ? (
-                  <Input label="Broker Pool Rate (%)" type="number" min={0} max={100} step="0.01" value={form.seller_profile.commission_pool_rate} onChange={(e) => updateSellerProfile({ commission_pool_rate: e.target.value })} />
-                ) : null}
-
-                {form.role === "manager" ? (
-                  <Input label="Manager Rate (%)" type="number" min={0} max={100} step="0.01" value={form.seller_profile.manager_rate} onChange={(e) => updateSellerProfile({ manager_rate: e.target.value })} />
-                ) : null}
-
-                {form.role === "agent" ? (
-                  <Input label="Agent Rate (%)" type="number" min={0} max={100} step="0.01" value={form.seller_profile.agent_commission_rate} onChange={(e) => updateSellerProfile({ agent_commission_rate: e.target.value })} />
+                {shouldShowGroupSelect ? (
+                  <Select label="Seller Group" value={form.seller_profile.seller_group_id} onChange={(e) => updateSellerProfile({ seller_group_id: e.target.value })}>
+                    <option value="">Select seller group</option>
+                    {activeSellerGroups.map((group) => (
+                      <option key={group.id} value={group.id}>{group.group_name} — Pool {formatRate(group.pool_rate)}</option>
+                    ))}
+                  </Select>
                 ) : null}
               </div>
 
-              {selectedParent ? (
-                <div className="mt-4 rounded-lg border border-blue-200 bg-white px-4 py-3 text-sm text-slate-600">
-                  <p className="font-semibold text-slate-900">Automatic hierarchy preview</p>
-                  <p>
-                    {formatText(form.role)} → {selectedParent.full_name} ({formatText(selectedParent.seller_role)})
-                    {selectedParent.parent_seller_name ? ` → ${selectedParent.parent_seller_name}` : ""}
+              <div className="mt-4 rounded-lg border border-blue-200 bg-white px-4 py-3 text-sm text-slate-600">
+                <p className="font-semibold text-slate-900">Automatic group/rate preview</p>
+                {selectedParent ? (
+                  <p>{formatText(form.role)} inherits group from {selectedParent.full_name}.</p>
+                ) : null}
+                {selectedGroup ? (
+                  <p className="mt-1">
+                    Group: <span className="font-semibold text-slate-900">{selectedGroup.group_name}</span> / Pool {formatRate(selectedGroup.pool_rate)} / {form.role === "broker_network_manager" ? "BNM personal total" : "Closing rate"} {formatRate(getGroupRateForRole(selectedGroup, form.role))}
                   </p>
-                  <p className="mt-1 text-xs text-slate-500">
-                    Parent rates: pool {formatRate(selectedParent.commission_pool_rate)}, assigned rate {formatRate(selectedParent.personal_commission_rate || selectedParent.commission_pool_rate)}
-                  </p>
-                </div>
-              ) : null}
+                ) : (
+                  <p className="mt-1 text-amber-600">No seller group selected yet. This seller will not have an approved commission rate until assigned to a group.</p>
+                )}
+              </div>
             </div>
           ) : null}
         </Modal>
       ) : null}
 
-      {isDefaultsOpen ? (
+      {isGroupsOpen ? (
         <Modal
-          title="Default Commission Rates"
-          onClose={() => setIsDefaultsOpen(false)}
-          size="lg"
+          title="Seller Groups and Flexible Pool Distribution"
+          onClose={() => setIsGroupsOpen(false)}
+          size="xl"
           footer={
-            <div className="flex justify-end gap-2">
-              <Button onClick={() => setIsDefaultsOpen(false)}>Cancel</Button>
-              <Button disabled={defaultsMutation.isPending} onClick={() => defaultsMutation.mutate(defaultsForm)} variant="primary">
-                {defaultsMutation.isPending ? "Saving..." : "Save Defaults"}
+            <div className="flex justify-between gap-2">
+              <Button onClick={() => setIsGroupsOpen(false)}>Close</Button>
+              <Button
+                disabled={saveGroupMutation.isPending || groupRateOverPool}
+                onClick={() => saveGroupMutation.mutate({ id: editingGroup?.id, form: groupForm })}
+                variant="primary"
+              >
+                {saveGroupMutation.isPending ? "Saving..." : editingGroup ? "Save Seller Group" : "Create Seller Group"}
               </Button>
             </div>
           }
         >
-          <Alert variant="warning" title="Only super admin can update default rates. Only BNM and Broker have system defaults. Manager and Agent rates are assigned by their upline or edited per account." />
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <Input label="Default BNM Pool Rate (%)" type="number" min={0} max={100} step="0.01" value={defaultsForm.bnm_pool_rate} onChange={(e) => setDefaultsForm({ ...defaultsForm, bnm_pool_rate: e.target.value })} />
-            <Input label="Default Broker Pool Rate (%)" type="number" min={0} max={100} step="0.01" value={defaultsForm.broker_pool_rate} onChange={(e) => setDefaultsForm({ ...defaultsForm, broker_pool_rate: e.target.value })} />
+          <Alert
+            variant="info"
+            title="Rates are now managed per Seller Group. User accounts inherit their group from the selected higher-up. Edit the exact split for Agent, Manager, Broker, and BNM sale scenarios."
+          />
+
+          <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_1.2fr]">
+            <div>
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <h3 className="text-sm font-bold text-slate-900">Existing Groups</h3>
+                <Button icon={<FiPlus />} onClick={openCreateGroup} variant="secondary">New</Button>
+              </div>
+              <div className="max-h-[460px] overflow-auto rounded-xl border border-slate-200 bg-white">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50">
+                    <tr>
+                      <th className="px-3 py-2 text-left">Group</th>
+                      <th className="px-3 py-2 text-left">Pool</th>
+                      <th className="px-3 py-2 text-left">Members</th>
+                      <th className="px-3 py-2 text-left">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sellerGroups.map((group) => (
+                      <tr key={group.id} className="border-t border-slate-100">
+                        <td className="px-3 py-2">
+                          <p className="font-semibold text-slate-900">{group.group_name}</p>
+                          <p className="text-xs text-slate-500">{group.group_code || "No code"}</p>
+                          <StatusBadge status={group.status} />
+                        </td>
+                        <td className="px-3 py-2 text-slate-600">{formatRate(group.pool_rate)}</td>
+                        <td className="px-3 py-2 text-slate-600">
+                          <p>{formatNumber(group.active_member_count)} active</p>
+                          <p className="text-xs text-slate-500">A {formatNumber(group.agent_count)} / M {formatNumber(group.manager_count)} / B {formatNumber(group.broker_count)}</p>
+                        </td>
+                        <td className="px-3 py-2">
+                          <div className="flex flex-col gap-2">
+                            <Button icon={<FiEdit2 />} onClick={() => openEditGroup(group)}>Edit</Button>
+                            <Button disabled={recalculateGroupMutation.isPending} onClick={() => recalculateGroupMutation.mutate(group.id)} variant="ghost">Recalc</Button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                    {!sellerGroups.length ? (
+                      <tr>
+                        <td colSpan={4} className="px-3 py-8 text-center text-slate-500">No seller groups yet.</td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-slate-200 bg-white p-4">
+              <div className="mb-4 flex items-center gap-2">
+                <FiSettings className="text-blue-600" />
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">{editingGroup ? "Edit Group" : "Create Group"}</h3>
+                  <p className="text-xs text-slate-500">Admin controls the group pool and exact commission split per sale type here.</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <Input label="Group Name" value={groupForm.group_name} onChange={(e) => setGroupForm((prev) => ({ ...prev, group_name: e.target.value }))} />
+                <Input label="Group Code" value={groupForm.group_code} onChange={(e) => setGroupForm((prev) => ({ ...prev, group_code: e.target.value }))} />
+                <Input label="Pool Rate (%)" type="number" min={0} max={100} step="0.01" value={groupForm.pool_rate} onChange={(e) => setGroupForm((prev) => ({ ...prev, pool_rate: e.target.value }))} />
+                <Select label="Status" value={groupForm.status} onChange={(e) => setGroupForm((prev) => ({ ...prev, status: e.target.value }))}>
+                  {statuses.map((status) => <option key={status} value={status}>{formatText(status)}</option>)}
+                </Select>
+                <Select label="Group Head / BNM" value={groupForm.group_head_seller_id} onChange={(e) => setGroupForm((prev) => ({ ...prev, group_head_seller_id: e.target.value }))}>
+                  <option value="">No group head yet</option>
+                  {groupHeadOptions.map((seller) => <option key={seller.id} value={seller.id}>{seller.full_name}</option>)}
+                </Select>
+                <Input label="Notes" value={groupForm.notes} onChange={(e) => setGroupForm((prev) => ({ ...prev, notes: e.target.value }))} />
+              </div>
+
+              <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <div className="mb-4 flex items-start justify-between gap-3">
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-900">Editable Pool Distribution per Sale Type</h4>
+                    <p className="text-xs text-slate-500">
+                      Edit the actual rates shown below. Each sale type can have its own split as long as its total does not exceed the group pool.
+                    </p>
+                  </div>
+                  <p className={groupRateOverPool ? "text-sm font-bold text-red-600" : "text-sm font-semibold text-slate-600"}>
+                    Pool {formatRate(groupPoolRate)}
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  {saleSplitSections.map((section) => {
+                    const total = groupSplitTotals[section.key] || 0
+                    const isOverPool = total > groupPoolRate
+                    const remaining = Math.max(groupPoolRate - total, 0)
+
+                    return (
+                      <div key={section.key} className="rounded-xl border border-blue-100 bg-white p-4">
+                        <div className="mb-3 flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-bold text-slate-900">{section.label}</p>
+                            <p className="mt-1 text-xs text-slate-500">{section.description}</p>
+                          </div>
+                          <div className="text-right text-xs">
+                            <p className={isOverPool ? "font-bold text-red-600" : "font-bold text-slate-900"}>
+                              Total {formatRate(total)}
+                            </p>
+                            <p className="text-slate-500">Remaining {formatRate(remaining)}</p>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                          {section.roles.map((role) => (
+                            <Input
+                              key={`${section.key}-${role.key}`}
+                              label={`${role.label} Rate (%)`}
+                              type="number"
+                              min={0}
+                              max={100}
+                              step="0.01"
+                              value={groupForm[section.key][role.key]}
+                              onChange={(e) => updateGroupSaleSplit(section.key, role.key, e.target.value)}
+                            />
+                          ))}
+                        </div>
+
+                        {isOverPool ? (
+                          <p className="mt-3 text-xs font-semibold text-red-600">
+                            {section.label} total cannot exceed the pool rate.
+                          </p>
+                        ) : null}
+
+                        {!isOverPool && total < groupPoolRate ? (
+                          <p className="mt-3 text-xs font-semibold text-amber-600">
+                            This split leaves {formatRate(groupPoolRate - total)} undistributed.
+                          </p>
+                        ) : null}
+                      </div>
+                    )
+                  })}
+                </div>
+
+                {groupRateOverPool ? <p className="mt-3 text-sm font-semibold text-red-600">One or more sale-type totals exceed the pool rate.</p> : null}
+              </div>
+            </div>
           </div>
         </Modal>
       ) : null}

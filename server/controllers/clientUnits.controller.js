@@ -13,6 +13,8 @@ import { rebuildPaymentSchedule, rebuildAndGetPaymentScheduleRows } from '../uti
 const allowedClientUnitStatuses = [
   'reserved',
   'active',
+  'past_due',
+  'pending_cancellation',
   'cancelled',
   'fully_paid',
   'closed',
@@ -175,12 +177,27 @@ const validateDueDay = (dueDay) => {
 }
 
 const listingStatusFromClientUnitStatus = (status) => {
-  if (status === 'cancelled') return 'available'
   if (status === 'reserved') return 'reserved'
-  if (status === 'active') return 'sold'
+  if (status === 'active' || status === 'past_due') return 'sold'
+  if (status === 'pending_cancellation') return 'pending_cancellation'
+  if (status === 'cancelled') return 'cancelled'
   if (status === 'fully_paid' || status === 'closed') return 'sold'
 
   return null
+}
+
+const cancellationResults = [
+  'refunded',
+  'partial_refund',
+  'discontinued',
+  'no_refund',
+  'pending_settlement',
+]
+
+const normalizeCancellationResult = (value) => {
+  if (isMissing(value)) return null
+  const normalized = String(value).trim().toLowerCase()
+  return cancellationResults.includes(normalized) ? normalized : null
 }
 
 const validateClientUnitStatus = (status) => {
@@ -529,6 +546,8 @@ const buildReservationTerms = ({
   reservationFeeAmount,
   downpaymentAmount,
   deferredCashAmount,
+  balloonPaymentAmount,
+  balloonDueDate,
   paymentTermsMonths,
   interestRate,
   monthlyAmortization,
@@ -652,6 +671,28 @@ const buildReservationTerms = ({
     return deferredCashValidation
   }
 
+  const balloonPaymentValidation = isInstallment
+    ? validateNonNegativeMoney(balloonPaymentAmount, 'Balloon payment amount')
+    : {
+        isValid: true,
+        value: 0,
+      }
+
+  if (!balloonPaymentValidation.isValid) {
+    return balloonPaymentValidation
+  }
+
+  const finalBalloonDueDate = isInstallment && !isMissing(balloonDueDate)
+    ? parseDateOnly(balloonDueDate)
+    : null
+
+  if (isInstallment && !isMissing(balloonDueDate) && !finalBalloonDueDate) {
+    return {
+      isValid: false,
+      message: 'Balloon due date is invalid',
+    }
+  }
+
   let finalPaymentTermsMonths = null
   let finalInterestRate = 0
   let finalMonthlyAmortization = null
@@ -695,9 +736,21 @@ const buildReservationTerms = ({
     }
   }
 
+  if (isInstallment && balloonPaymentValidation.value > offerBalanceAmount) {
+    return {
+      isValid: false,
+      message: 'Balloon payment cannot exceed the remaining offer balance',
+    }
+  }
+
   if (isInstallment) {
+    const amortizedBalance = Math.max(
+      normalizeMoney(offerBalanceAmount - balloonPaymentValidation.value),
+      0
+    )
+
     const computedMonthlyAmortization = calculateMonthlyAmortization({
-      balance: offerBalanceAmount,
+      balance: amortizedBalance,
       termsMonths: finalPaymentTermsMonths,
       interestRate: finalInterestRate,
     })
@@ -731,6 +784,8 @@ const buildReservationTerms = ({
       downpaymentDiscountAmount: computedDownpaymentDiscountAmount,
       downpaymentNetAmount: computedDownpaymentNet,
       deferredCashAmount: deferredCashValidation.value,
+      balloonPaymentAmount: balloonPaymentValidation.value,
+      balloonDueDate: finalBalloonDueDate,
       offerBalanceAmount,
       paymentTermsMonths: finalPaymentTermsMonths,
       interestRate: finalInterestRate,
@@ -993,10 +1048,39 @@ const getSellerById = async (connectionOrDb, sellerId) => {
 
   const [rows] = await connectionOrDb.query(
     `
-    SELECT *
-    FROM accredited_sellers
-    WHERE id = ?
-      AND status = 'active'
+    SELECT
+      seller.*,
+      sg.group_name AS seller_group_name,
+      sg.pool_rate AS seller_group_pool_rate,
+      sg.closing_seller_rate AS seller_group_closing_seller_rate,
+      sg.bnm_override_rate AS seller_group_bnm_override_rate,
+      sg.broker_override_rate AS seller_group_broker_override_rate,
+      sg.manager_override_rate AS seller_group_manager_override_rate,
+      sg.agent_sale_split_json AS seller_group_agent_sale_split_json,
+      sg.manager_sale_split_json AS seller_group_manager_sale_split_json,
+      sg.broker_sale_split_json AS seller_group_broker_sale_split_json,
+      sg.bnm_sale_split_json AS seller_group_bnm_sale_split_json,
+      JSON_OBJECT(
+        'pool_rate', sg.pool_rate,
+        'agent_sale_split', sg.agent_sale_split_json,
+        'manager_sale_split', sg.manager_sale_split_json,
+        'broker_sale_split', sg.broker_sale_split_json,
+        'bnm_sale_split', sg.bnm_sale_split_json,
+        'distributions', (
+          SELECT JSON_ARRAYAGG(
+            JSON_OBJECT(
+              'role', dist.seller_role,
+              'approved_rate', dist.approved_rate
+            )
+          )
+          FROM seller_group_rate_distributions dist
+          WHERE dist.seller_group_id = seller.seller_group_id
+        )
+      ) AS seller_group_rate_snapshot_json
+    FROM accredited_sellers seller
+    LEFT JOIN seller_groups sg ON sg.id = seller.seller_group_id
+    WHERE seller.id = ?
+      AND seller.status = 'active'
     LIMIT 1
     `,
     [sellerId]
@@ -1479,6 +1563,8 @@ export const reserveListing = async (req, res) => {
     downpayment_gives = 3,
     downpayment_discount_rate = 0,
     deferred_cash_amount = 0,
+    balloon_payment_amount = 0,
+    balloon_due_date,
     payment_terms_months,
     interest_rate = 0,
     monthly_amortization,
@@ -1588,6 +1674,8 @@ export const reserveListing = async (req, res) => {
       downpaymentGives: downpayment_gives,
       downpaymentDiscountRate: downpayment_discount_rate,
       deferredCashAmount: deferred_cash_amount,
+      balloonPaymentAmount: balloon_payment_amount,
+      balloonDueDate: balloon_due_date,
       paymentTermsMonths: payment_terms_months,
       interestRate: interest_rate,
       monthlyAmortization: monthly_amortization,
@@ -1648,6 +1736,14 @@ export const reserveListing = async (req, res) => {
         listing_id,
         assigned_user_id,
         seller_id,
+        seller_group_id,
+        seller_group_name_snapshot,
+        seller_group_pool_rate_snapshot,
+        seller_group_closing_rate_snapshot,
+        seller_group_bnm_override_snapshot,
+        seller_group_broker_override_snapshot,
+        seller_group_manager_override_snapshot,
+        seller_group_rate_snapshot_json,
         status,
         mode_of_payment,
         buyer_type,
@@ -1664,19 +1760,29 @@ export const reserveListing = async (req, res) => {
         downpayment_discount_amount,
         downpayment_net_amount,
         deferred_cash_amount,
+        balloon_payment_amount,
+        balloon_due_date,
         offer_balance_amount,
         payment_terms_months,
         interest_rate,
         monthly_amortization,
         contract_processing_status,
         sale_type
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         clientId,
         listing_id,
         nullableValue(assigned_user_id || req.user.id),
         finalSellerId,
+        mainSeller.seller_group_id || null,
+        mainSeller.seller_group_name || null,
+        mainSeller.seller_group_pool_rate || null,
+        mainSeller.seller_group_closing_seller_rate || null,
+        mainSeller.seller_group_bnm_override_rate || null,
+        mainSeller.seller_group_broker_override_rate || null,
+        mainSeller.seller_group_manager_override_rate || null,
+        mainSeller.seller_group_rate_snapshot_json || null,
         status,
         finalModeOfPayment,
         finalBuyerType,
@@ -1693,6 +1799,8 @@ export const reserveListing = async (req, res) => {
         terms.downpaymentDiscountAmount,
         terms.downpaymentNetAmount,
         terms.deferredCashAmount,
+        terms.balloonPaymentAmount,
+        terms.balloonDueDate,
         terms.offerBalanceAmount,
         terms.paymentTermsMonths,
         terms.interestRate,
@@ -1781,6 +1889,8 @@ export const reserveListing = async (req, res) => {
         downpayment_discount_amount: terms.downpaymentDiscountAmount,
         downpayment_net_amount: terms.downpaymentNetAmount,
         deferred_cash_amount: terms.deferredCashAmount,
+        balloon_payment_amount: terms.balloonPaymentAmount,
+        balloon_due_date: terms.balloonDueDate,
         offer_balance_amount: terms.offerBalanceAmount,
         payment_terms_months: terms.paymentTermsMonths,
         interest_rate: terms.interestRate,
@@ -2324,7 +2434,7 @@ export const changeClientUnitListing = async (req, res) => {
 
 export const cancelClientUnit = async (req, res) => {
   const { id } = req.params
-  const { release_listing = true, reason = null } = req.body
+  const { reason = null } = req.body
 
   const existingClientUnit = await getClientUnitById(id)
 
@@ -2348,19 +2458,23 @@ export const cancelClientUnit = async (req, res) => {
     await connection.query(
       `
       UPDATE client_units
-      SET status = 'cancelled'
+      SET
+        status = 'cancelled',
+        cancellation_status = 'cancelled',
+        cancellation_date = COALESCE(cancellation_date, CURDATE()),
+        cancellation_reason = COALESCE(?, cancellation_reason)
       WHERE id = ?
       `,
-      [id]
+      [nullableValue(reason), id]
     )
 
     await connection.query(
       `
       UPDATE listings
-      SET status = ?
+      SET status = 'cancelled'
       WHERE id = ?
       `,
-      [release_listing ? 'available' : 'hold', existingClientUnit.listing_id]
+      [existingClientUnit.listing_id]
     )
 
     await connection.query(
@@ -2395,10 +2509,10 @@ export const cancelClientUnit = async (req, res) => {
     })
 
     return res.status(200).json({
-      message: 'Client unit cancelled successfully',
+      message: 'Client unit cancelled successfully. Listing is now cancelled and must be settled before resale.',
       data: {
         clientUnitId: Number(id),
-        listing_status: release_listing ? 'available' : 'hold',
+        listing_status: 'cancelled',
       },
     })
   } catch (err) {
@@ -2407,6 +2521,218 @@ export const cancelClientUnit = async (req, res) => {
   } finally {
     connection.release()
   }
+}
+
+export const updateCancellationSettlement = async (req, res) => {
+  const { id } = req.params
+  const {
+    cancellation_result,
+    refund_amount,
+    discontinued_amount,
+    settlement_date,
+    cancellation_remarks,
+  } = req.body
+
+  const resultValue = normalizeCancellationResult(cancellation_result)
+
+  if (!resultValue) {
+    return res.status(400).json({
+      message: 'Valid cancellation result is required',
+    })
+  }
+
+  const existingClientUnit = await getClientUnitById(id)
+
+  if (!existingClientUnit) {
+    return res.status(404).json({
+      message: 'Client unit not found',
+    })
+  }
+
+  const [paymentRows] = await db.query(
+    `
+    SELECT COALESCE(SUM(amount), 0) AS total_paid
+    FROM payments
+    WHERE client_unit_id = ?
+      AND status = 'verified'
+    `,
+    [id]
+  )
+
+  const totalPaid = normalizeMoney(paymentRows[0]?.total_paid || 0)
+  const suppliedRefund = nullableNumber(refund_amount)
+  const suppliedDiscontinued = nullableNumber(discontinued_amount)
+
+  let finalRefundAmount = suppliedRefund ?? 0
+  let finalDiscontinuedAmount = suppliedDiscontinued ?? 0
+
+  if (suppliedRefund !== null && suppliedDiscontinued === null) {
+    finalDiscontinuedAmount = Math.max(normalizeMoney(totalPaid - suppliedRefund), 0)
+  } else if (suppliedRefund === null && suppliedDiscontinued !== null) {
+    finalRefundAmount = Math.max(normalizeMoney(totalPaid - suppliedDiscontinued), 0)
+  }
+
+  if (finalRefundAmount < 0 || finalDiscontinuedAmount < 0) {
+    return res.status(400).json({
+      message: 'Refund and discontinued amounts cannot be negative',
+    })
+  }
+
+  if (normalizeMoney(finalRefundAmount + finalDiscontinuedAmount) !== totalPaid) {
+    return res.status(400).json({
+      message: 'Refund amount plus discontinued amount must equal total verified payments',
+      data: {
+        total_paid: totalPaid,
+        refund_amount: finalRefundAmount,
+        discontinued_amount: finalDiscontinuedAmount,
+      },
+    })
+  }
+
+  await db.query(
+    `
+    UPDATE client_units
+    SET
+      status = 'cancelled',
+      cancellation_status = CASE
+        WHEN ? = 'pending_settlement' THEN 'cancelled'
+        ELSE 'settled'
+      END,
+      cancellation_result = ?,
+      total_paid_by_client = ?,
+      refund_amount = ?,
+      discontinued_amount = ?,
+      settlement_date = ?,
+      cancellation_approved_by = ?,
+      cancellation_remarks = ?
+    WHERE id = ?
+    `,
+    [
+      resultValue,
+      resultValue,
+      totalPaid,
+      finalRefundAmount,
+      finalDiscontinuedAmount,
+      nullableValue(settlement_date),
+      req.user.id,
+      nullableValue(cancellation_remarks),
+      id,
+    ]
+  )
+
+  await safeCreateAuditLog({
+    userId: req.user.id,
+    action: 'settle_cancellation',
+    module: 'Client Units',
+    description: `Updated cancellation settlement for client unit ${id}`,
+    ipAddress: getClientIp(req),
+  })
+
+  return res.status(200).json({
+    message: 'Cancellation settlement updated successfully',
+    data: {
+      clientUnitId: Number(id),
+      total_paid: totalPaid,
+      refund_amount: finalRefundAmount,
+      discontinued_amount: finalDiscontinuedAmount,
+      cancellation_result: resultValue,
+    },
+  })
+}
+
+export const clearClientUnitForResale = async (req, res) => {
+  const { id } = req.params
+
+  const [rows] = await db.query(
+    `
+    SELECT
+      cu.id,
+      cu.listing_id,
+      cu.cancellation_status,
+      cu.cancellation_result,
+      cu.settlement_date,
+      cu.refund_amount,
+      cu.discontinued_amount,
+      l.status AS listing_status
+    FROM client_units cu
+    INNER JOIN listings l ON l.id = cu.listing_id
+    WHERE cu.id = ?
+    LIMIT 1
+    `,
+    [id]
+  )
+
+  const clientUnit = rows[0]
+
+  if (!clientUnit) {
+    return res.status(404).json({
+      message: 'Client unit not found',
+    })
+  }
+
+  const isSettled =
+    clientUnit.cancellation_status === 'settled' &&
+    clientUnit.cancellation_result &&
+    clientUnit.cancellation_result !== 'pending_settlement' &&
+    clientUnit.settlement_date &&
+    (Number(clientUnit.refund_amount || 0) > 0 ||
+      Number(clientUnit.discontinued_amount || 0) >= 0)
+
+  if (!isSettled) {
+    return res.status(400).json({
+      message: 'Cancellation must be settled before clearing the listing for resale',
+    })
+  }
+
+  const connection = await db.getConnection()
+
+  try {
+    await connection.beginTransaction()
+
+    await connection.query(
+      `
+      UPDATE listings
+      SET status = 'available'
+      WHERE id = ?
+      `,
+      [clientUnit.listing_id]
+    )
+
+    await connection.query(
+      `
+      UPDATE client_units
+      SET
+        cleared_for_resale_at = NOW(),
+        cleared_for_resale_by = ?
+      WHERE id = ?
+      `,
+      [req.user.id, id]
+    )
+
+    await connection.commit()
+  } catch (err) {
+    await connection.rollback()
+    throw err
+  } finally {
+    connection.release()
+  }
+
+  await safeCreateAuditLog({
+    userId: req.user.id,
+    action: 'clear_for_resale',
+    module: 'Client Units',
+    description: `Cleared client unit ${id} listing for resale`,
+    ipAddress: getClientIp(req),
+  })
+
+  return res.status(200).json({
+    message: 'Listing cleared for resale successfully',
+    data: {
+      clientUnitId: Number(id),
+      listing_id: Number(clientUnit.listing_id),
+      listing_status: 'available',
+    },
+  })
 }
 
 export const deleteClientUnit = async (req, res) => {
