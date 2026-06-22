@@ -13,6 +13,7 @@ type ScheduleRow = {
   amount_paid: number | string | null
   reference: string | null
   running_balance: number | string
+  status?: string | null
 }
 
 type PrintData = {
@@ -162,6 +163,7 @@ const StatementOfAccountPrint = () => {
               <th>Date Paid</th>
               <th>Amount Paid</th>
               <th>Reference ID</th>
+              <th>Status</th>
               <th>Running Balance</th>
             </tr>
           </thead>
@@ -175,6 +177,7 @@ const StatementOfAccountPrint = () => {
                 <td>{formatDateOnly(row.date_paid)}</td>
                 <td className="money">{row.amount_paid ? amount(row.amount_paid) : ""}</td>
                 <td>{display(row.reference)}</td>
+                <td>{display(row.status)}</td>
                 <td className="money strong">{amount(row.running_balance)}</td>
               </tr>
             ))}

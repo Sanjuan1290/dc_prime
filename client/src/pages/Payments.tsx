@@ -129,6 +129,8 @@ const paymentTypes = [
   "reservation",
   "downpayment",
   "monthly",
+  "balloon",
+  "advance_payment",
   "legal_misc",
   "full_payment",
   "other",
@@ -253,7 +255,10 @@ const formatPaymentPayload = (paymentData: PaymentFormData) => {
     amount: Number(paymentData.amount || 0),
     payment_type: paymentData.payment_type || null,
     payment_method: paymentData.payment_method || null,
-    reference_id: paymentData.reference_id.trim() || null,
+    reference_id:
+      paymentData.payment_method === "cash"
+        ? null
+        : paymentData.reference_id.trim() || null,
     payment_date: paymentData.payment_date || getLocalDate(),
     status: paymentData.status || "pending",
   }
@@ -297,7 +302,15 @@ const getSuggestionHelpText = (paymentType: string) => {
   }
 
   if (paymentType === "monthly") {
-    return "Suggested amount based on unpaid monthly schedule"
+    return "Suggested amount based on locked monthly amortization"
+  }
+
+  if (paymentType === "balloon") {
+    return "Balloon payment pays future dues and shortens the duration"
+  }
+
+  if (paymentType === "advance_payment") {
+    return "Advance payment applies to the next unpaid monthly due"
   }
 
   if (paymentType === "full_payment") {
@@ -1054,12 +1067,14 @@ const PaymentModal = ({
           <Select
             label="Payment Method"
             value={formData.payment_method}
-            onChange={(e) =>
+            onChange={(e) => {
+              const nextMethod = e.target.value
               setFormData({
                 ...formData,
-                payment_method: e.target.value,
+                payment_method: nextMethod,
+                reference_id: nextMethod === "cash" ? "" : formData.reference_id,
               })
-            }
+            }}
           >
             {paymentMethods.map((method) => (
               <option key={method} value={method}>
@@ -1068,17 +1083,29 @@ const PaymentModal = ({
             ))}
           </Select>
 
-          <Input
-            label="Reference ID / OR No. / Transaction No."
-            value={formData.reference_id}
-            onChange={(e) =>
-              setFormData({
-                ...formData,
-                reference_id: e.target.value,
-              })
-            }
-            placeholder="Optional for cash; recommended for bank, GCash, check"
-          />
+          <div>
+            <Input
+              label="Reference ID / OR No. / Transaction No."
+              value={formData.payment_method === "cash" ? "" : formData.reference_id}
+              onChange={(e) =>
+                setFormData({
+                  ...formData,
+                  reference_id: e.target.value,
+                })
+              }
+              placeholder={
+                formData.payment_method === "cash"
+                  ? "Auto-generated after saving"
+                  : "Required when verified"
+              }
+              disabled={formData.payment_method === "cash"}
+            />
+            {formData.payment_method === "cash" ? (
+              <p className="mt-1 text-xs text-slate-500">
+                Cash payments will get a reference like CASH-YYYYMMDD-CU0001-0001.
+              </p>
+            ) : null}
+          </div>
 
           <Select
             label="Status"

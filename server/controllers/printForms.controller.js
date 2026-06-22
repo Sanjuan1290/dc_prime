@@ -1,6 +1,7 @@
 import { db } from '../db/connect.js'
 import { safeCreateAuditLog } from '../utils/createAuditLog.js'
 import { getClientIp } from '../utils/getClientIp.js'
+import { rebuildAndGetPaymentScheduleRows, mapScheduleRowForPrint } from '../utils/paymentSchedule.js'
 
 const toNumber = (value) => Number(value || 0)
 
@@ -311,7 +312,8 @@ export const getClientUnitPrintData = async (req, res) => {
     return res.status(404).json({ message: 'Client unit not found' })
   }
 
-  const schedule = buildSchedule(printData)
+  const scheduleRows = await rebuildAndGetPaymentScheduleRows(db, clientUnitId)
+  const schedule = scheduleRows.map(mapScheduleRowForPrint)
   const totalPaid = normalizeMoney(
     printData.payments.reduce((sum, payment) => sum + toNumber(payment.amount), 0)
   )

@@ -14,6 +14,8 @@ const toneForStatus = (status: string | null | undefined) => {
     case "submitted":
     case "verified":
     case "converted":
+    case "paid":
+    case "paid_ahead":
       return {
         badge: "border-emerald-200 bg-emerald-50 text-emerald-700",
         dot: "bg-emerald-500",
@@ -55,6 +57,7 @@ const toneForStatus = (status: string | null | undefined) => {
     case "hold":
     case "unpaid":
     case "overdue":
+    case "past_due":
       return {
         badge: "border-orange-200 bg-orange-50 text-orange-700",
         dot: "bg-orange-500",

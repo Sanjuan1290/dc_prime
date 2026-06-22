@@ -46,6 +46,60 @@ const validateLocationCode = (value) => {
   }
 }
 
+const normalizeCadastralLots = (value) => {
+  const rawLots = Array.isArray(value)
+    ? value
+    : String(value || '')
+        .split(/[,\n]/)
+
+  return Array.from(
+    new Set(
+      rawLots
+        .map((item) => String(item || '').trim())
+        .filter(Boolean)
+    )
+  )
+}
+
+const normalizeProjectRow = (project) => {
+  if (!project) return project
+
+  const cadastralLots = normalizeCadastralLots(
+    project.cadastral_lot_numbers || project.cadastral_lots || ''
+  )
+
+  return {
+    ...project,
+    cadastral_lots: cadastralLots,
+    cadastralLots,
+    cadastral_lot_count: cadastralLots.length,
+  }
+}
+
+const replaceProjectCadastralLots = async (connection, projectId, lots = []) => {
+  const cadastralLots = normalizeCadastralLots(lots)
+
+  await connection.query(
+    `UPDATE project_cadastral_lots SET status = 'inactive' WHERE project_id = ?`,
+    [projectId]
+  )
+
+  for (const lotNo of cadastralLots) {
+    await connection.query(
+      `
+      INSERT INTO project_cadastral_lots (project_id, cadastral_lot_no, status)
+      VALUES (?, ?, 'active')
+      ON DUPLICATE KEY UPDATE
+        status = 'active',
+        updated_at = CURRENT_TIMESTAMP
+      `,
+      [projectId, lotNo]
+    )
+  }
+
+  return cadastralLots
+}
+
 const projectSelectFields = `
   p.id,
   p.name,
@@ -58,6 +112,8 @@ const projectSelectFields = `
   p.document_template_id,
   template.name AS document_template_name,
   p.ended_at,
+  COALESCE(cadastral_summary.cadastral_lot_numbers, '') AS cadastral_lot_numbers,
+  COALESCE(cadastral_summary.cadastral_lot_count, 0) AS cadastral_lot_count,
   COALESCE(document_summary.document_count, 0) AS document_count,
   COALESCE(document_summary.required_count, 0) AS required_document_count,
   p.created_at,
@@ -70,7 +126,7 @@ const hydrateProjectRequirements = async (project) => {
   const documentRequirements = await loadProjectDocumentRequirements(db, project.id)
 
   return {
-    ...project,
+    ...normalizeProjectRow(project),
     document_requirements: documentRequirements,
     documentRequirements,
   }
@@ -86,6 +142,15 @@ export const getProjects = async (req, res) => {
     LEFT JOIN (
       SELECT
         project_id,
+        GROUP_CONCAT(cadastral_lot_no ORDER BY cadastral_lot_no SEPARATOR ',') AS cadastral_lot_numbers,
+        COUNT(*) AS cadastral_lot_count
+      FROM project_cadastral_lots
+      WHERE status = 'active'
+      GROUP BY project_id
+    ) cadastral_summary ON cadastral_summary.project_id = p.id
+    LEFT JOIN (
+      SELECT
+        project_id,
         COUNT(*) AS document_count,
         SUM(CASE WHEN is_required = TRUE THEN 1 ELSE 0 END) AS required_count
       FROM project_document_requirements
@@ -97,7 +162,7 @@ export const getProjects = async (req, res) => {
   )
 
   res.status(200).json({
-    projects,
+    projects: projects.map(normalizeProjectRow),
   })
 }
 
@@ -110,6 +175,15 @@ export const getProject = async (req, res) => {
       ${projectSelectFields}
     FROM projects p
     LEFT JOIN document_templates template ON template.id = p.document_template_id
+    LEFT JOIN (
+      SELECT
+        project_id,
+        GROUP_CONCAT(cadastral_lot_no ORDER BY cadastral_lot_no SEPARATOR ',') AS cadastral_lot_numbers,
+        COUNT(*) AS cadastral_lot_count
+      FROM project_cadastral_lots
+      WHERE status = 'active'
+      GROUP BY project_id
+    ) cadastral_summary ON cadastral_summary.project_id = p.id
     LEFT JOIN (
       SELECT
         project_id,
@@ -204,6 +278,9 @@ export const createProject = async (req, res) => {
     document_template_id,
     document_requirements,
     documentRequirements,
+    cadastral_lots,
+    cadastralLots,
+    cadastral_lot_numbers,
   } = req.body
 
   if (!name) {
@@ -251,6 +328,13 @@ export const createProject = async (req, res) => {
     )
 
     const projectId = result.insertId
+
+    await replaceProjectCadastralLots(
+      connection,
+      projectId,
+      cadastral_lots || cadastralLots || cadastral_lot_numbers || []
+    )
+
     let requirements = document_requirements || documentRequirements || []
 
     if ((!Array.isArray(requirements) || requirements.length === 0) && !isMissing(document_template_id)) {
@@ -298,6 +382,9 @@ export const updateProject = async (req, res) => {
     ended_at,
     document_requirements,
     documentRequirements,
+    cadastral_lots,
+    cadastralLots,
+    cadastral_lot_numbers,
   } = req.body
 
   if (!name) {
@@ -382,6 +469,19 @@ export const updateProject = async (req, res) => {
       return res.status(404).json({
         message: 'Project not found',
       })
+    }
+
+    const hasCadastralLots =
+      Object.prototype.hasOwnProperty.call(req.body, 'cadastral_lots') ||
+      Object.prototype.hasOwnProperty.call(req.body, 'cadastralLots') ||
+      Object.prototype.hasOwnProperty.call(req.body, 'cadastral_lot_numbers')
+
+    if (hasCadastralLots) {
+      await replaceProjectCadastralLots(
+        connection,
+        id,
+        cadastral_lots || cadastralLots || cadastral_lot_numbers || []
+      )
     }
 
     const hasRequirements =
@@ -470,3 +570,4 @@ export const deleteProject = async (req, res) => {
 
   res.status(200).json({ message: 'Project deleted successfully' })
 }
+

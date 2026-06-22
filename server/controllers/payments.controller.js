@@ -2,6 +2,7 @@ import { db } from '../db/connect.js'
 import { safeCreateAuditLog } from '../utils/createAuditLog.js'
 import { getClientIp } from '../utils/getClientIp.js'
 import { refreshCommissionEligibility } from './commissions.controller.js'
+import { getNextPaymentScheduleDue, rebuildPaymentSchedule } from '../utils/paymentSchedule.js'
 
 const allowedPaymentStatuses = ['pending', 'verified', 'rejected']
 
@@ -44,6 +45,67 @@ const toDateOnly = (value) => {
 
 const getTodayDateOnly = () => {
   return toDateOnly(new Date())
+}
+
+
+const isCashPaymentMethod = (paymentMethod) => {
+  return String(paymentMethod || '').toLowerCase() === 'cash'
+}
+
+const isReferenceRequired = ({ paymentMethod, status }) => {
+  if (isCashPaymentMethod(paymentMethod)) return false
+  return status === 'verified'
+}
+
+const buildCashReferenceId = ({ paymentDate, clientUnitId, sequence }) => {
+  const compactDate = String(toDateOnly(paymentDate) || getTodayDateOnly()).replace(/-/g, '')
+  const unitCode = `CU${String(clientUnitId).padStart(4, '0')}`
+  const sequenceCode = String(sequence).padStart(4, '0')
+
+  return `CASH-${compactDate}-${unitCode}-${sequenceCode}`
+}
+
+const generateCashReferenceId = async (
+  connectionOrDb,
+  { clientUnitId, paymentDate }
+) => {
+  const compactDate = String(toDateOnly(paymentDate) || getTodayDateOnly()).replace(/-/g, '')
+  const prefix = `CASH-${compactDate}-CU${String(clientUnitId).padStart(4, '0')}-`
+
+  const [rows] = await connectionOrDb.query(
+    `
+    SELECT COUNT(*) AS total
+    FROM payments
+    WHERE client_unit_id = ?
+      AND payment_method = 'cash'
+      AND reference_id LIKE ?
+    `,
+    [clientUnitId, `${prefix}%`]
+  )
+
+  let sequence = Number(rows[0]?.total || 0) + 1
+
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const referenceId = buildCashReferenceId({
+      paymentDate,
+      clientUnitId,
+      sequence,
+    })
+
+    const [existingRows] = await connectionOrDb.query(
+      `SELECT id FROM payments WHERE reference_id = ? LIMIT 1`,
+      [referenceId]
+    )
+
+    if (existingRows.length === 0) return referenceId
+    sequence += 1
+  }
+
+  return buildCashReferenceId({
+    paymentDate,
+    clientUnitId,
+    sequence: Date.now() % 10000,
+  })
 }
 
 const normalizeMoney = (value) => {
@@ -120,6 +182,8 @@ const buildPaymentSuggestions = async (connectionOrDb, clientUnitId) => {
   if (!unit) return null
 
   const summary = await getVerifiedPaymentSummary(connectionOrDb, clientUnitId)
+  const scheduleDue = await getNextPaymentScheduleDue(connectionOrDb, clientUnitId)
+  const nextScheduleRow = scheduleDue.nextRow
   const totalContractPrice = roundAmount(unit.offer_purchase_price || unit.total_contract_price)
   const paidAmount = roundAmount(summary.paid_amount)
   const balance = roundAmount(Math.max(totalContractPrice - paidAmount, 0))
@@ -128,49 +192,62 @@ const buildPaymentSuggestions = async (connectionOrDb, clientUnitId) => {
   const downpaymentGives = Math.max(Number(unit.downpayment_gives || 3), 1)
   const downpaymentPaid = roundAmount(summary.downpayment_paid)
   const downpaymentRemaining = roundAmount(Math.max(downpaymentNet - downpaymentPaid, 0))
-  const downpaymentPaymentsMade = Number(summary.downpayment_payment_count || 0)
-  const remainingDownpaymentGives = Math.max(downpaymentGives - downpaymentPaymentsMade, 1)
   const paymentTermsMonths = Math.max(Number(unit.payment_terms_months || 0), 0)
-  const monthlyPaymentsMade = Number(summary.monthly_payment_count || 0)
-  const remainingMonthlyMonths = Math.max(paymentTermsMonths - monthlyPaymentsMade, 1)
+  const lockedMonthly = roundAmount(unit.monthly_amortization || 0)
+  const fallbackMonthly = paymentTermsMonths > 0
+    ? roundAmount(Math.max(balance - downpaymentRemaining, 0) / paymentTermsMonths)
+    : 0
 
   const reservationSuggestion = roundAmount(Math.max(reservationFee - roundAmount(summary.reservation_paid), 0))
-  const downpaymentSuggestion = downpaymentRemaining > 0
-    ? roundAmount(downpaymentRemaining / remainingDownpaymentGives)
-    : 0
+  const downpaymentSuggestion = nextScheduleRow?.schedule_type === 'downpayment'
+    ? roundAmount(nextScheduleRow.balance || nextScheduleRow.total_due || 0)
+    : downpaymentRemaining > 0
+      ? roundAmount(downpaymentRemaining / downpaymentGives)
+      : 0
   const monthlySuggestion = unit.mode_of_payment === 'installment'
-    ? roundAmount(balance / remainingMonthlyMonths)
+    ? roundAmount(
+        nextScheduleRow?.schedule_type === 'monthly'
+          ? nextScheduleRow.balance || nextScheduleRow.total_due || lockedMonthly || fallbackMonthly
+          : lockedMonthly || fallbackMonthly
+      )
     : 0
   const legalMiscSuggestion = 0
   const fullPaymentSuggestion = balance
+  const balloonSuggestion = balance
+  const advancePaymentSuggestion = monthlySuggestion
 
   const suggestions = {
     reservation: reservationSuggestion,
     reservation_fee: reservationSuggestion,
     downpayment: downpaymentSuggestion,
     monthly: monthlySuggestion,
+    balloon: balloonSuggestion,
+    advance_payment: advancePaymentSuggestion,
     legal_misc: legalMiscSuggestion,
     full_payment: fullPaymentSuggestion,
     other: 0,
   }
 
-  const nextDue = downpaymentSuggestion > 0
+  const nextDue = nextScheduleRow
     ? {
-        payment_type: 'downpayment',
-        description: `${downpaymentPaymentsMade + 1}${downpaymentPaymentsMade === 0 ? 'st' : downpaymentPaymentsMade === 1 ? 'nd' : downpaymentPaymentsMade === 2 ? 'rd' : 'th'} Downpayment`,
-        due_amount: downpaymentSuggestion,
+        payment_type:
+          nextScheduleRow.schedule_type === 'reservation'
+            ? 'reservation'
+            : nextScheduleRow.schedule_type === 'full_payment'
+              ? 'full_payment'
+              : nextScheduleRow.schedule_type,
+        description: nextScheduleRow.description,
+        due_amount: roundAmount(nextScheduleRow.balance || nextScheduleRow.total_due || 0),
+        due_date: nextScheduleRow.due_date,
+        status: nextScheduleRow.status,
       }
-    : monthlySuggestion > 0
+    : balance > 0
       ? {
-          payment_type: 'monthly',
-          description: `${monthlyPaymentsMade + 1} Monthly Payment`,
-          due_amount: monthlySuggestion,
-        }
-      : {
           payment_type: 'full_payment',
-          description: 'Full Payment',
+          description: 'Remaining Balance',
           due_amount: fullPaymentSuggestion,
         }
+      : null
 
   return {
     client_unit_id: Number(clientUnitId),
@@ -187,6 +264,7 @@ const buildPaymentSuggestions = async (connectionOrDb, clientUnitId) => {
       downpayment_discount_amount: roundAmount(unit.downpayment_discount_amount || 0),
       downpayment_net_amount: downpaymentNet,
       payment_terms_months: paymentTermsMonths,
+      monthly_amortization: lockedMonthly,
     },
     suggestions,
     next_due: nextDue,
@@ -266,6 +344,7 @@ export const recomputeClientUnitBalance = async (
       cu.listing_id,
       l.reservation_fee,
       COALESCE(
+        NULLIF(cu.offer_purchase_price, 0),
         NULLIF(l.total_contract_price, 0),
         l.net_selling_price + l.legal_misc_fee,
         l.net_selling_price,
@@ -290,7 +369,7 @@ export const recomputeClientUnitBalance = async (
     SELECT
       COALESCE(SUM(amount), 0) AS paid_amount,
       COALESCE(SUM(CASE WHEN payment_type IN ('reservation_fee', 'reservation') THEN amount ELSE 0 END), 0) AS reservation_paid,
-      COALESCE(SUM(CASE WHEN payment_type IN ('downpayment', 'monthly', 'legal_misc', 'full_payment', 'other') THEN amount ELSE 0 END), 0) AS active_payment_paid
+      COALESCE(SUM(CASE WHEN payment_type IN ('downpayment', 'monthly', 'balloon', 'advance_payment', 'legal_misc', 'full_payment', 'other') THEN amount ELSE 0 END), 0) AS active_payment_paid
     FROM payments
     WHERE client_unit_id = ?
       AND status = 'verified'
@@ -314,7 +393,7 @@ export const recomputeClientUnitBalance = async (
       nextListingStatus = 'sold'
     } else if (activePaymentPaid > 0) {
       nextStatus = 'active'
-      nextListingStatus = 'active'
+      nextListingStatus = 'sold'
     } else if (reservationPaid > 0 || paidAmount >= reservationFee) {
       nextStatus = 'reserved'
       nextListingStatus = 'reserved'
@@ -342,6 +421,8 @@ export const recomputeClientUnitBalance = async (
       [nextListingStatus, clientUnit.listing_id]
     )
   }
+
+  await rebuildPaymentSchedule(connectionOrDb, clientUnitId)
 
   await refreshCommissionEligibility(clientUnitId, connectionOrDb, options)
 
@@ -544,6 +625,19 @@ export const createPayment = async (req, res) => {
       })
     }
 
+    const finalPaymentMethod = nullableValue(payment_method)
+    const finalPaymentDate = toDateOnly(payment_date) || getTodayDateOnly()
+    const finalReferenceId = isCashPaymentMethod(finalPaymentMethod)
+      ? null
+      : nullableValue(reference_id)
+
+    if (isReferenceRequired({ paymentMethod: finalPaymentMethod, status: finalStatus }) && !finalReferenceId) {
+      await connection.rollback()
+      return res.status(400).json({
+        message: 'Reference ID is required for verified non-cash payments',
+      })
+    }
+
     const verifiedBy = finalStatus === 'verified' ? req.user.id : null
     const verifiedAt = finalStatus === 'verified' ? new Date() : null
 
@@ -565,14 +659,26 @@ export const createPayment = async (req, res) => {
         client_unit_id,
         amountValidation.value,
         nullableValue(payment_type),
-        nullableValue(payment_method),
-        nullableValue(reference_id),
-        toDateOnly(payment_date) || getTodayDateOnly(),
+        finalPaymentMethod,
+        finalReferenceId,
+        finalPaymentDate,
         finalStatus,
         verifiedBy,
         verifiedAt,
       ]
     )
+
+    if (isCashPaymentMethod(finalPaymentMethod)) {
+      const cashReferenceId = await generateCashReferenceId(connection, {
+        clientUnitId: client_unit_id,
+        paymentDate: finalPaymentDate,
+      })
+
+      await connection.query(
+        `UPDATE payments SET reference_id = ? WHERE id = ?`,
+        [cashReferenceId, result.insertId]
+      )
+    }
 
     const balanceSummary = await recomputeClientUnitBalance(
       connection,
@@ -696,6 +802,37 @@ export const updatePayment = async (req, res) => {
         ? null
         : existingPayment.verified_at
 
+    const nextPaymentMethod = !isMissing(payment_method)
+      ? nullableValue(payment_method)
+      : existingPayment.payment_method
+    const nextPaymentDate = !isMissing(payment_date)
+      ? toDateOnly(payment_date)
+      : existingPayment.payment_date
+    let nextReferenceId = !isMissing(reference_id)
+      ? nullableValue(reference_id)
+      : existingPayment.reference_id
+
+    if (isCashPaymentMethod(nextPaymentMethod) && !nextReferenceId) {
+      nextReferenceId = await generateCashReferenceId(connection, {
+        clientUnitId: nextClientUnitId,
+        paymentDate: nextPaymentDate,
+      })
+    }
+
+    if (isCashPaymentMethod(nextPaymentMethod) && !isMissing(payment_method)) {
+      nextReferenceId = nextReferenceId || await generateCashReferenceId(connection, {
+        clientUnitId: nextClientUnitId,
+        paymentDate: nextPaymentDate,
+      })
+    }
+
+    if (isReferenceRequired({ paymentMethod: nextPaymentMethod, status: nextStatus }) && !nextReferenceId) {
+      await connection.rollback()
+      return res.status(400).json({
+        message: 'Reference ID is required for verified non-cash payments',
+      })
+    }
+
     await connection.query(
       `
       UPDATE payments
@@ -717,15 +854,9 @@ export const updatePayment = async (req, res) => {
         !isMissing(payment_type)
           ? nullableValue(payment_type)
           : existingPayment.payment_type,
-        !isMissing(payment_method)
-          ? nullableValue(payment_method)
-          : existingPayment.payment_method,
-        !isMissing(reference_id)
-          ? nullableValue(reference_id)
-          : existingPayment.reference_id,
-        !isMissing(payment_date)
-          ? toDateOnly(payment_date)
-          : existingPayment.payment_date,
+        nextPaymentMethod,
+        nextReferenceId,
+        nextPaymentDate,
         nextStatus,
         verifiedBy,
         verifiedAt,

@@ -34,6 +34,10 @@ type Project = {
   administrator: string | null;
   tax_declaration_no: string | null;
   pin: string | null;
+  cadastral_lots?: string[];
+  cadastralLots?: string[];
+  cadastral_lot_numbers?: string | null;
+  cadastral_lot_count?: number;
   status: "active" | "inactive" | string;
   ended_at: string | null;
   document_count?: number;
@@ -84,6 +88,7 @@ type ProjectFormData = {
   administrator: string;
   tax_declaration_no: string;
   pin: string;
+  cadastral_lots: string[];
   status: "active" | "inactive";
   document_template_id: number | "";
   document_template_ids: number[];
@@ -111,10 +116,35 @@ const emptyFormData: ProjectFormData = {
   administrator: "",
   tax_declaration_no: "",
   pin: "",
+  cadastral_lots: [],
   status: "active",
   document_template_id: "",
   document_template_ids: [],
   document_requirements: [],
+};
+
+const normalizeCadastralLots = (value: unknown): string[] => {
+  const rawLots = Array.isArray(value)
+    ? value
+    : String(value || "")
+        .split(/[,\n]/);
+
+  return Array.from(
+    new Set(
+      rawLots
+        .map((item) => String(item || "").trim())
+        .filter(Boolean),
+    ),
+  );
+};
+
+const getProjectCadastralLots = (project: Project | null | undefined) => {
+  return normalizeCadastralLots(
+    project?.cadastral_lots ||
+      project?.cadastralLots ||
+      project?.cadastral_lot_numbers ||
+      [],
+  );
 };
 
 const normalizeRequirements = (requirements: DocumentRequirement[] = []) =>
@@ -192,6 +222,7 @@ const createProject = async (projectData: ProjectFormData) => {
     body: JSON.stringify({
       ...projectData,
       document_template_id: projectData.document_template_ids[0] || projectData.document_template_id || "",
+      cadastral_lots: normalizeCadastralLots(projectData.cadastral_lots),
       document_requirements: normalizeRequirements(
         projectData.document_requirements,
       ),
@@ -219,6 +250,7 @@ const updateProject = async ({
     body: JSON.stringify({
       ...projectData,
       document_template_id: projectData.document_template_ids[0] || projectData.document_template_id || "",
+      cadastral_lots: normalizeCadastralLots(projectData.cadastral_lots),
       document_requirements: normalizeRequirements(
         projectData.document_requirements,
       ),
@@ -248,6 +280,7 @@ const projectToFormData = (project: Project): ProjectFormData => ({
   administrator: project.administrator ?? "",
   tax_declaration_no: project.tax_declaration_no ?? "",
   pin: project.pin ?? "",
+  cadastral_lots: getProjectCadastralLots(project),
   status: project.status === "inactive" ? "inactive" : "active",
   document_template_id: project.document_template_id || "",
   document_template_ids: project.document_template_id ? [Number(project.document_template_id)] : [],
@@ -355,6 +388,7 @@ const Projects = () => {
       (project.administrator ?? "").toLowerCase().includes(search) ||
       (project.tax_declaration_no ?? "").toLowerCase().includes(search) ||
       (project.pin ?? "").toLowerCase().includes(search) ||
+      getProjectCadastralLots(project).join(" ").toLowerCase().includes(search) ||
       project.status.toLowerCase().includes(search);
 
     const matchesStatus =
@@ -444,6 +478,41 @@ const Projects = () => {
       document_requirements: data.document_requirements.filter(
         (_, i) => i !== index,
       ),
+    });
+  };
+
+  const addCadastralLot = (
+    data: ProjectFormData,
+    setData: (data: ProjectFormData) => void,
+  ) => {
+    setData({
+      ...data,
+      cadastral_lots: [...data.cadastral_lots, ""],
+    });
+  };
+
+  const updateCadastralLot = (
+    index: number,
+    value: string,
+    data: ProjectFormData,
+    setData: (data: ProjectFormData) => void,
+  ) => {
+    setData({
+      ...data,
+      cadastral_lots: data.cadastral_lots.map((lotNo, i) =>
+        i === index ? value : lotNo,
+      ),
+    });
+  };
+
+  const removeCadastralLot = (
+    index: number,
+    data: ProjectFormData,
+    setData: (data: ProjectFormData) => void,
+  ) => {
+    setData({
+      ...data,
+      cadastral_lots: data.cadastral_lots.filter((_, i) => i !== index),
     });
   };
 
@@ -662,6 +731,55 @@ const Projects = () => {
                 onChange={(e) => setData({ ...data, pin: e.target.value })}
                 value={data.pin}
               />
+
+              <div className="md:col-span-2 xl:col-span-1">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-700">
+                      Cadastral Lot Numbers
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      Add values like 1306 or 1307. Listings will select from these.
+                    </p>
+                  </div>
+                  <Button onClick={() => addCadastralLot(data, setData)}>
+                    Add
+                  </Button>
+                </div>
+
+                <div className="space-y-2">
+                  {data.cadastral_lots.length === 0 ? (
+                    <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-500">
+                      No cadastral lot numbers yet. Add at least one if this project has fixed cadastral lots.
+                    </div>
+                  ) : null}
+
+                  {data.cadastral_lots.map((lotNo, index) => (
+                    <div key={`cadastral-lot-${index}`} className="flex gap-2">
+                      <Input
+                        aria-label={`Cadastral lot number ${index + 1}`}
+                        placeholder="Example: 1306"
+                        value={lotNo}
+                        onChange={(e) =>
+                          updateCadastralLot(
+                            index,
+                            e.target.value,
+                            data,
+                            setData,
+                          )
+                        }
+                      />
+                      <Button
+                        onClick={() => removeCadastralLot(index, data, setData)}
+                        variant="danger"
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
               <Select
                 label="Status"
                 onChange={(e) =>
@@ -1010,6 +1128,7 @@ const Projects = () => {
                       "Name",
                       "Location",
                       "Location Code",
+                      "Cadastral Lots",
                       "Default Docs",
                       "Status",
                       "Actions",
@@ -1039,6 +1158,11 @@ const Projects = () => {
                         <span className="inline-flex rounded border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-bold tracking-wide text-slate-700">
                           {project.location_code || "-"}
                         </span>
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {getProjectCadastralLots(project).length > 0
+                          ? getProjectCadastralLots(project).join(", ")
+                          : "-"}
                       </td>
                       <td className="px-4 py-3 text-slate-600">
                         {Number(project.document_count || 0)} docs / {Number(project.required_document_count || 0)} required
@@ -1116,6 +1240,7 @@ const Projects = () => {
             <p><b>Administrator:</b> {viewProject.administrator || "-"}</p>
             <p><b>Tax Declaration No.:</b> {viewProject.tax_declaration_no || "-"}</p>
             <p><b>PIN:</b> {viewProject.pin || "-"}</p>
+            <p className="md:col-span-2"><b>Cadastral Lot Numbers:</b> {getProjectCadastralLots(viewProject).length > 0 ? getProjectCadastralLots(viewProject).join(", ") : "-"}</p>
             <p><b>Status:</b> {viewProject.status}</p>
             <p><b>Document Template:</b> {viewProject.document_template_name || "Manual / Custom"}</p>
             <p><b>Default Documents:</b> {Number(viewProject.document_count || 0)}</p>
@@ -1182,3 +1307,4 @@ const Projects = () => {
 };
 
 export default Projects;
+

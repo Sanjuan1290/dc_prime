@@ -82,6 +82,9 @@ type Project = {
   id: number;
   name: string;
   location_code: string;
+  cadastral_lots?: string[];
+  cadastralLots?: string[];
+  cadastral_lot_numbers?: string | null;
 };
 
 type ClientUnitFullDetails = {
@@ -589,6 +592,34 @@ const getProjectLocationPrefix = (projects: Project[], projectId: number) => {
   const locationCode = (project?.location_code || "").trim().toUpperCase();
 
   return locationCode ? `${locationCode}-` : "";
+};
+
+const normalizeCadastralLots = (value: unknown): string[] => {
+  const rawLots = Array.isArray(value)
+    ? value
+    : String(value || "")
+        .split(/[,\n]/);
+
+  return Array.from(
+    new Set(
+      rawLots
+        .map((item) => String(item || "").trim())
+        .filter(Boolean),
+    ),
+  );
+};
+
+const getProjectCadastralLots = (projects: Project[], projectId: number) => {
+  const project = projects.find(
+    (item) => Number(item.id) === Number(projectId),
+  );
+
+  return normalizeCadastralLots(
+    project?.cadastral_lots ||
+      project?.cadastralLots ||
+      project?.cadastral_lot_numbers ||
+      [],
+  );
 };
 
 const Listings = () => {
@@ -1306,6 +1337,96 @@ const Listings = () => {
   );
 };
 
+type CadastralLotFieldProps = {
+  cadastralLots: string[];
+  value: string;
+  onChange: (value: string) => void;
+};
+
+const CadastralLotField = ({
+  cadastralLots,
+  value,
+  onChange,
+}: CadastralLotFieldProps) => {
+  const hasOptions = cadastralLots.length > 0;
+  const optionsKey = cadastralLots.join("|");
+  const previousOptionsKeyRef = useRef(optionsKey);
+  const [isManualMode, setIsManualMode] = useState(false);
+  const isManualValue = Boolean(value) && !cadastralLots.includes(value);
+
+  useEffect(() => {
+    if (!hasOptions) {
+      setIsManualMode(false);
+      previousOptionsKeyRef.current = optionsKey;
+      return;
+    }
+
+    if (previousOptionsKeyRef.current !== optionsKey) {
+      previousOptionsKeyRef.current = optionsKey;
+      setIsManualMode(false);
+    }
+
+    if (isManualValue) {
+      setIsManualMode(true);
+      return;
+    }
+
+    if (value && cadastralLots.includes(value)) {
+      setIsManualMode(false);
+    }
+  }, [cadastralLots, hasOptions, isManualValue, optionsKey, value]);
+
+  if (!hasOptions) {
+    return (
+      <Input
+        label="Cadastral Lot No."
+        placeholder="Add cadastral lot numbers in Projects to show a dropdown"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <Select
+        label="Cadastral Lot No."
+        value={isManualMode || isManualValue ? "__manual__" : value}
+        onChange={(e) => {
+          const nextValue = e.target.value;
+
+          if (nextValue === "__manual__") {
+            setIsManualMode(true);
+            onChange("");
+            return;
+          }
+
+          setIsManualMode(false);
+          onChange(nextValue);
+        }}
+      >
+        <option value="">Select cadastral lot no.</option>
+        {cadastralLots.map((lotNo) => (
+          <option key={lotNo} value={lotNo}>
+            {lotNo}
+          </option>
+        ))}
+        <option value="__manual__">Other / Manual</option>
+      </Select>
+
+      {isManualMode || isManualValue ? (
+        <Input
+          aria-label="Manual cadastral lot number"
+          autoFocus
+          placeholder="Manual cadastral lot no. if not listed"
+          value={isManualValue ? value : ""}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      ) : null}
+    </div>
+  );
+};
+
 type ListingFormModalProps = {
   title: string;
   projects: Project[];
@@ -1414,9 +1535,20 @@ const ListingFormModal = ({
                 (currentUnitId === "" ||
                   (oldPrefix !== "" && currentUnitId === oldPrefix));
 
+              const nextCadastralLots = getProjectCadastralLots(
+                projects,
+                nextProjectId,
+              );
+              const shouldKeepCadastralLot =
+                formData.cadastral_lot_no === "" ||
+                nextCadastralLots.includes(formData.cadastral_lot_no);
+
               setFormData({
                 ...formData,
                 project_id: nextProjectId,
+                cadastral_lot_no: shouldKeepCadastralLot
+                  ? formData.cadastral_lot_no
+                  : "",
                 unit_id: shouldReplacePrefix ? nextPrefix : formData.unit_id,
               });
             }}
@@ -1432,13 +1564,13 @@ const ListingFormModal = ({
             ))}
           </Select>
 
-          <Input
-            label="Cadastral Lot No."
+          <CadastralLotField
+            cadastralLots={getProjectCadastralLots(projects, formData.project_id)}
             value={formData.cadastral_lot_no}
-            onChange={(e) =>
+            onChange={(value) =>
               setFormData({
                 ...formData,
-                cadastral_lot_no: e.target.value,
+                cadastral_lot_no: value,
               })
             }
           />
@@ -2575,3 +2707,4 @@ const Detail = ({
 };
 
 export default Listings;
+

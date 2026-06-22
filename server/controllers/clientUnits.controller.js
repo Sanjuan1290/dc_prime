@@ -8,6 +8,7 @@ import {
   refreshCommissionEligibility,
 } from './commissions.controller.js'
 import { recomputeClientUnitBalance } from './payments.controller.js'
+import { rebuildPaymentSchedule, rebuildAndGetPaymentScheduleRows } from '../utils/paymentSchedule.js'
 
 const allowedClientUnitStatuses = [
   'reserved',
@@ -176,7 +177,7 @@ const validateDueDay = (dueDay) => {
 const listingStatusFromClientUnitStatus = (status) => {
   if (status === 'cancelled') return 'available'
   if (status === 'reserved') return 'reserved'
-  if (status === 'active') return 'active'
+  if (status === 'active') return 'sold'
   if (status === 'fully_paid' || status === 'closed') return 'sold'
 
   return null
@@ -1435,6 +1436,30 @@ export const getAvailableListings = async (req, res) => {
   })
 }
 
+
+export const getClientUnitPaymentSchedules = async (req, res) => {
+  const { id } = req.params
+
+  const [unitRows] = await db.query(
+    `SELECT id FROM client_units WHERE id = ? LIMIT 1`,
+    [id]
+  )
+
+  if (unitRows.length === 0) {
+    return res.status(404).json({
+      message: 'Client unit not found',
+    })
+  }
+
+  const schedules = await rebuildAndGetPaymentScheduleRows(db, id)
+
+  res.status(200).json({
+    message: 'Payment schedules fetched successfully',
+    schedules,
+    data: schedules,
+  })
+}
+
 export const reserveListing = async (req, res) => {
   const { clientId } = req.params
 
@@ -1708,6 +1733,8 @@ export const reserveListing = async (req, res) => {
         ? document_requirements || documentRequirements || []
         : null
     )
+
+    await rebuildPaymentSchedule(connection, clientUnitId)
 
     const createdCommissions = await createReservationCommissions({
       connection,
