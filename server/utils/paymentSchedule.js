@@ -255,10 +255,9 @@ const buildBaseRows = (unit) => {
   }
 
   if (plannedBalloonAmount > 0) {
-    const fallbackBalloonDueDate = terms > 0
-      ? addMonths(monthlyStart, terms)
+    const balloonDueDate = terms > 0
+      ? addMonths(monthlyStart, Math.max(terms - 1, 0))
       : monthlyStart
-    const balloonDueDate = toDateOnly(unit.balloon_due_date) || toDateOnly(fallbackBalloonDueDate)
 
     pushRow({
       dueDate: balloonDueDate,
@@ -535,3 +534,4 @@ export const mapScheduleRowForPrint = (row) => ({
   running_balance: row.running_balance,
   status: row.status,
 })
+

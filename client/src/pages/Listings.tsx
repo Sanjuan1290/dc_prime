@@ -706,6 +706,7 @@ const Listings = () => {
   const [listingToDelete, setListingToDelete] = useState<Listing | null>(null);
   const [reserveListing, setReserveListing] = useState<Listing | null>(null);
   const [reserveClientId, setReserveClientId] = useState<number | "">("");
+  const [reserveClientSearch, setReserveClientSearch] = useState("");
   const [pendingLmfUpdate, setPendingLmfUpdate] = useState<{
     id: number;
     listingData: ListingFormData;
@@ -753,6 +754,26 @@ const Listings = () => {
     queryKey: ["clients", "listing-reserve-options"],
     queryFn: fetchClients,
   });
+
+  const filteredReserveClients = useMemo(() => {
+    const keyword = reserveClientSearch.trim().toLowerCase();
+
+    if (!keyword) {
+      return clients;
+    }
+
+    return clients.filter((client) => {
+      const searchable = [
+        client.full_name,
+        client.email || "",
+        client.contact_no || "",
+      ]
+        .join(" ")
+        .toLowerCase();
+
+      return searchable.includes(keyword);
+    });
+  }, [clients, reserveClientSearch]);
 
   const {
     data: listingFullDetails,
@@ -1362,6 +1383,7 @@ const Listings = () => {
           onReserve={(listing) => {
             setReserveListing(listing);
             setReserveClientId("");
+            setReserveClientSearch("");
             setViewListingId(null);
           }}
         />
@@ -1373,6 +1395,7 @@ const Listings = () => {
           onClose={() => {
             setReserveListing(null);
             setReserveClientId("");
+            setReserveClientSearch("");
           }}
           footer={
             <div className="flex justify-end gap-2">
@@ -1380,6 +1403,7 @@ const Listings = () => {
                 onClick={() => {
                   setReserveListing(null);
                   setReserveClientId("");
+                  setReserveClientSearch("");
                 }}
               >
                 Cancel
@@ -1403,19 +1427,41 @@ const Listings = () => {
               title="Select client for reservation"
               message="The selected unit will be pre-selected in the client's Reserve Listing modal."
             />
+            <Input
+              icon={<FiSearch />}
+              label="Search client"
+              placeholder="Search by name, email, or contact number"
+              value={reserveClientSearch}
+              onChange={(event) => {
+                setReserveClientSearch(event.target.value);
+                setReserveClientId("");
+              }}
+            />
+
             <Select
               label="Client"
               value={reserveClientId}
               onChange={(event) => setReserveClientId(Number(event.target.value) || "")}
             >
-              <option value="">Select client</option>
-              {clients.map((client) => (
+              <option value="">
+                {filteredReserveClients.length
+                  ? "Select client"
+                  : "No matching clients"}
+              </option>
+              {filteredReserveClients.map((client) => (
                 <option key={client.id} value={client.id}>
                   {client.full_name}
                   {client.contact_no ? ` · ${client.contact_no}` : ""}
+                  {client.email ? ` · ${client.email}` : ""}
                 </option>
               ))}
             </Select>
+
+            {reserveClientSearch.trim() ? (
+              <p className="text-xs font-medium text-slate-500">
+                Showing {filteredReserveClients.length} of {clients.length} clients
+              </p>
+            ) : null}
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
               <p><strong>Unit:</strong> {reserveListing.unit_id}</p>
               <p><strong>Project:</strong> {reserveListing.project_name}</p>

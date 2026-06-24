@@ -1052,10 +1052,7 @@ const reserveListing = async ({
         reserveData.mode_of_payment === "installment"
           ? Number(reserveData.balloon_payment_amount || 0)
           : 0,
-      balloon_due_date:
-        reserveData.mode_of_payment === "installment" && reserveData.balloon_due_date
-          ? reserveData.balloon_due_date
-          : null,
+      balloon_due_date: null,
       payment_terms_months:
         reserveData.mode_of_payment === "installment"
           ? getSelectedNumber(
@@ -1540,6 +1537,47 @@ const calculateAmortizedMonthlyPayment = ({
   return (principal * monthlyRate * growth) / (growth - 1);
 };
 
+
+const parseDateInputValue = (value: string) => {
+  if (!value) return null;
+
+  const [year, month, day] = value.split("-").map(Number);
+
+  if (!year || !month || !day) return null;
+
+  return new Date(year, month - 1, day);
+};
+
+const toDateInputValue = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+};
+
+const addMonthsToDateInputValue = (value: string, months: number) => {
+  const date = parseDateInputValue(value);
+
+  if (!date) return "";
+
+  const day = date.getDate();
+  const targetYear = date.getFullYear();
+  const targetMonth = date.getMonth() + months;
+  const lastDayOfTargetMonth = new Date(
+    targetYear,
+    targetMonth + 1,
+    0,
+  ).getDate();
+  const result = new Date(
+    targetYear,
+    targetMonth,
+    Math.min(day, lastDayOfTargetMonth),
+  );
+
+  return toDateInputValue(result);
+};
+
 const getListingInterestRate = (listing?: AvailableListing | null) => {
   const parsed = Number(listing?.annual_interest_rate ?? listing?.interest_rate ?? 0);
 
@@ -1599,6 +1637,7 @@ const ClientProfile = () => {
     createDefaultReserveData(),
   );
   const [listingSearch, setListingSearch] = useState("");
+  const [hasHandledReserveListingParam, setHasHandledReserveListingParam] = useState(false);
   const [editUnit, setEditUnit] = useState<ClientUnit | null>(null);
   const [editUnitData, setEditUnitData] =
     useState<EditUnitData>(defaultEditUnitData);
@@ -2088,6 +2127,21 @@ const ClientProfile = () => {
           36,
         )
       : 0;
+  const reserveFirstDueDate = reserveData.due_date || reserveData.starting_date || getLocalDate();
+  const reserveMonthlyStartDate =
+    reserveData.mode_of_payment === "installment" && reserveDownpayment > 0
+      ? addMonthsToDateInputValue(reserveFirstDueDate, reserveDownpaymentGives)
+      : reserveFirstDueDate;
+  const reserveBalloonDueDate =
+    reserveData.mode_of_payment === "installment" &&
+    reserveBalloonPayment > 0 &&
+    reserveTermsMonths > 0
+      ? addMonthsToDateInputValue(
+          reserveMonthlyStartDate,
+          Math.max(reserveTermsMonths - 1, 0),
+        )
+      : "";
+
   const reserveInterestRate = selectedListing
     ? getListingInterestRate(selectedListing)
     : moneyInputValue(reserveData.interest_rate);
@@ -3794,10 +3848,7 @@ const ClientProfile = () => {
                       paymentMode === "installment"
                         ? reserveData.balloon_payment_amount || "0"
                         : "0",
-                    balloon_due_date:
-                      paymentMode === "installment"
-                        ? reserveData.balloon_due_date
-                        : "",
+                    balloon_due_date: "",
                     payment_terms_months:
                       paymentMode === "installment"
                         ? getSelectedNumber(
@@ -4138,18 +4189,21 @@ const ClientProfile = () => {
                       }}
                     />
 
-                    <Input
-                      label="Balloon Due Date"
-                      type="date"
-                      value={reserveData.balloon_due_date}
-                      onChange={(e) => {
-                        setReserveData({
-                          ...reserveData,
-                          balloon_due_date: e.target.value,
-                        });
-                        setReserveValidationMessage("");
-                      }}
-                    />
+                    {reserveBalloonPayment > 0 ? (
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                        <p className="text-xs font-semibold text-slate-500">
+                          Balloon Due Date
+                        </p>
+                        <p className="mt-1 text-sm font-bold text-slate-900">
+                          {reserveBalloonDueDate
+                            ? formatDate(reserveBalloonDueDate)
+                            : "End of term"}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          Automatically due on the final monthly schedule date.
+                        </p>
+                      </div>
+                    ) : null}
 
                     <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2">
                       <p className="text-xs font-semibold text-blue-700">
@@ -5845,3 +5899,5 @@ const MiniDetail = ({
 };
 
 export default ClientProfile;
+
+

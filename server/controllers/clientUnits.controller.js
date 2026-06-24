@@ -604,7 +604,6 @@ const buildReservationTerms = ({
   downpaymentAmount,
   deferredCashAmount,
   balloonPaymentAmount,
-  balloonDueDate,
   paymentTermsMonths,
   interestRate,
   monthlyAmortization,
@@ -739,16 +738,6 @@ const buildReservationTerms = ({
     return balloonPaymentValidation
   }
 
-  const finalBalloonDueDate = isInstallment && !isMissing(balloonDueDate)
-    ? parseDateOnly(balloonDueDate)
-    : null
-
-  if (isInstallment && !isMissing(balloonDueDate) && !finalBalloonDueDate) {
-    return {
-      isValid: false,
-      message: 'Balloon due date is invalid',
-    }
-  }
 
   let finalPaymentTermsMonths = null
   let finalInterestRate = 0
@@ -842,7 +831,7 @@ const buildReservationTerms = ({
       downpaymentNetAmount: computedDownpaymentNet,
       deferredCashAmount: deferredCashValidation.value,
       balloonPaymentAmount: balloonPaymentValidation.value,
-      balloonDueDate: finalBalloonDueDate,
+      balloonDueDate: null,
       offerBalanceAmount,
       paymentTermsMonths: finalPaymentTermsMonths,
       interestRate: finalInterestRate,
@@ -1653,7 +1642,6 @@ export const reserveListing = async (req, res) => {
     downpayment_discount_rate = 0,
     deferred_cash_amount = 0,
     balloon_payment_amount = 0,
-    balloon_due_date,
     payment_terms_months,
     interest_rate = 0,
     monthly_amortization,
@@ -1764,7 +1752,6 @@ export const reserveListing = async (req, res) => {
       downpaymentDiscountRate: downpayment_discount_rate,
       deferredCashAmount: deferred_cash_amount,
       balloonPaymentAmount: balloon_payment_amount,
-      balloonDueDate: balloon_due_date,
       paymentTermsMonths: payment_terms_months,
       interestRate: interest_rate,
       monthlyAmortization: monthly_amortization,
