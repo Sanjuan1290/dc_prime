@@ -217,7 +217,7 @@ const recomputeListingClientUnitBalances = async (
         l.net_selling_price,
         0
       ) AS total_contract_price,
-      COALESCE(SUM(CASE WHEN p.status = 'verified' THEN p.amount ELSE 0 END), 0) AS paid_amount,
+      COALESCE(SUM(CASE WHEN p.status = 'verified' AND (p.payment_type IS NULL OR p.payment_type <> 'excess_ma') THEN p.amount ELSE 0 END), 0) AS paid_amount,
       COALESCE(
         SUM(
           CASE
@@ -911,7 +911,7 @@ export const getListingFullDetails = async (req, res) => {
     const [paymentRows] = await db.query(
       `
       SELECT
-        COALESCE(SUM(amount), 0) AS total_paid,
+        COALESCE(SUM(CASE WHEN (payment_type IS NULL OR payment_type <> 'excess_ma') THEN amount ELSE 0 END), 0) AS total_paid,
         COUNT(id) AS payment_count,
         MAX(payment_date) AS latest_payment_date
       FROM payments

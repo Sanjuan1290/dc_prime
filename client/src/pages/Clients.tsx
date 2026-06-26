@@ -658,6 +658,17 @@ const ClientForm = ({
           }
         />
 
+        <Input
+          label="Region"
+          value={clientData.region}
+          onChange={(e) =>
+            setClientData({
+              ...clientData,
+              region: e.target.value,
+            })
+          }
+          placeholder="Example: CALABARZON / Region IV-A"
+        />
 
         <SellerCombobox
           label="Default Seller"

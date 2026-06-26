@@ -80,7 +80,7 @@ export const getDashboardSummary = async (req, res) => {
       ) AS sold_lot_value,
 
       (
-        SELECT COALESCE(SUM(amount), 0)
+        SELECT COALESCE(SUM(CASE WHEN (payment_type IS NULL OR payment_type <> 'excess_ma') THEN amount ELSE 0 END), 0)
         FROM payments
         WHERE status = 'verified'
       ) AS tracked_collections,
@@ -196,6 +196,7 @@ export const getDashboardSummary = async (req, res) => {
 
   const totalSales = formatDecimal(summaryRow.total_sales)
   const trackedCollections = formatDecimal(summaryRow.tracked_collections)
+  const pendingSales = formatDecimal(Math.max(totalSales - trackedCollections, 0))
 
   const collectionProgress =
     totalSales === 0
@@ -208,7 +209,7 @@ export const getDashboardSummary = async (req, res) => {
   res.status(200).json({
     summary: {
       totalSales,
-      pendingSales: formatDecimal(summaryRow.pending_sales),
+      pendingSales,
       listedLotValue: formatDecimal(summaryRow.listed_lot_value),
       availableLotValue: formatDecimal(summaryRow.available_lot_value),
       soldLotValue: formatDecimal(summaryRow.sold_lot_value),

@@ -369,6 +369,29 @@ type SellersResponse = {
   data?: Seller[];
 };
 
+type CommissionPreviewRow = {
+  seller: Seller;
+  rate: number | string;
+  sourceType?: string;
+  source_type?: string;
+  commissionRole?: string;
+  commission_role?: string;
+  label?: string;
+};
+
+type CommissionPreviewResponse = {
+  rows?: CommissionPreviewRow[];
+  preview?: {
+    rows?: CommissionPreviewRow[];
+    warnings?: string[];
+    totalRate?: number | string;
+    total_rate?: number | string;
+  };
+  warnings?: string[];
+  totalRate?: number | string;
+  total_rate?: number | string;
+};
+
 type CurrentUserResponse = {
   user?: {
     id: number;
@@ -931,6 +954,28 @@ const fetchSellers = async () => {
 
   const data = (await res.json()) as SellersResponse;
   return data.accreditedSellers || data.sellers || data.data || [];
+};
+
+const fetchSellerCommissionPreview = async (sellerId: number | "") => {
+  if (!sellerId) {
+    return { rows: [], warnings: [], totalRate: 0 };
+  }
+
+  const res = await fetch(
+    `${API_URL}/seller-groups/commission-preview?seller_id=${sellerId}`,
+    { credentials: "include" },
+  );
+
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+
+  const data = (await res.json()) as CommissionPreviewResponse;
+  const preview = data.preview || data;
+
+  return {
+    rows: preview.rows || [],
+    warnings: preview.warnings || [],
+    totalRate: Number(preview.totalRate || preview.total_rate || 0),
+  };
 };
 
 const fetchClientDocuments = async (clientUnitId: number | null) => {
@@ -1928,81 +1973,26 @@ const ClientProfile = () => {
     ? editUnitData.direct_to_developer_rate
     : editUnitData.direct_to_developer_rate || selectedEditDirectToDeveloperRate;
 
-  const sellerById = useMemo(() => {
-    return new Map(sellers.map((seller) => [Number(seller.id), seller]));
-  }, [sellers]);
+  const {
+    data: reserveCommissionPreviewData,
+    isFetching: isReserveCommissionPreviewLoading,
+    error: reserveCommissionPreviewError,
+  } = useQuery({
+    queryKey: ["seller-groups", "commission-preview", reserveData.seller_id || null],
+    queryFn: () => fetchSellerCommissionPreview(reserveData.seller_id),
+    enabled:
+      reserveData.sale_type === "distributed" && Boolean(reserveData.seller_id),
+  });
 
-  const reserveCommissionPreview = useMemo(() => {
-    if (!selectedMainSeller) return [];
-
-    const chain: Seller[] = [];
-    let current: Seller | undefined = selectedMainSeller;
-    const visited = new Set<number>();
-
-    while (current && !visited.has(Number(current.id)) && chain.length < 10) {
-      visited.add(Number(current.id));
-      chain.push(current);
-      current = current.parent_seller_id
-        ? sellerById.get(Number(current.parent_seller_id))
-        : undefined;
-    }
-
-    const personalRate = Number(
-      selectedMainSeller.personal_commission_rate ||
-        selectedMainSeller.commission_rate ||
-        0,
+  const reserveCommissionPreview = reserveCommissionPreviewData?.rows || [];
+  const reserveCommissionPreviewWarnings =
+    reserveCommissionPreviewData?.warnings || [];
+  const reserveCommissionPreviewTotalRate =
+    reserveCommissionPreviewData?.totalRate ||
+    reserveCommissionPreview.reduce(
+      (sum, row) => sum + Number(row.rate || 0),
+      0,
     );
-    const manager = chain.find((seller) => seller.seller_role === "manager");
-    const broker = chain.find((seller) => seller.seller_role === "broker");
-    const bnm = chain.find(
-      (seller) => seller.seller_role === "broker_network_manager",
-    );
-    const rows = [
-      {
-        seller: selectedMainSeller,
-        label: "Main Seller",
-        rate: personalRate,
-      },
-    ];
-
-    let allocatedBelowBroker = personalRate;
-
-    if (manager && Number(manager.id) !== Number(selectedMainSeller.id)) {
-      const managerRate = Number(manager.override_commission_rate || 0);
-      if (managerRate > 0) {
-        rows.push({
-          seller: manager,
-          label: "Manager Override",
-          rate: managerRate,
-        });
-        allocatedBelowBroker += managerRate;
-      }
-    }
-
-    if (broker && Number(broker.id) !== Number(selectedMainSeller.id)) {
-      const brokerPool = Number(
-        broker.commission_pool_rate || broker.commission_rate || 0,
-      );
-      const brokerResidual = Math.max(brokerPool - allocatedBelowBroker, 0);
-      if (brokerResidual > 0) {
-        rows.push({
-          seller: broker,
-          label: "Broker Residual",
-          rate: brokerResidual,
-        });
-      }
-
-      if (bnm) {
-        const bnmPool = Number(bnm.commission_pool_rate || 0);
-        const bnmResidual = Math.max(bnmPool - brokerPool, 0);
-        if (bnmResidual > 0) {
-          rows.push({ seller: bnm, label: "BNM Residual", rate: bnmResidual });
-        }
-      }
-    }
-
-    return rows.filter((row) => Number(row.rate) > 0);
-  }, [selectedMainSeller, sellerById]);
 
   const selectedListing = availableListings.find(
     (listing) => Number(listing.id) === Number(reserveData.listing_id),
@@ -2026,10 +2016,10 @@ const ClientProfile = () => {
     reserveData.mode_of_payment === "installment"
       ? reservePurchasePrice * (reserveDownpaymentPercent / 100)
       : 0;
-  const reserveDownpaymentGross = Math.max(
-    reserveDownpaymentTarget - reserveReservationFee,
-    0,
-  );
+  const reserveDownpaymentGross =
+    reserveData.mode_of_payment === "installment"
+      ? Math.max(reserveDownpaymentTarget, 0)
+      : 0;
   const reserveDownpaymentGives =
     reserveData.mode_of_payment === "installment"
       ? Math.max(
@@ -2117,8 +2107,8 @@ const ClientProfile = () => {
         reserveData.mode_of_payment === "installment"
           ? formatMoney(reserveDownpayment)
           : "-",
-      formula: `${formatMoney(reserveDownpaymentGross)} - ${formatMoney(reserveDownpaymentDiscountAmount)}`,
-      note: "Downpayment is computed from the selected terms. Spot discount only applies if configured.",
+      formula: `(${formatMoney(reservePurchasePrice)} × ${formatNumber(reserveDownpaymentPercent)}%) - ${formatMoney(reserveDownpaymentDiscountAmount)}`,
+      note: `Gross DP ${formatMoney(reserveDownpaymentTarget)}${reserveDownpaymentDiscountAmount > 0 ? ` minus spot discount ${formatMoney(reserveDownpaymentDiscountAmount)}` : ""}. Reservation fee is separate and only reduces the balance for amortization.`,
     },
     {
       key: "offer_balance",
@@ -4105,6 +4095,14 @@ const ClientProfile = () => {
                       </p>
                     </div>
 
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                      <p className="text-xs font-semibold text-slate-500">
+                        Balloon / Principal Payment
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        Not scheduled during reservation. Add it later in Payments as a balloon payment. It deducts principal only and shortens the remaining duration.
+                      </p>
+                    </div>
 
                     <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2">
                       <p className="text-xs font-semibold text-blue-700">
@@ -4226,30 +4224,53 @@ const ClientProfile = () => {
                   used here.
                 </p>
 
-                {reserveCommissionPreview.length > 0 ? (
-                  <div className="mt-4 grid gap-3 md:grid-cols-2">
-                    {reserveCommissionPreview.map((row) => (
-                      <div
-                        key={`${row.label}-${row.seller.id}`}
-                        className="rounded-lg border border-blue-100 bg-white p-3"
-                      >
-                        <p className="text-xs font-semibold uppercase text-slate-400">
-                          {row.label}
-                        </p>
-                        <p className="mt-1 text-sm font-bold text-slate-900">
-                          {row.seller.full_name}
-                        </p>
-                        <p className="text-xs text-slate-500">
-                          {formatText(row.seller.seller_role)} •{" "}
-                          {formatNumber(row.rate)}%
-                        </p>
+                {isReserveCommissionPreviewLoading ? (
+                  <p className="mt-3 text-sm text-slate-600">
+                    Loading actual commission split...
+                  </p>
+                ) : reserveCommissionPreviewError ? (
+                  <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                    {reserveCommissionPreviewError instanceof Error
+                      ? reserveCommissionPreviewError.message
+                      : "Unable to load commission preview."}
+                  </p>
+                ) : reserveCommissionPreview.length > 0 ? (
+                  <>
+                    <div className="mt-4 grid gap-3 md:grid-cols-2">
+                      {reserveCommissionPreview.map((row) => (
+                        <div
+                          key={`${row.label || row.commissionRole || row.commission_role}-${row.seller.id}`}
+                          className="rounded-lg border border-blue-100 bg-white p-3"
+                        >
+                          <p className="text-xs font-semibold uppercase text-slate-400">
+                            {row.label || formatText(row.commissionRole || row.commission_role || row.sourceType || row.source_type || "commission")}
+                          </p>
+                          <p className="mt-1 text-sm font-bold text-slate-900">
+                            {row.seller.full_name}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            {formatText(row.seller.seller_role)} • {formatNumber(row.rate)}%
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+
+                    <p className="mt-3 text-xs font-semibold text-blue-700">
+                      Total computed pool: {formatNumber(reserveCommissionPreviewTotalRate)}%
+                    </p>
+
+                    {reserveCommissionPreviewWarnings.length > 0 ? (
+                      <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                        {reserveCommissionPreviewWarnings.map((warning) => (
+                          <p key={warning}>{warning}</p>
+                        ))}
                       </div>
-                    ))}
-                  </div>
+                    ) : null}
+                  </>
                 ) : (
                   <p className="mt-3 text-sm text-amber-700">
-                    Select a seller with saved commission rates to preview the
-                    automatic split.
+                    Select a seller with saved seller group split rates to preview the
+                    actual automatic commission rows.
                   </p>
                 )}
               </div>
@@ -5662,12 +5683,15 @@ const EmploymentFields = ({
         <Select
           label="Employment Status"
           value={data.employment_status}
-          onChange={(e) =>
+          onChange={(e) => {
+            const employmentStatus = e.target.value as EmploymentStatus | "";
             onChange({
               ...data,
-              employment_status: e.target.value as EmploymentStatus | "",
-            })
-          }
+              employment_status: employmentStatus,
+              employment_status_other:
+                employmentStatus === "other" ? data.employment_status_other : "",
+            });
+          }}
         >
           <option value="">Select status</option>
           {employmentStatusOptions.map((option) => (
@@ -5677,16 +5701,19 @@ const EmploymentFields = ({
           ))}
         </Select>
 
-        <Input
-          label="Other Employment Status"
-          value={data.employment_status_other}
-          onChange={(e) =>
-            onChange({
-              ...data,
-              employment_status_other: e.target.value,
-            })
-          }
-        />
+        {data.employment_status === "other" ? (
+          <Input
+            label="Other Employment Status"
+            value={data.employment_status_other}
+            onChange={(e) =>
+              onChange({
+                ...data,
+                employment_status_other: e.target.value,
+              })
+            }
+            required
+          />
+        ) : null}
 
         <Input
           label="Employer / Business Name"

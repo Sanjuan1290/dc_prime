@@ -245,11 +245,11 @@ const commissionJoins = `
     LEFT JOIN (
       SELECT
         p.client_unit_id,
-        COALESCE(SUM(CASE WHEN p.status = 'verified' THEN p.amount ELSE 0 END), 0) AS total_paid,
+        COALESCE(SUM(CASE WHEN p.status = 'verified' AND (p.payment_type IS NULL OR p.payment_type <> 'excess_ma') THEN p.amount ELSE 0 END), 0) AS total_paid,
         COALESCE(
           ROUND(
             (
-              COALESCE(SUM(CASE WHEN p.status = 'verified' THEN p.amount ELSE 0 END), 0)
+              COALESCE(SUM(CASE WHEN p.status = 'verified' AND (p.payment_type IS NULL OR p.payment_type <> 'excess_ma') THEN p.amount ELSE 0 END), 0)
               / NULLIF(
                 COALESCE(
                   NULLIF(l.total_contract_price, 0),
@@ -341,7 +341,8 @@ const getSeller = async (connectionOrDb, sellerId) => {
         sg.manager_sale_split_json AS seller_group_manager_sale_split_json,
         sg.broker_sale_split_json AS seller_group_broker_sale_split_json,
         sg.bnm_sale_split_json AS seller_group_bnm_sale_split_json,
-        sg.rollover_policy AS seller_group_rollover_policy
+        sg.rollover_policy AS seller_group_rollover_policy,
+        sg.group_head_seller_id AS seller_group_head_seller_id
       FROM accredited_sellers seller
       LEFT JOIN seller_groups sg ON sg.id = seller.seller_group_id
       WHERE seller.id = ?
@@ -447,6 +448,43 @@ const getSellerChain = async (connectionOrDb, sellerId) => {
   }
 
   return chain;
+};
+
+const getSellerGroupMembers = async (connectionOrDb, sellerGroupId) => {
+  if (isMissing(sellerGroupId)) return [];
+
+  const [rows] = await connectionOrDb.query(
+    `
+      SELECT
+        seller.id,
+        seller.full_name,
+        seller.seller_role,
+        seller.parent_seller_id,
+        seller.seller_group_id,
+        seller.commission_rate,
+        seller.commission_pool_rate,
+        seller.personal_commission_rate,
+        seller.override_commission_rate,
+        seller.direct_to_developer_rate,
+        seller.max_downline_rate,
+        seller.status
+      FROM accredited_sellers seller
+      WHERE seller.seller_group_id = ?
+        AND seller.status = 'active'
+      ORDER BY
+        CASE seller.seller_role
+          WHEN 'broker_network_manager' THEN 1
+          WHEN 'broker' THEN 2
+          WHEN 'manager' THEN 3
+          WHEN 'agent' THEN 4
+          ELSE 99
+        END,
+        seller.full_name ASC
+      `,
+    [sellerGroupId],
+  );
+
+  return rows;
 };
 
 const getCommissionById = async (commissionId) => {
@@ -1327,7 +1365,7 @@ export const refreshCommissionEligibility = async (
         COALESCE(
           SUM(
             CASE
-              WHEN p.status = 'verified' THEN p.amount
+              WHEN p.status = 'verified' AND (p.payment_type IS NULL OR p.payment_type <> 'excess_ma') THEN p.amount
               ELSE 0
             END
           ),
@@ -1572,6 +1610,7 @@ const getSellerGroupPlanFromSeller = (seller) => {
   return {
     seller_group_id: seller.seller_group_id,
     group_name: seller.seller_group_name,
+    group_head_seller_id: seller.seller_group_head_seller_id,
     pool_rate: poolRate,
     sale_splits: saleSplits,
   };
@@ -1607,23 +1646,67 @@ const splitKeyBySellerRole = {
   broker_network_manager: "broker_network_manager",
 };
 
-const getSplitRecipient = ({ targetRole, chain, sellingSeller }) => {
+const getGroupHeadSeller = ({ groupMembers = [], groupHeadSellerId = null }) => {
+  if (isMissing(groupHeadSellerId)) return null;
+
+  return groupMembers.find(
+    (seller) => Number(seller.id) === Number(groupHeadSellerId),
+  ) || null;
+};
+
+const getGroupRoleRecipient = ({ targetRole, groupMembers = [], groupHeadSellerId = null }) => {
+  const groupHead = getGroupHeadSeller({ groupMembers, groupHeadSellerId });
+
+  if (groupHead?.seller_role === targetRole) return groupHead;
+
+  return groupMembers.find((seller) => seller.seller_role === targetRole) || null;
+};
+
+const getSplitRecipient = ({
+  targetRole,
+  chain,
+  sellingSeller,
+  groupMembers = [],
+  groupHeadSellerId = null,
+  warnings = [],
+}) => {
   if (targetRole === sellingSeller.seller_role) return sellingSeller;
 
   const exactRecipient = chain.find((seller) => seller.seller_role === targetRole);
   if (exactRecipient) return exactRecipient;
+
+  const groupRoleRecipient = getGroupRoleRecipient({
+    targetRole,
+    groupMembers,
+    groupHeadSellerId,
+  });
+  if (groupRoleRecipient) return groupRoleRecipient;
+
+  const groupHead = getGroupHeadSeller({ groupMembers, groupHeadSellerId });
+  if (groupHead) {
+    warnings.push(
+      `${sellerDisplayRole(targetRole)} allocation was assigned to the group head because no active ${sellerDisplayRole(targetRole)} member was found in the seller hierarchy or group.`,
+    );
+    return groupHead;
+  }
 
   const targetIndex = sellerRoleOrder[targetRole] ?? 99;
 
   const nearestUpline = chain
     .slice(1)
     .filter((seller) => (sellerRoleOrder[seller.seller_role] ?? 99) <= targetIndex)
-    .sort((a, b) => (sellerRoleOrder[b.seller_role] ?? 99) - (sellerRoleOrder[a.seller_role] ?? 99))[0];
+    .sort((a, b) => (sellerRoleOrder[a.seller_role] ?? 99) - (sellerRoleOrder[b.seller_role] ?? 99))[0];
+
+  if (nearestUpline) {
+    warnings.push(
+      `${sellerDisplayRole(targetRole)} allocation was assigned to ${nearestUpline.full_name} because no exact recipient was found.`,
+    );
+  }
 
   return nearestUpline || getNearestUpline(chain) || sellingSeller;
 };
 
-const buildGroupPlanCommissionPreview = ({ chain, plan }) => {
+const buildGroupPlanCommissionPreview = ({ chain, plan, groupMembers = [] }) => {
   const sellingSeller = chain[0];
   const rowsBySellerId = new Map();
   const warnings = [];
@@ -1646,6 +1729,9 @@ const buildGroupPlanCommissionPreview = ({ chain, plan }) => {
       targetRole,
       chain,
       sellingSeller,
+      groupMembers,
+      groupHeadSellerId: plan.group_head_seller_id,
+      warnings,
     });
 
     const sourceType = Number(recipient?.id) === Number(sellingSeller.id) ? "main" : "override";
@@ -1848,10 +1934,15 @@ export const buildHierarchyCommissionPreview = async ({
     return buildLegacyHierarchyCommissionPreview({ connectionOrDb, sellerId });
   }
 
-  const preview = buildGroupPlanCommissionPreview({ chain, plan });
+  const groupMembers = await getSellerGroupMembers(
+    connectionOrDb,
+    plan.seller_group_id,
+  );
+  const preview = buildGroupPlanCommissionPreview({ chain, plan, groupMembers });
 
   return {
     chain,
+    groupMembers,
     rows: preview.rows,
     totalRate: preview.totalRate,
     warnings: preview.warnings,

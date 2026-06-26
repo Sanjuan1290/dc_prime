@@ -46,6 +46,7 @@ type Payment = {
   total_contract_price?: number | string
   amount: number | string
   payment_type: string | null
+  apply_excess_ma?: number | boolean
   payment_method: string | null
   reference_id?: string | null
   payment_date: string
@@ -81,6 +82,12 @@ type ClientUnit = {
 
 type PaymentSuggestions = {
   suggestions: Record<string, number>
+  balance?: number
+  principal_balance?: number
+  statement_balance?: number
+  excess_ma_available?: number
+  excess_ma_generated?: number
+  excess_ma_used?: number
   next_due?: {
     payment_type: string
     description: string
@@ -100,6 +107,7 @@ type PaymentFormData = {
   client_unit_id: number | ""
   amount: string
   payment_type: string
+  apply_excess_ma: boolean
   payment_method: string
   reference_id: string
   payment_date: string
@@ -120,6 +128,7 @@ const emptyFormData: PaymentFormData = {
   client_unit_id: "",
   amount: "",
   payment_type: "monthly",
+  apply_excess_ma: false,
   payment_method: "cash",
   reference_id: "",
   payment_date: getLocalDate(),
@@ -253,6 +262,7 @@ const formatPaymentPayload = (paymentData: PaymentFormData) => {
     client_unit_id: paymentData.client_unit_id,
     amount: Number(paymentData.amount || 0),
     payment_type: paymentData.payment_type || null,
+    apply_excess_ma: Boolean(paymentData.apply_excess_ma),
     payment_method: paymentData.payment_method || null,
     reference_id:
       paymentData.payment_method === "cash"
@@ -268,6 +278,7 @@ const paymentToFormData = (payment: Payment): PaymentFormData => {
     client_unit_id: payment.client_unit_id,
     amount: String(payment.amount || ""),
     payment_type: payment.payment_type || "monthly",
+    apply_excess_ma: Boolean(Number(payment.apply_excess_ma || 0)),
     payment_method: payment.payment_method || "cash",
     reference_id: payment.reference_id || "",
     payment_date: getDateInputValue(payment.payment_date),
@@ -304,8 +315,12 @@ const getSuggestionHelpText = (paymentType: string) => {
     return "Suggested amount based on locked monthly amortization"
   }
 
+  if (paymentType === "excess_ma") {
+    return "Use saved excess MA to pay the current monthly due"
+  }
+
   if (paymentType === "balloon") {
-    return "Balloon payment pays future dues and shortens the duration"
+    return "Balloon payment reduces principal and shortens the remaining SOA duration"
   }
 
   if (paymentType === "full_payment") {
@@ -527,15 +542,15 @@ const Payments = () => {
   )
 
   const totalCollected = filteredPayments
-    .filter((payment) => payment.status === "verified")
+    .filter((payment) => payment.status === "verified" && payment.payment_type !== "excess_ma")
     .reduce((sum, payment) => sum + Number(payment.amount || 0), 0)
 
   const pendingTotal = filteredPayments
-    .filter((payment) => payment.status === "pending")
+    .filter((payment) => payment.status === "pending" && payment.payment_type !== "excess_ma")
     .reduce((sum, payment) => sum + Number(payment.amount || 0), 0)
 
   const rejectedTotal = filteredPayments
-    .filter((payment) => payment.status === "rejected")
+    .filter((payment) => payment.status === "rejected" && payment.payment_type !== "excess_ma")
     .reduce((sum, payment) => sum + Number(payment.amount || 0), 0)
 
   const openAddModal = () => {
@@ -937,7 +952,7 @@ const PaymentStatusModal = ({
           ))}
         </Select>
 
-        {formData.status === "verified" && formData.payment_method !== "cash" && !formData.reference_id ? (
+        {formData.status === "verified" && formData.payment_method !== "cash" && formData.payment_type !== "excess_ma" && !formData.reference_id ? (
           <Alert
             variant="warning"
             title="Verified non-cash payments need a reference ID. Use Edit if you need to add the reference first."
@@ -992,6 +1007,47 @@ const PaymentModal = ({
     ? `${paymentSuggestions.next_due.description}: ${formatMoney(paymentSuggestions.next_due.due_amount)}`
     : null
   const suggestionHelpText = getSuggestionHelpText(formData.payment_type)
+  const currentDueAmount = Number(paymentSuggestions?.suggestions?.monthly || 0)
+  const enteredAmount = Number(formData.amount || 0)
+  const availableExcessMa = Number(paymentSuggestions?.excess_ma_available || 0)
+  const excessMaNeeded = formData.apply_excess_ma
+    ? Math.max(currentDueAmount - enteredAmount, 0)
+    : 0
+  const excessMaToUse = Math.min(excessMaNeeded, availableExcessMa)
+  const remainingAfterExcessMa = Math.max(excessMaNeeded - excessMaToUse, 0)
+  const displayBalance =
+    paymentSuggestions?.principal_balance ??
+    paymentSuggestions?.balance ??
+    selectedClientUnit?.balance ??
+    0
+  const showNextDueInSuggestion = !["balloon", "full_payment"].includes(formData.payment_type)
+  const suggestionMessage = (() => {
+    if (isSuggestionsLoading) {
+      return "Loading suggested amount..."
+    }
+
+    if (formData.payment_type === "balloon") {
+      return selectedClientUnit
+        ? `${suggestionHelpText}. Current principal balance: ${formatMoney(displayBalance)}. Enter the amount the client wants to pay as balloon.`
+        : "Select a client unit to load the current principal balance."
+    }
+
+    if (formData.payment_type === "full_payment") {
+      return selectedClientUnit
+        ? `${suggestionHelpText}: ${formatMoney(displayBalance)}`
+        : "Select a client unit to load the payoff amount."
+    }
+
+    if (suggestedAmount && Number(suggestedAmount) > 0) {
+      return `${suggestionHelpText}: ${formatMoney(suggestedAmount)}${
+        nextDueLabel && showNextDueInSuggestion ? ` - Next due: ${nextDueLabel}` : ""
+      }`
+    }
+
+    return formData.payment_type === "other"
+      ? "Other payments are manual."
+      : "Select a client unit and payment type to load a suggested amount."
+  })()
 
   return (
     <Modal
@@ -1045,6 +1101,7 @@ const PaymentModal = ({
                         ...formData,
                         client_unit_id: unit.id,
                         amount: "",
+                        apply_excess_ma: false,
                       })
                       onAmountManualEditChange?.(false)
                       setClientUnitSearch(label)
@@ -1060,9 +1117,14 @@ const PaymentModal = ({
                   </button>
                 )
               })
+            ) : selectedClientUnit ? (
+              <div className="px-3 py-3 text-sm text-slate-600">
+                <span className="font-semibold text-slate-900">Selected:</span>{" "}
+                {selectedClientUnit.client_name} — {selectedClientUnit.unit_id} ({selectedClientUnit.project_name})
+              </div>
             ) : (
               <p className="px-3 py-3 text-sm text-slate-500">
-                No client units found. Type a client name, unit ID, project, or seller.
+                No matching client units found. Type a client name, unit ID, project, or seller.
               </p>
             )}
           </div>
@@ -1075,7 +1137,7 @@ const PaymentModal = ({
         </div>
 
         {selectedClientUnit ? (
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
             <MiniDetail
               label="TCP"
               value={formatMoney(selectedClientUnit.total_contract_price)}
@@ -1085,12 +1147,16 @@ const PaymentModal = ({
               value={formatMoney(selectedClientUnit.paid_amount)}
             />
             <MiniDetail
-              label="Balance"
-              value={formatMoney(selectedClientUnit.balance)}
+              label="Principal Balance"
+              value={formatMoney(displayBalance)}
             />
             <MiniDetail
               label="Payment %"
               value={`${formatNumber(selectedClientUnit.payment_percentage || 0)}%`}
+            />
+            <MiniDetail
+              label="Excess MA"
+              value={formatMoney(paymentSuggestions?.excess_ma_available || 0)}
             />
           </div>
         ) : null}
@@ -1107,6 +1173,10 @@ const PaymentModal = ({
               setFormData({
                 ...formData,
                 payment_type: nextType,
+                apply_excess_ma: nextType === "monthly" ? formData.apply_excess_ma : false,
+                payment_method: formData.payment_method,
+                reference_id: formData.reference_id,
+                status: formData.status,
                 amount:
                   nextType !== "other" && nextSuggestedAmount && Number(nextSuggestedAmount) > 0
                     ? Number(nextSuggestedAmount).toFixed(2)
@@ -1137,23 +1207,35 @@ const PaymentModal = ({
               }}
               required
             />
-            {isSuggestionsLoading ? (
-              <p className="mt-1 text-xs text-slate-500">
-                Loading suggested amount...
-              </p>
-            ) : suggestedAmount && Number(suggestedAmount) > 0 ? (
-              <p className="mt-1 text-xs text-slate-500">
-                {suggestionHelpText}: {formatMoney(suggestedAmount)}
-                {nextDueLabel ? ` - Next due: ${nextDueLabel}` : ""}
-              </p>
-            ) : (
-              <p className="mt-1 text-xs text-slate-500">
-                {formData.payment_type === "other"
-                  ? "Other payments are manual."
-                  : "Select a client unit and payment type to load a suggested amount."}
-              </p>
-            )}
+            <p className="mt-1 text-xs text-slate-500">
+              {suggestionMessage}
+            </p>
           </div>
+
+          {formData.payment_type === "monthly" && availableExcessMa > 0 ? (
+            <div className="rounded-xl border border-blue-100 bg-blue-50 p-3 md:col-span-2">
+              <label className="flex items-start gap-3 text-sm font-semibold text-slate-800">
+                <input
+                  className="mt-1 h-4 w-4"
+                  type="checkbox"
+                  checked={formData.apply_excess_ma}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      apply_excess_ma: e.target.checked,
+                    })
+                  }
+                />
+                <span>
+                  Use Excess MA for unpaid portion
+                  <span className="mt-1 block text-xs font-normal text-slate-600">
+                    Available Excess MA: {formatMoney(availableExcessMa)}. If the due is {formatMoney(currentDueAmount)} and the client pays {formatMoney(enteredAmount)}, the system will use {formatMoney(excessMaToUse)} from Excess MA.
+                    {remainingAfterExcessMa > 0 ? ` Remaining unpaid after Excess MA: ${formatMoney(remainingAfterExcessMa)}.` : ""}
+                  </span>
+                </span>
+              </label>
+            </div>
+          ) : null}
 
           <Input
             label="Payment Date"
@@ -1180,11 +1262,12 @@ const PaymentModal = ({
               })
             }}
           >
-            {paymentMethods.map((method) => (
-              <option key={method} value={method}>
-                {formatText(method)}
-              </option>
-            ))}
+            {paymentMethods
+              .map((method) => (
+                <option key={method} value={method}>
+                  {formatText(method)}
+                </option>
+              ))}
           </Select>
 
           <div>
@@ -1230,8 +1313,7 @@ const PaymentModal = ({
         </div>
 
         <p className="text-sm text-slate-500">
-          Only verified payments affect collection percentage and commission
-          release eligibility.
+          Verified payments affect collection percentage and commission release eligibility. Use Excess MA only covers the unpaid portion from saved overpayment credits.
         </p>
       </div>
     </Modal>

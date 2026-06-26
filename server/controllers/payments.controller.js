@@ -52,8 +52,13 @@ const isCashPaymentMethod = (paymentMethod) => {
   return String(paymentMethod || '').toLowerCase() === 'cash'
 }
 
-const isReferenceRequired = ({ paymentMethod, status }) => {
+const isExcessMaPayment = (paymentType) => {
+  return String(paymentType || '').toLowerCase() === 'excess_ma'
+}
+
+const isReferenceRequired = ({ paymentMethod, paymentType, status }) => {
   if (isCashPaymentMethod(paymentMethod)) return false
+  if (isExcessMaPayment(paymentType)) return false
   return status === 'verified'
 }
 
@@ -158,7 +163,7 @@ const getVerifiedPaymentSummary = async (connectionOrDb, clientUnitId) => {
   const [rows] = await connectionOrDb.query(
     `
     SELECT
-      COALESCE(SUM(amount), 0) AS paid_amount,
+      COALESCE(SUM(CASE WHEN (payment_type IS NULL OR payment_type <> 'excess_ma') THEN amount ELSE 0 END), 0) AS paid_amount,
       COALESCE(SUM(CASE WHEN payment_type IN ('reservation_fee', 'reservation') THEN amount ELSE 0 END), 0) AS reservation_paid,
       COALESCE(SUM(CASE WHEN payment_type = 'downpayment' THEN amount ELSE 0 END), 0) AS downpayment_paid,
       COALESCE(SUM(CASE WHEN payment_type = 'monthly' THEN amount ELSE 0 END), 0) AS monthly_paid,
@@ -186,7 +191,13 @@ const buildPaymentSuggestions = async (connectionOrDb, clientUnitId) => {
   const nextScheduleRow = scheduleDue.nextRow
   const totalContractPrice = roundAmount(unit.offer_purchase_price || unit.total_contract_price)
   const paidAmount = roundAmount(summary.paid_amount)
-  const balance = roundAmount(Math.max(totalContractPrice - paidAmount, 0))
+  const scheduleBalance = roundAmount(scheduleDue.totalBalance || 0)
+  const principalBalance = roundAmount(
+    scheduleDue.principalBalance ||
+      unit.balance ||
+      Math.max(totalContractPrice - paidAmount, 0)
+  )
+  const balance = principalBalance
   const reservationFee = roundAmount(unit.reservation_fee_amount || unit.listing_reservation_fee)
   const downpaymentNet = roundAmount(unit.downpayment_net_amount || unit.downpayment_amount)
   const downpaymentGives = Math.max(Number(unit.downpayment_gives || 3), 1)
@@ -212,15 +223,18 @@ const buildPaymentSuggestions = async (connectionOrDb, clientUnitId) => {
       )
     : 0
   const legalMiscSuggestion = 0
-  const fullPaymentSuggestion = balance
-  const balloonSuggestion = balance
+  const fullPaymentSuggestion = principalBalance
+  const balloonSuggestion = principalBalance
   const advancePaymentSuggestion = monthlySuggestion
+  const excessMaAvailable = roundAmount(scheduleDue.excessMaAvailable || 0)
+  const excessMaSuggestion = roundAmount(Math.min(excessMaAvailable, monthlySuggestion || balance || 0))
 
   const suggestions = {
     reservation: reservationSuggestion,
     reservation_fee: reservationSuggestion,
     downpayment: downpaymentSuggestion,
     monthly: monthlySuggestion,
+    excess_ma: excessMaSuggestion,
     balloon: balloonSuggestion,
     advance_payment: advancePaymentSuggestion,
     legal_misc: legalMiscSuggestion,
@@ -257,6 +271,11 @@ const buildPaymentSuggestions = async (connectionOrDb, clientUnitId) => {
     total_contract_price: totalContractPrice,
     paid_amount: paidAmount,
     balance,
+    principal_balance: principalBalance,
+    statement_balance: scheduleBalance,
+    excess_ma_available: excessMaAvailable,
+    excess_ma_generated: roundAmount(scheduleDue.excessMaGenerated || 0),
+    excess_ma_used: roundAmount(scheduleDue.excessMaUsed || 0),
     terms: {
       downpayment_percent: Number(unit.downpayment_percent || 0),
       downpayment_gives: downpaymentGives,
@@ -282,6 +301,7 @@ const paymentFields = `
   l.total_contract_price,
   py.amount,
   py.payment_type,
+  COALESCE(py.apply_excess_ma, 0) AS apply_excess_ma,
   py.payment_method,
   py.reference_id,
   DATE_FORMAT(py.payment_date, '%Y-%m-%d') AS payment_date,
@@ -367,7 +387,7 @@ export const recomputeClientUnitBalance = async (
   const [paymentRows] = await connectionOrDb.query(
     `
     SELECT
-      COALESCE(SUM(amount), 0) AS paid_amount,
+      COALESCE(SUM(CASE WHEN (payment_type IS NULL OR payment_type <> 'excess_ma') THEN amount ELSE 0 END), 0) AS paid_amount,
       COALESCE(SUM(CASE WHEN payment_type IN ('reservation_fee', 'reservation') THEN amount ELSE 0 END), 0) AS reservation_paid,
       COALESCE(SUM(CASE WHEN payment_type IN ('downpayment', 'monthly', 'balloon', 'advance_payment', 'legal_misc', 'full_payment', 'other') THEN amount ELSE 0 END), 0) AS active_payment_paid
     FROM payments
@@ -382,13 +402,16 @@ export const recomputeClientUnitBalance = async (
   const reservationPaid = normalizeMoney(paymentRows[0]?.reservation_paid)
   const activePaymentPaid = normalizeMoney(paymentRows[0]?.active_payment_paid)
   const reservationFee = normalizeMoney(clientUnit.reservation_fee)
-  const balance = Math.max(normalizeMoney(totalContractPrice - paidAmount), 0)
+  const scheduleSummary = await rebuildPaymentSchedule(connectionOrDb, clientUnitId)
+  const balance = normalizeMoney(
+    scheduleSummary?.principal_balance ?? Math.max(totalContractPrice - paidAmount, 0)
+  )
 
   let nextStatus = clientUnit.status
   let nextListingStatus = null
 
   if (!['cancelled', 'closed'].includes(clientUnit.status)) {
-    if (totalContractPrice > 0 && paidAmount >= totalContractPrice) {
+    if (balance <= 0 && paidAmount > 0) {
       nextStatus = 'fully_paid'
       nextListingStatus = 'sold'
     } else if (activePaymentPaid > 0) {
@@ -422,8 +445,6 @@ export const recomputeClientUnitBalance = async (
     )
   }
 
-  await rebuildPaymentSchedule(connectionOrDb, clientUnitId)
-
   await refreshCommissionEligibility(clientUnitId, connectionOrDb, options)
 
   return {
@@ -432,6 +453,8 @@ export const recomputeClientUnitBalance = async (
     reservationPaid,
     activePaymentPaid,
     balance,
+    statementBalance: balance,
+    statementTotal: scheduleSummary?.total_statement_due ?? null,
     status: nextStatus,
     listingStatus: nextListingStatus,
   }
@@ -583,6 +606,7 @@ export const createPayment = async (req, res) => {
     client_unit_id,
     amount,
     payment_type,
+    apply_excess_ma = false,
     payment_method,
     reference_id,
     payment_date,
@@ -625,13 +649,29 @@ export const createPayment = async (req, res) => {
       })
     }
 
-    const finalPaymentMethod = nullableValue(payment_method)
+    const finalPaymentType = nullableValue(payment_type)
+    const finalApplyExcessMa = ['true', '1', 'yes', 'on'].includes(String(apply_excess_ma).toLowerCase()) || apply_excess_ma === true || apply_excess_ma === 1
+    const finalPaymentMethod = isExcessMaPayment(finalPaymentType)
+      ? 'excess_ma'
+      : nullableValue(payment_method)
     const finalPaymentDate = toDateOnly(payment_date) || getTodayDateOnly()
-    const finalReferenceId = isCashPaymentMethod(finalPaymentMethod)
+    const finalReferenceId = isCashPaymentMethod(finalPaymentMethod) || isExcessMaPayment(finalPaymentType)
       ? null
       : nullableValue(reference_id)
 
-    if (isReferenceRequired({ paymentMethod: finalPaymentMethod, status: finalStatus }) && !finalReferenceId) {
+    if (finalStatus === 'verified' && isExcessMaPayment(finalPaymentType)) {
+      const scheduleDue = await getNextPaymentScheduleDue(connection, client_unit_id)
+      const availableExcessMa = normalizeMoney(scheduleDue.excessMaAvailable || 0)
+
+      if (amountValidation.value > availableExcessMa) {
+        await connection.rollback()
+        return res.status(400).json({
+          message: `Excess MA available is only ₱${availableExcessMa.toFixed(2)}`,
+        })
+      }
+    }
+
+    if (isReferenceRequired({ paymentMethod: finalPaymentMethod, paymentType: finalPaymentType, status: finalStatus }) && !finalReferenceId) {
       await connection.rollback()
       return res.status(400).json({
         message: 'Reference ID is required for verified non-cash payments',
@@ -647,18 +687,20 @@ export const createPayment = async (req, res) => {
         client_unit_id,
         amount,
         payment_type,
+        apply_excess_ma,
         payment_method,
         reference_id,
         payment_date,
         status,
         verified_by,
         verified_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         client_unit_id,
         amountValidation.value,
-        nullableValue(payment_type),
+        finalPaymentType,
+        finalApplyExcessMa ? 1 : 0,
         finalPaymentMethod,
         finalReferenceId,
         finalPaymentDate,
@@ -728,6 +770,7 @@ export const updatePayment = async (req, res) => {
     client_unit_id,
     amount,
     payment_type,
+    apply_excess_ma,
     payment_method,
     reference_id,
     payment_date,
@@ -826,7 +869,33 @@ export const updatePayment = async (req, res) => {
       })
     }
 
-    if (isReferenceRequired({ paymentMethod: nextPaymentMethod, status: nextStatus }) && !nextReferenceId) {
+    const nextPaymentType = !isMissing(payment_type)
+      ? nullableValue(payment_type)
+      : existingPayment.payment_type
+    const nextApplyExcessMa = !isMissing(apply_excess_ma)
+      ? ['true', '1', 'yes', 'on'].includes(String(apply_excess_ma).toLowerCase()) || apply_excess_ma === true || apply_excess_ma === 1
+      : Boolean(Number(existingPayment.apply_excess_ma || 0))
+
+    if (isExcessMaPayment(nextPaymentType)) {
+      nextReferenceId = null
+    }
+
+    if (nextStatus === 'verified' && isExcessMaPayment(nextPaymentType)) {
+      const scheduleDue = await getNextPaymentScheduleDue(connection, nextClientUnitId)
+      const reusableCurrentAmount = existingPayment.status === 'verified' && isExcessMaPayment(existingPayment.payment_type)
+        ? normalizeMoney(existingPayment.amount)
+        : 0
+      const availableExcessMa = normalizeMoney((scheduleDue.excessMaAvailable || 0) + reusableCurrentAmount)
+
+      if (nextAmount > availableExcessMa) {
+        await connection.rollback()
+        return res.status(400).json({
+          message: `Excess MA available is only ₱${availableExcessMa.toFixed(2)}`,
+        })
+      }
+    }
+
+    if (isReferenceRequired({ paymentMethod: nextPaymentMethod, paymentType: nextPaymentType, status: nextStatus }) && !nextReferenceId) {
       await connection.rollback()
       return res.status(400).json({
         message: 'Reference ID is required for verified non-cash payments',
@@ -840,6 +909,7 @@ export const updatePayment = async (req, res) => {
         client_unit_id = ?,
         amount = ?,
         payment_type = ?,
+        apply_excess_ma = ?,
         payment_method = ?,
         reference_id = ?,
         payment_date = ?,
@@ -851,10 +921,9 @@ export const updatePayment = async (req, res) => {
       [
         nextClientUnitId,
         nextAmount,
-        !isMissing(payment_type)
-          ? nullableValue(payment_type)
-          : existingPayment.payment_type,
-        nextPaymentMethod,
+        nextPaymentType,
+        nextApplyExcessMa ? 1 : 0,
+        isExcessMaPayment(nextPaymentType) ? 'excess_ma' : nextPaymentMethod,
         nextReferenceId,
         nextPaymentDate,
         nextStatus,

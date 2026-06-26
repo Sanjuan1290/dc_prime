@@ -1,6 +1,7 @@
 import { db } from '../db/connect.js'
 import { safeCreateAuditLog } from '../utils/createAuditLog.js'
 import { getClientIp } from '../utils/getClientIp.js'
+import { buildHierarchyCommissionPreview } from './commissions.controller.js'
 
 const allowedStatuses = ['active', 'inactive']
 const sellerRoles = ['broker_network_manager', 'broker', 'manager', 'agent']
@@ -585,6 +586,24 @@ export const updateSellerGroup = async (req, res) => {
   } finally {
     connection.release()
   }
+}
+
+
+export const getSellerGroupCommissionPreview = async (req, res) => {
+  const sellerId = req.query.seller_id || req.query.sellerId
+
+  if (isMissing(sellerId)) {
+    return res.status(400).json({ message: 'Seller is required for commission preview' })
+  }
+
+  const preview = await buildHierarchyCommissionPreview({ sellerId })
+
+  res.status(200).json({
+    preview,
+    rows: preview.rows || [],
+    warnings: preview.warnings || [],
+    totalRate: preview.totalRate || 0,
+  })
 }
 
 export const deleteSellerGroup = async (req, res) => {

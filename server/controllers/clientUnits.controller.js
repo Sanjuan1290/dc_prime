@@ -222,7 +222,7 @@ const deriveCancellationResult = (totalPaid, refundAmount) => {
 const getVerifiedPaidTotal = async (connectionOrDb, clientUnitId) => {
   const [paymentRows] = await connectionOrDb.query(
     `
-    SELECT COALESCE(SUM(amount), 0) AS total_paid
+    SELECT COALESCE(SUM(CASE WHEN (payment_type IS NULL OR payment_type <> 'excess_ma') THEN amount ELSE 0 END), 0) AS total_paid
     FROM payments
     WHERE client_unit_id = ?
       AND status = 'verified'
@@ -697,12 +697,22 @@ const buildReservationTerms = ({
   let computedDownpaymentNet = 0
 
   if (isInstallment) {
-    const targetDownpayment = normalizeMoney(purchasePrice * (downpaymentPercentValidation.value / 100))
-    computedDownpaymentGross = normalizeMoney(Math.max(targetDownpayment - reservationFeeValidation.value, 0))
+    const targetDownpayment = normalizeMoney(
+      purchasePrice * (downpaymentPercentValidation.value / 100)
+    )
+
+    computedDownpaymentGross = normalizeMoney(Math.max(targetDownpayment, 0))
+
     computedDownpaymentDiscountAmount = parsedDownpaymentGives === 1
-      ? normalizeMoney(computedDownpaymentGross * (downpaymentDiscountRateValidation.value / 100))
+      ? normalizeMoney(
+          computedDownpaymentGross *
+            (downpaymentDiscountRateValidation.value / 100)
+        )
       : 0
-    computedDownpaymentNet = normalizeMoney(Math.max(computedDownpaymentGross - computedDownpaymentDiscountAmount, 0))
+
+    computedDownpaymentNet = normalizeMoney(
+      Math.max(computedDownpaymentGross - computedDownpaymentDiscountAmount, 0)
+    )
   }
 
   const downpaymentValidation = isInstallment
@@ -1003,7 +1013,7 @@ const clientUnitJoins = `
   LEFT JOIN (
     SELECT
       client_unit_id,
-      SUM(amount) AS paid_amount
+      SUM(CASE WHEN (payment_type IS NULL OR payment_type <> 'excess_ma') THEN amount ELSE 0 END) AS paid_amount
     FROM payments
     WHERE status = 'verified'
     GROUP BY client_unit_id
@@ -1422,7 +1432,7 @@ export const searchClientUnits = async (req, res) => {
     INNER JOIN projects p ON p.id = l.project_id
     LEFT JOIN accredited_sellers seller ON seller.id = cu.seller_id
     LEFT JOIN (
-      SELECT client_unit_id, SUM(amount) AS paid_amount
+      SELECT client_unit_id, SUM(CASE WHEN (payment_type IS NULL OR payment_type <> 'excess_ma') THEN amount ELSE 0 END) AS paid_amount
       FROM payments
       WHERE status = 'verified'
       GROUP BY client_unit_id

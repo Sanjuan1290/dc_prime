@@ -379,7 +379,7 @@ const Dashboard = () => {
     {
       title: "Sales & Collections",
       description:
-        "Shows booked contract value, reserved sales, verified payments, and how much of booked sales has already been collected.",
+        "Shows booked contract value, remaining uncollected sales, verified payments, and collection progress.",
       icon: <FiDollarSign className="h-5 w-5" />,
       metrics: [
         {
@@ -395,8 +395,8 @@ const Dashboard = () => {
           title: "Pending Sales",
           value: formatMoney(pendingSales),
           description:
-            "Reserved accounts that are not yet fully active or fully paid.",
-          formula: "SUM(TCP) from client units where status = reserved.",
+            "Remaining uncollected amount from booked sales.",
+          formula: "Total Sales - Tracked Collections.",
           icon: <FiHome />,
         },
         {

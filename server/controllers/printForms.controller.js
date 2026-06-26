@@ -315,10 +315,20 @@ export const getClientUnitPrintData = async (req, res) => {
   const scheduleRows = await rebuildAndGetPaymentScheduleRows(db, clientUnitId)
   const schedule = scheduleRows.map(mapScheduleRowForPrint)
   const totalPaid = normalizeMoney(
-    printData.payments.reduce((sum, payment) => sum + toNumber(payment.amount), 0)
+    printData.payments.reduce((sum, payment) => (
+      payment.payment_type === 'excess_ma'
+        ? sum
+        : sum + toNumber(payment.amount)
+    ), 0)
   )
   const totalAmountPayable = normalizeMoney(
     printData.unit.offer_purchase_price || printData.unit.total_contract_price
+  )
+  const statementBalance = normalizeMoney(
+    scheduleRows.reduce((sum, row) => sum + toNumber(row.balance), 0)
+  )
+  const statementTotal = normalizeMoney(
+    scheduleRows.reduce((sum, row) => sum + toNumber(row.total_due), 0)
   )
 
   res.status(200).json({
@@ -328,8 +338,9 @@ export const getClientUnitPrintData = async (req, res) => {
       schedule,
       totals: {
         total_amount_payable: totalAmountPayable,
+        total_statement_due: statementTotal,
         total_paid: totalPaid,
-        balance: normalizeMoney(Math.max(totalAmountPayable - totalPaid, 0)),
+        balance: statementBalance,
       },
       statement_date: formatDateOnly(new Date()),
     },

@@ -4,6 +4,7 @@ import { requireRole } from '../middlewares/role.middleware.js'
 import {
   createSellerGroup,
   deleteSellerGroup,
+  getSellerGroupCommissionPreview,
   getSellerGroups,
   recalculateSellerGroupMembers,
   updateSellerGroup,
@@ -12,6 +13,7 @@ import {
 const router = express.Router()
 
 router.get('/seller-groups', auth, requireRole('super_admin', 'admin'), getSellerGroups)
+router.get('/seller-groups/commission-preview', auth, requireRole('super_admin', 'admin'), getSellerGroupCommissionPreview)
 router.post('/seller-groups', auth, requireRole('super_admin', 'admin'), createSellerGroup)
 router.patch('/seller-groups/:id', auth, requireRole('super_admin', 'admin'), updateSellerGroup)
 router.delete('/seller-groups/:id', auth, requireRole('super_admin', 'admin'), deleteSellerGroup)

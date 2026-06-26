@@ -199,7 +199,7 @@ const clientJoins = `
   LEFT JOIN listings l
     ON l.id = cu.listing_id
   LEFT JOIN (
-    SELECT client_unit_id, SUM(amount) AS total_paid
+    SELECT client_unit_id, SUM(CASE WHEN (payment_type IS NULL OR payment_type <> 'excess_ma') THEN amount ELSE 0 END) AS total_paid
     FROM payments
     WHERE status = 'verified'
     GROUP BY client_unit_id

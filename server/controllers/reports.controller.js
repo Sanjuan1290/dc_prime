@@ -92,7 +92,7 @@ export const getSalesReport = async (req, res) => {
     LEFT JOIN (
       SELECT
         client_unit_id,
-        SUM(amount) AS total_paid
+        SUM(CASE WHEN (payment_type IS NULL OR payment_type <> 'excess_ma') THEN amount ELSE 0 END) AS total_paid
       FROM payments
       WHERE status = 'verified'
       GROUP BY client_unit_id
@@ -181,7 +181,7 @@ export const getCollectionsReport = async (req, res) => {
     LEFT JOIN (
       SELECT
         client_unit_id,
-        SUM(amount) AS total_paid
+        SUM(CASE WHEN (payment_type IS NULL OR payment_type <> 'excess_ma') THEN amount ELSE 0 END) AS total_paid
       FROM payments
       GROUP BY client_unit_id
     ) payment_summary ON payment_summary.client_unit_id = cu.id
@@ -459,7 +459,7 @@ export const getClientsReport = async (req, res) => {
     LEFT JOIN (
       SELECT
         client_unit_id,
-        SUM(amount) AS total_paid
+        SUM(CASE WHEN (payment_type IS NULL OR payment_type <> 'excess_ma') THEN amount ELSE 0 END) AS total_paid
       FROM payments
       GROUP BY client_unit_id
     ) payment_summary ON payment_summary.client_unit_id = cu.id
