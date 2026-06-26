@@ -20,3 +20,4 @@ router.patch('/settings', updateSettings)
 router.patch('/settings/:key', updateSetting)
 
 export default router
+

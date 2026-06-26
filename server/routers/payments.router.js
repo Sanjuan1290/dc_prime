@@ -23,3 +23,4 @@ router.get('/client-units/:clientUnitId/payments', getPaymentsByClientUnit)
 router.get('/client-units/:clientUnitId/payment-suggestions', getPaymentSuggestions)
 
 export default router
+

@@ -658,16 +658,6 @@ const ClientForm = ({
           }
         />
 
-        <Input
-          label="Region"
-          value={clientData.region}
-          onChange={(e) =>
-            setClientData({
-              ...clientData,
-              region: e.target.value,
-            })
-          }
-        />
 
         <SellerCombobox
           label="Default Seller"
@@ -713,3 +703,4 @@ const ClientForm = ({
 };
 
 export default Clients;
+

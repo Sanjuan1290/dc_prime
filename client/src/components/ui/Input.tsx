@@ -33,3 +33,4 @@ const Input = ({ className = "", icon, label, ...props }: InputProps) => {
 }
 
 export default Input
+

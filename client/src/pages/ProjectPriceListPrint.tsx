@@ -224,3 +224,4 @@ const printStyles = `
 `
 
 export default ProjectPriceListPrint
+

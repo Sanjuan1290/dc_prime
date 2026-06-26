@@ -27,6 +27,7 @@ import AvailableUnits from "./pages/AvailableUnits"
 import SellerDashboard from "./pages/SellerDashboard"
 import ChangePassword from "./pages/ChangePassword"
 import ProjectPriceListPrint from "./pages/ProjectPriceListPrint"
+import Notifications from "./pages/Notifications"
 
 
 const App = () => {
@@ -46,6 +47,7 @@ const App = () => {
         <Route path="accreditted_sellers" element={<AccredittedSellers/>} />
         <Route path="documents" element={<Documents/>} />
         <Route path="payments" element={<Payments/>} />
+        <Route path="notifications" element={<Notifications/>} />
         <Route path="commissions" element={<Commissions/>} />
         <Route path="cash-advances" element={<CashAdvances />} />
         <Route path="reports" element={<Reports/>} />
@@ -73,3 +75,4 @@ const App = () => {
 }
 
 export default App
+

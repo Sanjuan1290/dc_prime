@@ -3122,12 +3122,12 @@ export const deleteClientUnit = async (req, res) => {
     await connection.beginTransaction()
 
     const [[paymentCount]] = await connection.query(
-      `SELECT COUNT(id) AS total FROM payments WHERE client_unit_id = ?`,
+      `SELECT COUNT(id) AS total FROM payments WHERE client_unit_id = ? AND status = 'verified'`,
       [id]
     )
 
     const [[commissionCount]] = await connection.query(
-      `SELECT COUNT(id) AS total FROM commissions WHERE client_unit_id = ?`,
+      `SELECT COUNT(id) AS total FROM commissions WHERE client_unit_id = ? AND status IN ('partially_released', 'released')`,
       [id]
     )
 
@@ -3190,3 +3190,4 @@ export const deleteClientUnit = async (req, res) => {
     connection.release()
   }
 }
+

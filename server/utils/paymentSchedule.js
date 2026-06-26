@@ -148,9 +148,6 @@ const buildBaseRows = (unit) => {
   const deferredCashAmount = money(unit.deferred_cash_amount)
   const terms = Math.max(Number(unit.payment_terms_months || 0), 0)
   const monthlyAmortization = money(unit.monthly_amortization)
-  const plannedBalloonAmount = unit.mode_of_payment === 'installment'
-    ? money(unit.balloon_payment_amount)
-    : 0
   const startingDate = toDateOnly(unit.starting_date) || toDateOnly(unit.created_at) || toDateOnly(new Date())
   const firstDueDate = toDateOnly(unit.due_date) || startingDate
   const rows = []
@@ -230,10 +227,10 @@ const buildBaseRows = (unit) => {
   const monthlyBase = monthlyAmortization > 0
     ? monthlyAmortization
     : terms > 0
-      ? money((totalContractPrice - reservationFee - downpaymentNet - deferredCashAmount - plannedBalloonAmount) / terms)
+      ? money((totalContractPrice - reservationFee - downpaymentNet - deferredCashAmount) / terms)
       : 0
   let remainingMonthlyTotal = money(
-    totalContractPrice - reservationFee - downpaymentNet - deferredCashAmount - plannedBalloonAmount
+    totalContractPrice - reservationFee - downpaymentNet - deferredCashAmount
   )
 
   for (let index = 1; index <= terms; index += 1) {
@@ -254,20 +251,6 @@ const buildBaseRows = (unit) => {
     remainingMonthlyTotal = money(remainingMonthlyTotal - amount)
   }
 
-  if (plannedBalloonAmount > 0) {
-    const balloonDueDate = terms > 0
-      ? addMonths(monthlyStart, Math.max(terms - 1, 0))
-      : monthlyStart
-
-    pushRow({
-      dueDate: balloonDueDate,
-      description: 'Balloon Payment',
-      scheduleType: 'balloon',
-      totalDue: plannedBalloonAmount,
-      sortOrder: sortOrder++,
-    })
-  }
-
   return rows
 }
 
@@ -275,22 +258,31 @@ const preferredScheduleTypes = (paymentType) => {
   switch (paymentType) {
     case 'reservation':
     case 'reservation_fee':
-      return ['reservation', 'downpayment', 'monthly', 'balloon', 'full_payment']
+      return ['reservation', 'downpayment', 'monthly', 'full_payment']
     case 'downpayment':
-      return ['downpayment', 'monthly', 'balloon', 'full_payment']
+      return ['downpayment', 'monthly', 'full_payment']
     case 'monthly':
-      return ['monthly', 'downpayment', 'balloon', 'full_payment']
+      return ['monthly', 'downpayment', 'full_payment']
     case 'balloon':
-      return ['balloon', 'monthly', 'downpayment', 'full_payment']
+      return ['monthly', 'full_payment']
     case 'full_payment':
-      return ['reservation', 'downpayment', 'monthly', 'balloon', 'full_payment']
+      return ['reservation', 'downpayment', 'monthly', 'full_payment']
     case 'other':
     default:
-      return ['reservation', 'downpayment', 'monthly', 'balloon', 'full_payment']
+      return ['reservation', 'downpayment', 'monthly', 'full_payment']
   }
 }
 
 const findNextRowIndex = (rows, paymentType) => {
+  if (paymentType === 'balloon') {
+    for (let index = rows.length - 1; index >= 0; index -= 1) {
+      const row = rows[index]
+      if (row.schedule_type === 'monthly' && money(row.balance) > 0) {
+        return index
+      }
+    }
+  }
+
   const types = preferredScheduleTypes(paymentType)
 
   for (const type of types) {
@@ -525,13 +517,16 @@ export const getNextPaymentScheduleDue = async (connectionOrDb, clientUnitId) =>
 export const mapScheduleRowForPrint = (row) => ({
   due_date: row.due_date,
   description: row.description,
+  schedule_type: row.schedule_type,
   due_amount: row.total_due,
   penalty: row.penalty_due,
   date_paid: row.date_paid,
   amount_paid: row.amount_paid,
+  excess_used: row.advance_applied,
   reference: row.reference_no,
   reference_details: row.reference_details || [],
   running_balance: row.running_balance,
   status: row.status,
 })
+
 

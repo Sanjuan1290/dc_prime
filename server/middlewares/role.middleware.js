@@ -10,3 +10,4 @@ export const requireRole = (...allowedRoles) => (req, res, next) => {
 
 export const adminRoles = ['super_admin', 'admin']
 export const sellerRoles = ['broker_network_manager', 'broker', 'manager', 'agent']
+

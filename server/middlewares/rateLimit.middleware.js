@@ -72,3 +72,4 @@ export const passwordRateLimit = rateLimit({
   legacyHeaders: false,
   handler: createRateLimitHandler('Too many password attempts.'),
 })
+

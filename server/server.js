@@ -27,10 +27,9 @@ import cashAdvancesRouter from './routers/cashAdvances.router.js'
 import printFormsRouter from './routers/printForms.router.js'
 import usersManagementRouter from './routers/usersManagement.router.js'
 import sellerGroupsRouter from './routers/sellerGroups.router.js'
+import notificationsRouter from './routers/notifications.router.js'
 
 import useCurrentUser from './utils/useCurrentUser.js'
-import { startPaymentReminderJob } from './jobs/paymentReminderJob.js'
-import { startDocumentReminderJob } from './jobs/documentReminderJob.js'
 
 const app = express()
 
@@ -93,6 +92,7 @@ app.use('/api/v1', cashAdvancesRouter)
 app.use('/api/v1', printFormsRouter)
 app.use('/api/v1', usersManagementRouter)
 app.use('/api/v1', sellerGroupsRouter)
+app.use('/api/v1', notificationsRouter)
 
 app.use((req, res) => {
   res.status(404).json({
@@ -145,10 +145,8 @@ app.use((err, req, res, _next) => {
 
 const PORT = process.env.PORT || 5000
 
-if (process.env.ENABLE_EMAIL_JOBS !== 'false') {
-  startPaymentReminderJob()
-  startDocumentReminderJob()
-}
+// Email reminders are now admin-controlled from the Notifications page.
+// Keep the old jobs in /jobs for manual migration/reference, but do not auto-send emails.
 
 app.listen(PORT, async () => {
   try {
@@ -161,3 +159,4 @@ app.listen(PORT, async () => {
     process.exit(1)
   }
 })
+

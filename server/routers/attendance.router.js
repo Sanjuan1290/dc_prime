@@ -34,3 +34,4 @@ router.get(
 router.get('/employees/:employeeId/attendance', getAttendanceByEmployee)
 
 export default router
+

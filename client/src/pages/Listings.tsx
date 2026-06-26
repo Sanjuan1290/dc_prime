@@ -660,6 +660,23 @@ const getProjectLocationPrefix = (projects: Project[], projectId: number) => {
   return locationCode ? `${locationCode}-` : "";
 };
 
+
+const getUnitSuffixFromPrefix = (unitId: string, prefix: string) => {
+  const value = String(unitId || "");
+
+  if (!prefix) return value;
+  if (value.toUpperCase().startsWith(prefix.toUpperCase())) {
+    return value.slice(prefix.length);
+  }
+
+  return value;
+};
+
+const buildUnitIdWithLockedPrefix = (prefix: string, value: string) => {
+  const suffix = getUnitSuffixFromPrefix(value, prefix).replace(/^[-\s]+/, "");
+  return prefix ? `${prefix}${suffix}` : suffix;
+};
+
 const normalizeCadastralLots = (value: unknown): string[] => {
   const rawLots = Array.isArray(value)
     ? value
@@ -1616,6 +1633,12 @@ const ListingFormModal = ({
 }: ListingFormModalProps) => {
   const formId = `${title.replaceAll(" ", "-").toLowerCase()}-form`;
   const breakdown = calculateListingBreakdown(formData);
+  const lockedUnitPrefix = autoPrefixUnitId
+    ? getProjectLocationPrefix(projects, formData.project_id)
+    : "";
+  const unitIdSuffix = autoPrefixUnitId
+    ? getUnitSuffixFromPrefix(formData.unit_id, lockedUnitPrefix)
+    : formData.unit_id;
   const breakdownRows = [
     ["Net Selling Price", breakdown.netSellingPrice],
     ["LMF Amount", breakdown.legalMiscFee],
@@ -1672,6 +1695,10 @@ const ListingFormModal = ({
                 nextProjectId,
               );
               const currentUnitId = formData.unit_id.trim();
+              const currentUnitSuffix = getUnitSuffixFromPrefix(
+                currentUnitId,
+                oldPrefix,
+              );
               const shouldReplacePrefix =
                 autoPrefixUnitId &&
                 (currentUnitId === "" ||
@@ -1691,7 +1718,11 @@ const ListingFormModal = ({
                 cadastral_lot_no: shouldKeepCadastralLot
                   ? formData.cadastral_lot_no
                   : "",
-                unit_id: shouldReplacePrefix ? nextPrefix : formData.unit_id,
+                unit_id: autoPrefixUnitId
+                  ? `${nextPrefix}${currentUnitSuffix}`
+                  : shouldReplacePrefix
+                    ? nextPrefix
+                    : formData.unit_id,
               });
             }}
             required
@@ -1717,17 +1748,48 @@ const ListingFormModal = ({
             }
           />
 
-          <Input
-            label="Unit ID"
-            value={formData.unit_id}
-            onChange={(e) =>
-              setFormData({
-                ...formData,
-                unit_id: e.target.value,
-              })
-            }
-            required
-          />
+          {autoPrefixUnitId ? (
+            <div>
+              <label className="mb-1 block text-sm font-semibold text-slate-700">
+                Unit ID <span className="text-red-500">*</span>
+              </label>
+              <div className="flex overflow-hidden rounded-lg border border-slate-200 bg-white transition focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-100">
+                <span className="flex min-w-[88px] items-center justify-center border-r border-slate-200 bg-slate-100 px-3 text-sm font-bold uppercase text-slate-700">
+                  {lockedUnitPrefix || "No Code"}
+                </span>
+                <input
+                  className="w-full px-3 py-2 text-sm outline-none"
+                  placeholder="1001"
+                  value={unitIdSuffix}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      unit_id: buildUnitIdWithLockedPrefix(
+                        lockedUnitPrefix,
+                        e.target.value,
+                      ),
+                    })
+                  }
+                  required
+                />
+              </div>
+              <p className="mt-1 text-xs text-slate-500">
+                Project code is locked. Admin can only type the unit number after the prefix.
+              </p>
+            </div>
+          ) : (
+            <Input
+              label="Unit ID"
+              value={formData.unit_id}
+              onChange={(e) =>
+                setFormData({
+                  ...formData,
+                  unit_id: e.target.value,
+                })
+              }
+              required
+            />
+          )}
 
           <Input
             label="Old Unit IDs"
@@ -2867,3 +2929,4 @@ const Detail = ({
 };
 
 export default Listings;
+

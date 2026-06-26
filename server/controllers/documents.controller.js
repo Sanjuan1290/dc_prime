@@ -4,15 +4,12 @@ import { getClientIp } from '../utils/getClientIp.js'
 import { refreshCommissionEligibility } from './commissions.controller.js'
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib'
 import {
-  GOOGLE_DRIVE_NOT_CONFIGURED_MESSAGE,
-  createDriveFolderIfMissing,
-  createGoogleDriveNotConfiguredError,
-  deleteDriveFile,
-  getDriveFileBuffer,
-  isGoogleDriveConfigured,
-  safeDriveName,
-  uploadFileToDrive,
-} from '../lib/googleDrive.js'
+  CLOUDINARY_NOT_CONFIGURED_MESSAGE,
+  deleteCloudinaryAsset,
+  getClientDocumentFolder,
+  isCloudinaryConfigured,
+  uploadBufferToCloudinary,
+} from '../lib/cloudinary.js'
 import {
   createClientDocumentChecklistFromListing,
   getDocumentTemplates as loadDocumentTemplates,
@@ -34,9 +31,9 @@ const allowedClientDocumentStatusTransitions = {
   approved: ['submitted', 'not_submitted'],
 }
 
-const sendGoogleDriveNotConfigured = (res) => {
+const sendCloudinaryNotConfigured = (res) => {
   return res.status(503).json({
-    message: GOOGLE_DRIVE_NOT_CONFIGURED_MESSAGE,
+    message: CLOUDINARY_NOT_CONFIGURED_MESSAGE,
   })
 }
 
@@ -547,9 +544,15 @@ export const getClientUnitDocuments = async (req, res) => {
       d.can_reuse,
       cdl.file_url,
       cdl.storage_provider,
+      cdl.cloudinary_asset_id,
+      cdl.cloudinary_public_id,
+      cdl.cloudinary_folder,
+      cdl.cloudinary_resource_type,
+      cdl.cloudinary_secure_url,
       cdl.drive_file_id,
       cdl.drive_folder_id,
       cdl.file_name,
+      cdl.original_file_name,
       cdl.mime_type,
       cdl.file_size,
       cdl.web_view_link,
@@ -631,9 +634,15 @@ export const updateClientDocumentStatus = async (req, res) => {
       cdl.document_id,
       cdl.file_url,
       cdl.storage_provider,
+      cdl.cloudinary_asset_id,
+      cdl.cloudinary_public_id,
+      cdl.cloudinary_folder,
+      cdl.cloudinary_resource_type,
+      cdl.cloudinary_secure_url,
       cdl.drive_file_id,
       cdl.drive_folder_id,
       cdl.file_name,
+      cdl.original_file_name,
       cdl.mime_type,
       cdl.file_size,
       cdl.web_view_link,
@@ -855,34 +864,6 @@ const getClientDocumentForFile = async (id, connectionOrDb = db) => {
   return rows[0] || null
 }
 
-const getOrCreateClientDocumentFolder = async (documentRow) => {
-  if (!isGoogleDriveConfigured()) {
-    throw createGoogleDriveNotConfiguredError()
-  }
-
-  const rootFolderId = process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID
-
-  const clientsFolder = await createDriveFolderIfMissing({
-    name: 'clients',
-    parentFolderId: rootFolderId,
-  })
-
-  const clientFolder = await createDriveFolderIfMissing({
-    name: `client-${documentRow.client_id}-${safeDriveName(documentRow.client_name)}`,
-    parentFolderId: clientsFolder.id,
-  })
-
-  const unitFolder = await createDriveFolderIfMissing({
-    name: safeDriveName(documentRow.unit_id),
-    parentFolderId: clientFolder.id,
-  })
-
-  return createDriveFolderIfMissing({
-    name: 'documents',
-    parentFolderId: unitFolder.id,
-  })
-}
-
 export const uploadClientDocumentFile = async (req, res) => {
   const { id } = req.params
   const file = req.file
@@ -897,8 +878,8 @@ export const uploadClientDocumentFile = async (req, res) => {
     })
   }
 
-  if (!isGoogleDriveConfigured()) {
-    return sendGoogleDriveNotConfigured(res)
+  if (!isCloudinaryConfigured()) {
+    return sendCloudinaryNotConfigured(res)
   }
 
   const documentRow = await getClientDocumentForFile(id)
@@ -906,21 +887,23 @@ export const uploadClientDocumentFile = async (req, res) => {
     return res.status(404).json({ message: 'Client document not found' })
   }
 
-  const folder = await getOrCreateClientDocumentFolder(documentRow)
-
-  if (documentRow.drive_file_id) {
+  if (documentRow.cloudinary_public_id) {
     try {
-      await deleteDriveFile(documentRow.drive_file_id)
+      await deleteCloudinaryAsset({
+        publicId: documentRow.cloudinary_public_id,
+        resourceType: documentRow.cloudinary_resource_type || 'image',
+      })
     } catch (error) {
-      console.warn(`[documents] failed to delete old Drive file ${documentRow.drive_file_id}:`, error.message)
+      console.warn(`[documents] failed to delete old Cloudinary file ${documentRow.cloudinary_public_id}:`, error.message)
     }
   }
 
-  const uploaded = await uploadFileToDrive({
+  const folder = getClientDocumentFolder(documentRow)
+  const uploaded = await uploadBufferToCloudinary({
     buffer: file.buffer,
     fileName: file.originalname,
     mimeType: file.mimetype,
-    parentFolderId: folder.id,
+    folder,
   })
 
   const nextStatus = documentRow.status === 'not_submitted' ? 'submitted' : documentRow.status
@@ -929,10 +912,16 @@ export const uploadClientDocumentFile = async (req, res) => {
     `
     UPDATE client_document_list
     SET
-      storage_provider = 'google_drive',
-      drive_file_id = ?,
-      drive_folder_id = ?,
+      storage_provider = 'cloudinary',
+      cloudinary_asset_id = ?,
+      cloudinary_public_id = ?,
+      cloudinary_folder = ?,
+      cloudinary_resource_type = ?,
+      cloudinary_secure_url = ?,
+      drive_file_id = NULL,
+      drive_folder_id = NULL,
       file_name = ?,
+      original_file_name = ?,
       mime_type = ?,
       file_size = ?,
       web_view_link = ?,
@@ -945,13 +934,17 @@ export const uploadClientDocumentFile = async (req, res) => {
     WHERE id = ?
     `,
     [
-      uploaded.id,
-      folder.id,
-      uploaded.name || file.originalname,
+      uploaded.asset_id || null,
+      uploaded.public_id || null,
+      folder,
+      uploaded.resource_type || 'image',
+      uploaded.secure_url || null,
+      uploaded.original_filename || file.originalname,
+      file.originalname,
       file.mimetype,
       file.size,
-      uploaded.webViewLink || null,
-      uploaded.webViewLink || null,
+      uploaded.secure_url || null,
+      uploaded.secure_url || null,
       req.user.id,
       nextStatus,
       nextStatus,
@@ -965,7 +958,7 @@ export const uploadClientDocumentFile = async (req, res) => {
     userId: req.user.id,
     action: 'upload',
     module: 'Client Documents',
-    description: `Uploaded file for client document ${id}`,
+    description: `Uploaded Cloudinary file for client document ${id}`,
     ipAddress: getClientIp(req),
   })
 
@@ -982,18 +975,13 @@ export const openClientDocumentFile = async (req, res) => {
   const { id } = req.params
   const documentRow = await getClientDocumentForFile(id)
 
-  if (!documentRow || !documentRow.drive_file_id) {
+  const fileUrl = documentRow?.cloudinary_secure_url || documentRow?.file_url || documentRow?.web_view_link
+
+  if (!documentRow || !fileUrl) {
     return res.status(404).json({ message: 'Uploaded file not found' })
   }
 
-  if (!isGoogleDriveConfigured()) {
-    return sendGoogleDriveNotConfigured(res)
-  }
-
-  const buffer = await getDriveFileBuffer(documentRow.drive_file_id)
-  res.setHeader('Content-Type', documentRow.mime_type || 'application/octet-stream')
-  res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(documentRow.file_name || 'document')}"`)
-  res.send(buffer)
+  return res.redirect(fileUrl)
 }
 
 export const downloadClientUnitDocumentsPdf = async (req, res) => {
@@ -1003,7 +991,8 @@ export const downloadClientUnitDocumentsPdf = async (req, res) => {
     `
     SELECT
       cdl.id,
-      cdl.drive_file_id,
+      cdl.cloudinary_secure_url,
+      cdl.file_url,
       cdl.file_name,
       cdl.mime_type,
       cdl.status,
@@ -1014,7 +1003,7 @@ export const downloadClientUnitDocumentsPdf = async (req, res) => {
     JOIN client_units cu ON cu.id = cdl.client_unit_id
     JOIN listings l ON l.id = cu.listing_id
     WHERE cdl.client_unit_id = ?
-      AND cdl.drive_file_id IS NOT NULL
+      AND (cdl.cloudinary_secure_url IS NOT NULL OR cdl.file_url IS NOT NULL)
     ORDER BY cdl.id ASC
     `,
     [clientUnitId]
@@ -1022,10 +1011,6 @@ export const downloadClientUnitDocumentsPdf = async (req, res) => {
 
   if (rows.length === 0) {
     return res.status(400).json({ message: 'No uploaded document images found for this client unit.' })
-  }
-
-  if (!isGoogleDriveConfigured()) {
-    return sendGoogleDriveNotConfigured(res)
   }
 
   const pdf = await PDFDocument.create()
@@ -1041,7 +1026,9 @@ export const downloadClientUnitDocumentsPdf = async (req, res) => {
     page.drawText(row.file_name || '-', { x: margin, y: pageHeight - 62, size: 9, font, color: rgb(0.35, 0.4, 0.5) })
 
     try {
-      const buffer = await getDriveFileBuffer(row.drive_file_id)
+      const fileResponse = await fetch(row.cloudinary_secure_url || row.file_url)
+      if (!fileResponse.ok) throw new Error('Could not fetch uploaded file from Cloudinary')
+      const buffer = Buffer.from(await fileResponse.arrayBuffer())
       if (row.mime_type === 'image/jpeg' || row.mime_type === 'image/jpg') {
         const image = await pdf.embedJpg(buffer)
         const scaled = image.scaleToFit(pageWidth - margin * 2, pageHeight - 110)
@@ -1195,3 +1182,4 @@ export const deleteDocument = async (req, res) => {
     connection.release()
   }
 }
+

@@ -992,3 +992,4 @@ export const deletePayment = async (req, res) => {
     connection.release()
   }
 }
+

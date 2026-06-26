@@ -26,3 +26,4 @@ router.patch('/users/:id/link-seller', auth, requireRole('super_admin', 'admin')
 router.patch('/users/:id/reset-temporary-password', auth, requireRole('super_admin', 'admin'), passwordRateLimit, resetUserTemporaryPassword)
 
 export default router
+

@@ -513,3 +513,4 @@ export const updateEmployeeRestDays = async (req, res) => {
     message: 'Rest days updated successfully'
   })
 }
+

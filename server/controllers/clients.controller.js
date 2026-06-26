@@ -1305,3 +1305,4 @@ export const deleteClient = async (req, res) => {
     message: 'Client deleted successfully',
   })
 }
+

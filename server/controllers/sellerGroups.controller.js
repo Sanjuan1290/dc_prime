@@ -160,6 +160,24 @@ const getDistributionFromPlan = (plan = {}) => {
   }))
 }
 
+const validateGroupHeadSeller = async (groupHeadSellerId) => {
+  if (!groupHeadSellerId) return null
+
+  const [rows] = await db.query(
+    `SELECT id, seller_role, status FROM accredited_sellers WHERE id = ? LIMIT 1`,
+    [groupHeadSellerId]
+  )
+
+  const seller = rows[0]
+  if (!seller) return 'Selected group head does not exist'
+  if (!['broker_network_manager', 'broker'].includes(String(seller.seller_role))) {
+    return 'Group head must be a BNM or Broker'
+  }
+  if (seller.status !== 'active') return 'Selected group head must be active'
+
+  return null
+}
+
 const validateGroupPayload = ({ groupName, poolRate, status, plan }) => {
   if (isMissing(groupName)) return 'Group name is required'
   if (!allowedStatuses.includes(status)) return 'Invalid group status'
@@ -373,6 +391,9 @@ export const createSellerGroup = async (req, res) => {
   const validationError = validateGroupPayload({ groupName, poolRate, status, plan })
   if (validationError) return res.status(400).json({ message: validationError })
 
+  const groupHeadError = await validateGroupHeadSeller(groupHeadSellerId)
+  if (groupHeadError) return res.status(400).json({ message: groupHeadError })
+
   const connection = await db.getConnection()
 
   try {
@@ -480,6 +501,9 @@ export const updateSellerGroup = async (req, res) => {
   const validationError = validateGroupPayload({ groupName, poolRate, status, plan })
   if (validationError) return res.status(400).json({ message: validationError })
 
+  const groupHeadError = await validateGroupHeadSeller(groupHeadSellerId)
+  if (groupHeadError) return res.status(400).json({ message: groupHeadError })
+
   const connection = await db.getConnection()
 
   try {
@@ -563,6 +587,62 @@ export const updateSellerGroup = async (req, res) => {
   }
 }
 
+export const deleteSellerGroup = async (req, res) => {
+  const { id } = req.params
+
+  const [existingRows] = await db.query(
+    `SELECT id, group_name FROM seller_groups WHERE id = ? LIMIT 1`,
+    [id]
+  )
+  const existing = existingRows[0]
+
+  if (!existing) {
+    return res.status(404).json({ message: 'Seller group not found' })
+  }
+
+  const connection = await db.getConnection()
+
+  try {
+    await connection.beginTransaction()
+
+    await connection.query(
+      `
+      UPDATE accredited_sellers
+      SET
+        seller_group_id = NULL,
+        commission_pool_rate = NULL,
+        personal_commission_rate = NULL,
+        override_commission_rate = NULL,
+        residual_commission_rate = NULL,
+        max_downline_rate = NULL,
+        updated_at = NOW()
+      WHERE seller_group_id = ?
+      `,
+      [id]
+    )
+
+    await connection.query(`DELETE FROM seller_groups WHERE id = ?`, [id])
+
+    await connection.commit()
+
+    await safeCreateAuditLog({
+      userId: req.user.id,
+      action: 'delete',
+      module: 'Seller Groups',
+      description: `Removed seller group ${existing.group_name}`,
+      ipAddress: getClientIp(req),
+    })
+
+    const groups = await getGroupRows()
+    res.status(200).json({ message: 'Seller group removed successfully', groups })
+  } catch (error) {
+    await connection.rollback()
+    throw error
+  } finally {
+    connection.release()
+  }
+}
+
 export const recalculateSellerGroupMembers = async (req, res) => {
   const { id } = req.params
 
@@ -585,3 +665,4 @@ export const recalculateSellerGroupMembers = async (req, res) => {
     connection.release()
   }
 }
+

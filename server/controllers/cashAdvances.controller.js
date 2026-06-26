@@ -1196,3 +1196,4 @@ export const getSellerCommissionSummaryForCashAdvance = async (req, res) => {
     data: { clientUnits, eligibleReleases, allReleases, releases: allReleases, totals },
   })
 }
+

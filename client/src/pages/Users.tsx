@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { FiEdit2, FiPlus, FiSearch, FiSettings, FiUserPlus, FiUsers } from "react-icons/fi"
+import { FiEye, FiPlus, FiSearch, FiSettings, FiTrash2, FiUserPlus, FiUsers } from "react-icons/fi"
 import Alert from "../components/ui/Alert"
 import Button from "../components/ui/Button"
 import EmptyState from "../components/ui/EmptyState"
@@ -340,7 +340,7 @@ const saveSellerGroup = async ({ id, form }: { id?: number; form: SellerGroupFor
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       group_name: form.group_name.trim(),
-      group_code: form.group_code.trim() || null,
+      group_code: null,
       pool_rate: Number(form.pool_rate || 0),
       closing_seller_rate: Number(form.agent_sale_split.agent || form.closing_seller_rate || 0),
       bnm_override_rate: Number(form.agent_sale_split.broker_network_manager || form.bnm_override_rate || 0),
@@ -356,6 +356,16 @@ const saveSellerGroup = async ({ id, form }: { id?: number; form: SellerGroupFor
       notes: form.notes.trim() || null,
     }),
   })
+  if (!res.ok) throw new Error(await getErrorMessage(res))
+  return res.json()
+}
+
+const deleteSellerGroup = async (id: number) => {
+  const res = await fetch(`${API_URL}/seller-groups/${id}`, {
+    method: "DELETE",
+    credentials: "include",
+  })
+
   if (!res.ok) throw new Error(await getErrorMessage(res))
   return res.json()
 }
@@ -462,7 +472,7 @@ const getSplitTotal = (split: SaleSplitForm, roles: SaleSplitRole[]) => {
 
 const groupFormFromGroup = (group: SellerGroup): SellerGroupForm => ({
   group_name: group.group_name || "",
-  group_code: group.group_code || "",
+  group_code: "",
   pool_rate: String(group.pool_rate ?? "0"),
   closing_seller_rate: String(group.closing_seller_rate ?? "5"),
   bnm_override_rate: String(group.bnm_override_rate ?? "1"),
@@ -512,6 +522,7 @@ const Users = () => {
   const [search, setSearch] = useState("")
   const [isOpen, setIsOpen] = useState(false)
   const [isGroupsOpen, setIsGroupsOpen] = useState(false)
+  const [isGroupFormOpen, setIsGroupFormOpen] = useState(false)
   const [editUser, setEditUser] = useState<User | null>(null)
   const [form, setForm] = useState<UserForm>(emptyForm)
   const [editingGroup, setEditingGroup] = useState<SellerGroup | null>(null)
@@ -522,6 +533,8 @@ const Users = () => {
   const [sellerProfileFilter, setSellerProfileFilter] = useState("all")
   const [page, setPage] = useState(1)
   const [rowsPerPage, setRowsPerPage] = useState(10)
+  const [groupMemberSearch, setGroupMemberSearch] = useState("")
+  const [groupMemberRoleFilter, setGroupMemberRoleFilter] = useState("all")
 
   const { data: currentUserData } = useCurrentUser()
   const currentUser = (currentUserData as CurrentUserResponse | null)?.user
@@ -593,10 +606,35 @@ const Users = () => {
   }, [form.seller_profile.seller_group_id, selectedParent, sellerGroups])
 
   const activeSellerGroups = sellerGroups.filter((group) => group.status === "active")
-  const groupHeadOptions = sellers.filter((seller) => seller.seller_role === "broker_network_manager" && seller.status === "active")
+  const groupHeadOptions = sellers.filter(
+    (seller) => ["broker_network_manager", "broker"].includes(String(seller.seller_role)) && seller.status === "active"
+  )
   const groupPoolRate = Number(groupForm.pool_rate || 0)
   const groupSplitTotals = getGroupSplitTotals(groupForm)
   const groupRateOverPool = Object.values(groupSplitTotals).some((total) => total > groupPoolRate)
+  const filteredGroupMembers = useMemo(() => {
+    if (!editingGroup) return []
+
+    const term = groupMemberSearch.toLowerCase().trim()
+
+    return sellers.filter((seller) => {
+      const belongsToGroup = Number(seller.seller_group_id || 0) === Number(editingGroup.id)
+      const matchesRole = groupMemberRoleFilter === "all" || String(seller.seller_role) === groupMemberRoleFilter
+      const matchesSearch = !term || [
+        seller.full_name,
+        seller.seller_role,
+        seller.parent_seller_name,
+        seller.reports_under_display,
+        seller.status,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(term)
+
+      return belongsToGroup && matchesRole && matchesSearch
+    })
+  }, [editingGroup, groupMemberRoleFilter, groupMemberSearch, sellers])
 
   useEffect(() => {
     if (message) {
@@ -628,6 +666,7 @@ const Users = () => {
       invalidateUserData()
       setEditingGroup(null)
       setGroupForm(emptyGroupForm)
+      setIsGroupFormOpen(false)
       setMessage("Seller group saved successfully. Closing and override rates were applied to group members.")
     },
   })
@@ -637,6 +676,17 @@ const Users = () => {
     onSuccess: () => {
       invalidateUserData()
       setMessage("Seller group members and rates recalculated successfully.")
+    },
+  })
+
+  const deleteGroupMutation = useMutation({
+    mutationFn: deleteSellerGroup,
+    onSuccess: () => {
+      invalidateUserData()
+      setIsGroupFormOpen(false)
+      setEditingGroup(null)
+      setGroupForm(emptyGroupForm)
+      setMessage("Seller group removed successfully. Members under this group are now marked as No group.")
     },
   })
 
@@ -709,16 +759,29 @@ const Users = () => {
     setIsOpen(true)
   }
 
+  const openSellerGroups = () => {
+    setIsGroupsOpen(true)
+    setIsGroupFormOpen(false)
+    setEditingGroup(null)
+    setGroupForm(emptyGroupForm)
+    setGroupMemberSearch("")
+    setGroupMemberRoleFilter("all")
+  }
+
   const openCreateGroup = () => {
     setEditingGroup(null)
     setGroupForm(emptyGroupForm)
-    setIsGroupsOpen(true)
+    setGroupMemberSearch("")
+    setGroupMemberRoleFilter("all")
+    setIsGroupFormOpen(true)
   }
 
-  const openEditGroup = (group: SellerGroup) => {
+  const openGroupDetails = (group: SellerGroup) => {
     setEditingGroup(group)
     setGroupForm(groupFormFromGroup(group))
-    setIsGroupsOpen(true)
+    setGroupMemberSearch("")
+    setGroupMemberRoleFilter("all")
+    setIsGroupFormOpen(true)
   }
 
   const canResetOrDeactivateUser = (user: User) => canEditAdminUsers || !isOfficeRole(String(user.role))
@@ -746,6 +809,18 @@ const Users = () => {
     if (confirmed) deactivateMutation.mutate(user.id)
   }
 
+
+  const handleRemoveGroup = (group: SellerGroup) => {
+    const activeMembers = Number(group.active_member_count || 0)
+    const confirmed = window.confirm(
+      activeMembers > 0
+        ? `Remove ${group.group_name}? This will unassign ${activeMembers} active member(s) from this group and clear their inherited group rates.`
+        : `Remove ${group.group_name}? This cannot be undone.`
+    )
+
+    if (confirmed) deleteGroupMutation.mutate(group.id)
+  }
+
   const rateSummary = (user: User) => {
     if (!isSellerRole(String(user.role))) return "-"
     if (!user.seller_group_name) return "No seller group"
@@ -762,7 +837,7 @@ const Users = () => {
         subtitle="Create accounts and set hierarchy. Commission rates are controlled by Seller Groups, not individual accounts."
         actions={
           <div className="flex flex-wrap gap-2">
-            <Button icon={<FiUsers />} onClick={openCreateGroup} variant="secondary">
+            <Button icon={<FiUsers />} onClick={openSellerGroups} variant="secondary">
               Seller Groups
             </Button>
             <Button icon={<FiPlus />} onClick={openCreate} variant="primary">
@@ -777,6 +852,7 @@ const Users = () => {
       {saveMutation.error ? <Alert variant="error" title={saveMutation.error instanceof Error ? saveMutation.error.message : "Failed to save user"} /> : null}
       {saveGroupMutation.error ? <Alert variant="error" title={saveGroupMutation.error instanceof Error ? saveGroupMutation.error.message : "Failed to save seller group"} /> : null}
       {recalculateGroupMutation.error ? <Alert variant="error" title={recalculateGroupMutation.error instanceof Error ? recalculateGroupMutation.error.message : "Failed to recalculate seller group"} /> : null}
+      {deleteGroupMutation.error ? <Alert variant="error" title={deleteGroupMutation.error instanceof Error ? deleteGroupMutation.error.message : "Failed to remove seller group"} /> : null}
       {deactivateMutation.error ? <Alert variant="error" title={deactivateMutation.error instanceof Error ? deactivateMutation.error.message : "Failed to deactivate user"} /> : null}
       {resetPasswordMutation.error ? <Alert variant="error" title={resetPasswordMutation.error instanceof Error ? resetPasswordMutation.error.message : "Failed to reset password"} /> : null}
 
@@ -1007,164 +1083,337 @@ const Users = () => {
 
       {isGroupsOpen ? (
         <Modal
-          title="Seller Groups and Flexible Pool Distribution"
+          title="Seller Groups"
           onClose={() => setIsGroupsOpen(false)}
           size="xl"
           footer={
-            <div className="flex justify-between gap-2">
+            <div className="flex justify-end gap-2">
               <Button onClick={() => setIsGroupsOpen(false)}>Close</Button>
+            </div>
+          }
+        >
+          <div className="space-y-5">
+            <Alert
+              variant="info"
+              title="Seller groups control the commission pool and flexible distribution. Open group details only when you need to view or edit the full setup."
+            />
+
+            <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Seller Groups</h3>
+                <p className="mt-1 text-sm text-slate-500">
+                  This table only shows group summaries. Details and distribution are hidden until you click Details.
+                </p>
+              </div>
+
+              <Button icon={<FiPlus />} onClick={openCreateGroup} variant="primary">
+                New Group
+              </Button>
+            </div>
+
+            <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50">
+                  <tr className="border-b border-slate-200">
+                    <th className="px-4 py-3 text-left">Group</th>
+                    <th className="px-4 py-3 text-left">Pool Rate</th>
+                    <th className="px-4 py-3 text-left">Members</th>
+                    <th className="px-4 py-3 text-left">Group Head</th>
+                    <th className="px-4 py-3 text-left">Status</th>
+                    <th className="px-4 py-3 text-left">Action</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {sellerGroups.map((group) => (
+                    <tr key={group.id} className="border-b border-slate-100 last:border-b-0">
+                      <td className="px-4 py-3">
+                        <p className="font-semibold text-slate-900">{group.group_name}</p>
+                        {group.notes ? <p className="text-xs text-slate-500">{group.notes}</p> : null}
+                      </td>
+
+                      <td className="px-4 py-3">
+                        <p className="font-semibold text-slate-900">{formatRate(group.pool_rate)}</p>
+                        <p className="text-xs text-slate-500">Flexible pool</p>
+                      </td>
+
+                      <td className="px-4 py-3 text-slate-600">
+                        <p>{formatNumber(group.active_member_count)} active member(s)</p>
+                        <p className="text-xs text-slate-500">
+                          BNM {formatNumber(group.bnm_count)} / B {formatNumber(group.broker_count)} / M{" "}
+                          {formatNumber(group.manager_count)} / A {formatNumber(group.agent_count)}
+                        </p>
+                      </td>
+
+                      <td className="px-4 py-3 text-slate-600">
+                        {group.group_head_name || "-"}
+                      </td>
+
+                      <td className="px-4 py-3">
+                        <StatusBadge status={group.status} />
+                      </td>
+
+                      <td className="px-4 py-3">
+                        <div className="flex flex-wrap gap-2">
+                          <Button icon={<FiEye />} onClick={() => openGroupDetails(group)}>
+                            Details
+                          </Button>
+
+                          <Button
+                            disabled={deleteGroupMutation.isPending}
+                            icon={<FiTrash2 />}
+                            onClick={() => handleRemoveGroup(group)}
+                            variant="danger"
+                          >
+                            Remove
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+
+                  {!sellerGroups.length ? (
+                    <tr>
+                      <td colSpan={6} className="px-4 py-10 text-center text-slate-500">
+                        No seller groups yet. Click New Group to create one.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </Modal>
+      ) : null}
+
+      {isGroupFormOpen ? (
+        <Modal
+          title={editingGroup ? `Seller Group Details - ${editingGroup.group_name}` : "Create Seller Group"}
+          onClose={() => setIsGroupFormOpen(false)}
+          size="xl"
+          footer={
+            <div className="flex justify-between gap-2">
+              <Button onClick={() => setIsGroupFormOpen(false)}>Cancel</Button>
+
               <Button
                 disabled={saveGroupMutation.isPending || groupRateOverPool}
                 onClick={() => saveGroupMutation.mutate({ id: editingGroup?.id, form: groupForm })}
                 variant="primary"
               >
-                {saveGroupMutation.isPending ? "Saving..." : editingGroup ? "Save Seller Group" : "Create Seller Group"}
+                {saveGroupMutation.isPending
+                  ? "Saving..."
+                  : editingGroup
+                    ? "Save Changes"
+                    : "Create Seller Group"}
               </Button>
             </div>
           }
         >
-          <Alert
-            variant="info"
-            title="Rates are now managed per Seller Group. User accounts inherit their group from the selected higher-up. Edit the exact split for Agent, Manager, Broker, and BNM sale scenarios."
-          />
+          <div className="space-y-5">
+            <Alert
+              variant="info"
+              title="Edit the group details and flexible pool distribution here. The group list stays clean and only shows summary data."
+            />
 
-          <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_1.2fr]">
-            <div>
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <h3 className="text-sm font-bold text-slate-900">Existing Groups</h3>
-                <Button icon={<FiPlus />} onClick={openCreateGroup} variant="secondary">New</Button>
-              </div>
-              <div className="max-h-[460px] overflow-auto rounded-xl border border-slate-200 bg-white">
-                <table className="w-full text-sm">
-                  <thead className="bg-slate-50">
-                    <tr>
-                      <th className="px-3 py-2 text-left">Group</th>
-                      <th className="px-3 py-2 text-left">Pool</th>
-                      <th className="px-3 py-2 text-left">Members</th>
-                      <th className="px-3 py-2 text-left">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sellerGroups.map((group) => (
-                      <tr key={group.id} className="border-t border-slate-100">
-                        <td className="px-3 py-2">
-                          <p className="font-semibold text-slate-900">{group.group_name}</p>
-                          <p className="text-xs text-slate-500">{group.group_code || "No code"}</p>
-                          <StatusBadge status={group.status} />
-                        </td>
-                        <td className="px-3 py-2 text-slate-600">{formatRate(group.pool_rate)}</td>
-                        <td className="px-3 py-2 text-slate-600">
-                          <p>{formatNumber(group.active_member_count)} active</p>
-                          <p className="text-xs text-slate-500">A {formatNumber(group.agent_count)} / M {formatNumber(group.manager_count)} / B {formatNumber(group.broker_count)}</p>
-                        </td>
-                        <td className="px-3 py-2">
-                          <div className="flex flex-col gap-2">
-                            <Button icon={<FiEdit2 />} onClick={() => openEditGroup(group)}>Edit</Button>
-                            <Button disabled={recalculateGroupMutation.isPending} onClick={() => recalculateGroupMutation.mutate(group.id)} variant="ghost">Recalc</Button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                    {!sellerGroups.length ? (
-                      <tr>
-                        <td colSpan={4} className="px-3 py-8 text-center text-slate-500">No seller groups yet.</td>
-                      </tr>
-                    ) : null}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-slate-200 bg-white p-4">
+            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
               <div className="mb-4 flex items-center gap-2">
                 <FiSettings className="text-blue-600" />
                 <div>
-                  <h3 className="text-sm font-bold text-slate-900">{editingGroup ? "Edit Group" : "Create Group"}</h3>
-                  <p className="text-xs text-slate-500">Admin controls the group pool and exact commission split per sale type here.</p>
+                  <h3 className="text-sm font-bold text-slate-900">Group Details</h3>
+                  <p className="text-xs text-slate-500">
+                    Basic group information and assigned group head.
+                  </p>
                 </div>
               </div>
 
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <Input label="Group Name" value={groupForm.group_name} onChange={(e) => setGroupForm((prev) => ({ ...prev, group_name: e.target.value }))} />
-                <Input label="Group Code" value={groupForm.group_code} onChange={(e) => setGroupForm((prev) => ({ ...prev, group_code: e.target.value }))} />
-                <Input label="Pool Rate (%)" type="number" min={0} max={100} step="0.01" value={groupForm.pool_rate} onChange={(e) => setGroupForm((prev) => ({ ...prev, pool_rate: e.target.value }))} />
-                <Select label="Status" value={groupForm.status} onChange={(e) => setGroupForm((prev) => ({ ...prev, status: e.target.value }))}>
-                  {statuses.map((status) => <option key={status} value={status}>{formatText(status)}</option>)}
+                <Input
+                  label="Group Name"
+                  value={groupForm.group_name}
+                  onChange={(e) => setGroupForm((prev) => ({ ...prev, group_name: e.target.value }))}
+                />
+                <Input
+                  label="Pool Rate (%)"
+                  type="number"
+                  min={0}
+                  max={100}
+                  step="0.01"
+                  value={groupForm.pool_rate}
+                  onChange={(e) => setGroupForm((prev) => ({ ...prev, pool_rate: e.target.value }))}
+                />
+                <Select
+                  label="Status"
+                  value={groupForm.status}
+                  onChange={(e) => setGroupForm((prev) => ({ ...prev, status: e.target.value }))}
+                >
+                  {statuses.map((status) => (
+                    <option key={status} value={status}>{formatText(status)}</option>
+                  ))}
                 </Select>
-                <Select label="Group Head / BNM" value={groupForm.group_head_seller_id} onChange={(e) => setGroupForm((prev) => ({ ...prev, group_head_seller_id: e.target.value }))}>
+                <Select
+                  label="Group Head (BNM/Broker)"
+                  value={groupForm.group_head_seller_id}
+                  onChange={(e) => setGroupForm((prev) => ({ ...prev, group_head_seller_id: e.target.value }))}
+                >
                   <option value="">No group head yet</option>
-                  {groupHeadOptions.map((seller) => <option key={seller.id} value={seller.id}>{seller.full_name}</option>)}
+                  {groupHeadOptions.map((seller) => (
+                    <option key={seller.id} value={seller.id}>
+                      {seller.full_name} — {formatText(seller.seller_role)}
+                    </option>
+                  ))}
                 </Select>
-                <Input label="Notes" value={groupForm.notes} onChange={(e) => setGroupForm((prev) => ({ ...prev, notes: e.target.value }))} />
+                <Input
+                  label="Notes"
+                  value={groupForm.notes}
+                  onChange={(e) => setGroupForm((prev) => ({ ...prev, notes: e.target.value }))}
+                />
               </div>
+            </div>
 
-              <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                <div className="mb-4 flex items-start justify-between gap-3">
+            {editingGroup ? (
+              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
                   <div>
-                    <h4 className="text-sm font-bold text-slate-900">Editable Pool Distribution per Sale Type</h4>
+                    <h3 className="text-sm font-bold text-slate-900">Group Members</h3>
                     <p className="text-xs text-slate-500">
-                      Edit the actual rates shown below. Each sale type can have its own split as long as its total does not exceed the group pool.
+                      View members assigned to this group. Use search and position filter to narrow the list.
                     </p>
                   </div>
-                  <p className={groupRateOverPool ? "text-sm font-bold text-red-600" : "text-sm font-semibold text-slate-600"}>
-                    Pool {formatRate(groupPoolRate)}
+
+                  <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-[1fr_220px] lg:w-[560px]">
+                    <Input
+                      icon={<FiSearch />}
+                      placeholder="Search member, parent, status..."
+                      value={groupMemberSearch}
+                      onChange={(e) => setGroupMemberSearch(e.target.value)}
+                    />
+                    <Select
+                      value={groupMemberRoleFilter}
+                      onChange={(e) => setGroupMemberRoleFilter(e.target.value)}
+                    >
+                      <option value="all">All positions</option>
+                      <option value="broker_network_manager">BNM</option>
+                      <option value="broker">Broker</option>
+                      <option value="manager">Manager</option>
+                      <option value="agent">Agent</option>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="overflow-hidden rounded-xl border border-slate-200">
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-50">
+                      <tr className="border-b border-slate-200">
+                        <th className="px-4 py-3 text-left">Member</th>
+                        <th className="px-4 py-3 text-left">Position</th>
+                        <th className="px-4 py-3 text-left">Reports Under</th>
+                        <th className="px-4 py-3 text-left">Rate</th>
+                        <th className="px-4 py-3 text-left">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredGroupMembers.map((member) => (
+                        <tr key={member.id} className="border-b border-slate-100 last:border-b-0">
+                          <td className="px-4 py-3">
+                            <p className="font-semibold text-slate-900">{member.full_name}</p>
+                            <p className="text-xs text-slate-500">Seller ID #{member.id}</p>
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">{formatText(member.seller_role)}</td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {member.reports_under_display || member.parent_seller_name || "Company / None"}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {formatRate(member.seller_group_role_rate ?? member.seller_group_closing_seller_rate ?? 0)}
+                          </td>
+                          <td className="px-4 py-3">
+                            <StatusBadge status={member.status} />
+                          </td>
+                        </tr>
+                      ))}
+
+                      {!filteredGroupMembers.length ? (
+                        <tr>
+                          <td colSpan={5} className="px-4 py-8 text-center text-slate-500">
+                            No members found for this filter.
+                          </td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : null}
+
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div>
+                  <h4 className="text-sm font-bold text-slate-900">Flexible Pool Distribution</h4>
+                  <p className="text-xs text-slate-500">
+                    Edit the actual rates per sale type. Each sale type total must not exceed the group pool.
                   </p>
                 </div>
-
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                  {saleSplitSections.map((section) => {
-                    const total = groupSplitTotals[section.key] || 0
-                    const isOverPool = total > groupPoolRate
-                    const remaining = Math.max(groupPoolRate - total, 0)
-
-                    return (
-                      <div key={section.key} className="rounded-xl border border-blue-100 bg-white p-4">
-                        <div className="mb-3 flex items-start justify-between gap-3">
-                          <div>
-                            <p className="text-sm font-bold text-slate-900">{section.label}</p>
-                            <p className="mt-1 text-xs text-slate-500">{section.description}</p>
-                          </div>
-                          <div className="text-right text-xs">
-                            <p className={isOverPool ? "font-bold text-red-600" : "font-bold text-slate-900"}>
-                              Total {formatRate(total)}
-                            </p>
-                            <p className="text-slate-500">Remaining {formatRate(remaining)}</p>
-                          </div>
-                        </div>
-
-                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                          {section.roles.map((role) => (
-                            <Input
-                              key={`${section.key}-${role.key}`}
-                              label={`${role.label} Rate (%)`}
-                              type="number"
-                              min={0}
-                              max={100}
-                              step="0.01"
-                              value={groupForm[section.key][role.key]}
-                              onChange={(e) => updateGroupSaleSplit(section.key, role.key, e.target.value)}
-                            />
-                          ))}
-                        </div>
-
-                        {isOverPool ? (
-                          <p className="mt-3 text-xs font-semibold text-red-600">
-                            {section.label} total cannot exceed the pool rate.
-                          </p>
-                        ) : null}
-
-                        {!isOverPool && total < groupPoolRate ? (
-                          <p className="mt-3 text-xs font-semibold text-amber-600">
-                            This split leaves {formatRate(groupPoolRate - total)} undistributed.
-                          </p>
-                        ) : null}
-                      </div>
-                    )
-                  })}
-                </div>
-
-                {groupRateOverPool ? <p className="mt-3 text-sm font-semibold text-red-600">One or more sale-type totals exceed the pool rate.</p> : null}
+                <p className={groupRateOverPool ? "text-sm font-bold text-red-600" : "text-sm font-semibold text-slate-600"}>
+                  Pool {formatRate(groupPoolRate)}
+                </p>
               </div>
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                {saleSplitSections.map((section) => {
+                  const total = groupSplitTotals[section.key] || 0
+                  const isOverPool = total > groupPoolRate
+                  const remaining = Math.max(groupPoolRate - total, 0)
+
+                  return (
+                    <div key={section.key} className="rounded-xl border border-blue-100 bg-white p-4">
+                      <div className="mb-3 flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-bold text-slate-900">{section.label}</p>
+                          <p className="mt-1 text-xs text-slate-500">{section.description}</p>
+                        </div>
+                        <div className="text-right text-xs">
+                          <p className={isOverPool ? "font-bold text-red-600" : "font-bold text-slate-900"}>
+                            Total {formatRate(total)}
+                          </p>
+                          <p className="text-slate-500">Remaining {formatRate(remaining)}</p>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        {section.roles.map((role) => (
+                          <Input
+                            key={`${section.key}-${role.key}`}
+                            label={`${role.label} Rate (%)`}
+                            type="number"
+                            min={0}
+                            max={100}
+                            step="0.01"
+                            value={groupForm[section.key][role.key]}
+                            onChange={(e) => updateGroupSaleSplit(section.key, role.key, e.target.value)}
+                          />
+                        ))}
+                      </div>
+
+                      {isOverPool ? (
+                        <p className="mt-3 text-xs font-semibold text-red-600">
+                          {section.label} total cannot exceed the pool rate.
+                        </p>
+                      ) : null}
+
+                      {!isOverPool && total < groupPoolRate ? (
+                        <p className="mt-3 text-xs font-semibold text-amber-600">
+                          This split leaves {formatRate(groupPoolRate - total)} undistributed.
+                        </p>
+                      ) : null}
+                    </div>
+                  )
+                })}
+              </div>
+
+              {groupRateOverPool ? (
+                <p className="mt-3 text-sm font-semibold text-red-600">
+                  One or more sale-type totals exceed the pool rate.
+                </p>
+              ) : null}
             </div>
           </div>
         </Modal>
@@ -1174,3 +1423,4 @@ const Users = () => {
 }
 
 export default Users
+

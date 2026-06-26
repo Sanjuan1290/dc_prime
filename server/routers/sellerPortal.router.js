@@ -24,3 +24,4 @@ router.patch('/seller/team/:sellerId/rate', updateSellerTeamRate)
 router.get('/seller/sales', getSellerSales)
 
 export default router
+

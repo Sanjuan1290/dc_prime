@@ -28,3 +28,4 @@ router.patch('/listings/:id', updateListing)
 router.delete('/listings/:id', deleteListing)
 
 export default router
+

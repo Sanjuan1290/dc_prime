@@ -350,3 +350,4 @@ const printStyles = `
 `
 
 export default SellerProofOfIncomePrint
+

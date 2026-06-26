@@ -32,3 +32,4 @@ export const sendSystemEmail = async ({ to, subject, text, html }) => {
     html,
   })
 }
+

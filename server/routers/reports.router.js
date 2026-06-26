@@ -21,3 +21,4 @@ router.get('/reports/documents', getDocumentsReport)
 router.get('/reports/clients', getClientsReport)
 
 export default router
+

@@ -97,3 +97,4 @@ router.get('/client-documents/:id/file', openClientDocumentFile)
 router.delete('/documents/:id', deleteDocument)
 
 export default router
+

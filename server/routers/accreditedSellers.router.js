@@ -26,3 +26,4 @@ router.patch('/accredited-sellers/:id', updateAccreditedSeller)
 router.delete('/accredited-sellers/:id', deleteAccreditedSeller)
 
 export default router
+

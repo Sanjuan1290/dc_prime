@@ -48,3 +48,4 @@ const Modal = ({ children, footer, onClose, size = "md", title }: ModalProps) =>
 }
 
 export default Modal
+

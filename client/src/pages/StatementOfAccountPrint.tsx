@@ -27,6 +27,7 @@ type ScheduleRow = {
   running_balance: number | string
   status?: string | null
   schedule_type?: string | null
+  excess_used?: number | string | null
 }
 
 type InterestBreakdownRow = ScheduleRow & {
@@ -158,12 +159,12 @@ const isInterestBearingRow = (row: ScheduleRow) => {
   const scheduleType = String(row.schedule_type || "").toLowerCase()
   const description = String(row.description || "").toLowerCase()
 
-  if (["monthly", "balloon"].includes(scheduleType)) return true
+  if (scheduleType === "monthly") return true
 
   return (
     description.includes("monthly") ||
     description.includes("amortization") ||
-    description.includes("balloon")
+    false
   )
 }
 
@@ -370,7 +371,7 @@ const StatementOfAccountPrint = () => {
         {showInterestBreakdown ? (
           <>
             <div className="interest-note">
-              Interest breakdown is a display-only view. Interest applies to monthly/balloon rows only.
+              Interest breakdown is a display-only view. Interest applies to monthly amortization rows only.
               Principal paid = Amount Paid - Penalty - Interest.
             </div>
 
@@ -422,6 +423,7 @@ const StatementOfAccountPrint = () => {
                 <th>Date Paid</th>
                 <th>Amount Paid</th>
                 <th>Reference ID</th>
+                <th>Excess Used</th>
                 <th>Running Balance</th>
               </tr>
             </thead>
@@ -435,6 +437,7 @@ const StatementOfAccountPrint = () => {
                   <td>{formatDateOnly(row.date_paid)}</td>
                   <td className="money">{row.amount_paid ? amount(row.amount_paid) : ""}</td>
                   <td className="reference-cell">{displayReference(row)}</td>
+                  <td className="money">{toNumber(row.excess_used) > 0 ? amount(row.excess_used) : ""}</td>
                   <td className="money strong">{amount(row.running_balance)}</td>
                 </tr>
               ))}
@@ -522,3 +525,4 @@ const printStyles = `
 `
 
 export default StatementOfAccountPrint
+

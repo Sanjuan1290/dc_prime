@@ -26,3 +26,4 @@ router.patch('/projects/:id', updateProject)
 router.delete('/projects/:id', deleteProject)
 
 export default router
+

@@ -10,3 +10,4 @@ router.post('/logout', auth, logout)
 router.patch('/change-password', auth, passwordRateLimit, changePassword)
 
 export default router
+

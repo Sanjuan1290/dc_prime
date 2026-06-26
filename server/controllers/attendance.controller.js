@@ -1080,3 +1080,4 @@ export const getEmployeeAttendanceSummary = async (req, res) => {
     logs
   })
 }
+

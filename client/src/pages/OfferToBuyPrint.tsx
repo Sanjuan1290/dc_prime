@@ -349,3 +349,4 @@ const printStyles = `
 `
 
 export default OfferToBuyPrint
+

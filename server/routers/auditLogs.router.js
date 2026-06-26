@@ -13,3 +13,4 @@ router.get('/audit-logs', getAuditLogs)
 router.get('/audit-logs/:id', getAuditLog)
 
 export default router
+

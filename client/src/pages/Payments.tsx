@@ -1256,3 +1256,4 @@ const MiniDetail = ({
 }
 
 export default Payments
+

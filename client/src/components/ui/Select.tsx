@@ -26,3 +26,4 @@ const Select = ({ children, className = "", label, ...props }: SelectProps) => {
 }
 
 export default Select
+

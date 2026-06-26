@@ -56,3 +56,4 @@ const useCurrentUser = async (req, res) => {
 }
 
 export default useCurrentUser
+

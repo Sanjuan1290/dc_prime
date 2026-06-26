@@ -21,3 +21,4 @@ router.get('/employees/:id/rest-days', getEmployeeRestDays)
 router.patch('/employees/:id/rest-days', updateEmployeeRestDays)
 
 export default router
+

@@ -4,6 +4,7 @@ import type { IconType } from "react-icons"
 import {
   FiActivity,
   FiBarChart2,
+  FiBell,
   FiClock,
   FiCreditCard,
   FiDollarSign,
@@ -161,6 +162,7 @@ const navGroups: NavGroup[] = [
     tone: "amber",
     items: [
       { label: "Payments", to: "/payments", icon: FiCreditCard, tone: "amber" },
+      { label: "Notifications", to: "/notifications", icon: FiBell, tone: "amber" },
       { label: "Commissions", to: "/commissions", icon: FiDollarSign, tone: "amber" },
       { label: "Cash Advances", to: "/cash-advances", icon: FiDollarSign, tone: "amber" },
     ],
@@ -204,8 +206,8 @@ const roleHomePath = (role?: string) => {
 }
 
 const roleAllowedPaths: Record<string, string[]> = {
-  super_admin: ["/dashboard", "/projects", "/listings", "/clients", "/client", "/accreditted_sellers", "/payments", "/commissions", "/cash-advances", "/documents", "/audit-logs", "/reports", "/employees", "/attendance", "/settings", "/users", "/change-password"],
-  admin: ["/dashboard", "/projects", "/listings", "/clients", "/client", "/accreditted_sellers", "/payments", "/commissions", "/cash-advances", "/documents", "/audit-logs", "/reports", "/employees", "/attendance", "/settings", "/users", "/change-password"],
+  super_admin: ["/dashboard", "/projects", "/listings", "/clients", "/client", "/accreditted_sellers", "/payments", "/notifications", "/commissions", "/cash-advances", "/documents", "/audit-logs", "/reports", "/employees", "/attendance", "/settings", "/users", "/change-password"],
+  admin: ["/dashboard", "/projects", "/listings", "/clients", "/client", "/accreditted_sellers", "/payments", "/notifications", "/commissions", "/cash-advances", "/documents", "/audit-logs", "/reports", "/employees", "/attendance", "/settings", "/users", "/change-password"],
   broker_network_manager: ["/seller-dashboard", "/available-units", "/my-team", "/team-sales", "/change-password"],
   broker: ["/seller-dashboard", "/available-units", "/my-team", "/team-sales", "/change-password"],
   manager: ["/seller-dashboard", "/available-units", "/my-team", "/team-sales", "/change-password"],
@@ -287,7 +289,7 @@ const SystemLayout = () => {
             <img
               src="/logo2.png"
               alt="D&C Prime logo"
-              className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white bg-white object-cover shadow-sm"
+              className="flex h-14 w-14 items-center justify-center rounded-2xl border border-white bg-white object-cover shadow-sm"
             />
 
             <div>
@@ -476,6 +478,7 @@ const SystemLayout = () => {
 }
 
 export default SystemLayout
+
 
 
 

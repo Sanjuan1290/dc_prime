@@ -274,3 +274,4 @@ export const getSellerSales = async (req, res) => {
 
   res.status(200).json({ message: 'Sales fetched successfully', sales: rows, data: rows })
 }
+

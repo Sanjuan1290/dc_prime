@@ -1048,10 +1048,7 @@ const reserveListing = async ({
         reserveData.mode_of_payment === "cash"
           ? Number(reserveData.deferred_cash_amount || 0)
           : 0,
-      balloon_payment_amount:
-        reserveData.mode_of_payment === "installment"
-          ? Number(reserveData.balloon_payment_amount || 0)
-          : 0,
+      balloon_payment_amount: 0,
       balloon_due_date: null,
       payment_terms_months:
         reserveData.mode_of_payment === "installment"
@@ -1537,46 +1534,6 @@ const calculateAmortizedMonthlyPayment = ({
   return (principal * monthlyRate * growth) / (growth - 1);
 };
 
-
-const parseDateInputValue = (value: string) => {
-  if (!value) return null;
-
-  const [year, month, day] = value.split("-").map(Number);
-
-  if (!year || !month || !day) return null;
-
-  return new Date(year, month - 1, day);
-};
-
-const toDateInputValue = (date: Date) => {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-
-  return `${year}-${month}-${day}`;
-};
-
-const addMonthsToDateInputValue = (value: string, months: number) => {
-  const date = parseDateInputValue(value);
-
-  if (!date) return "";
-
-  const day = date.getDate();
-  const targetYear = date.getFullYear();
-  const targetMonth = date.getMonth() + months;
-  const lastDayOfTargetMonth = new Date(
-    targetYear,
-    targetMonth + 1,
-    0,
-  ).getDate();
-  const result = new Date(
-    targetYear,
-    targetMonth,
-    Math.min(day, lastDayOfTargetMonth),
-  );
-
-  return toDateInputValue(result);
-};
 
 const getListingInterestRate = (listing?: AvailableListing | null) => {
   const parsed = Number(listing?.annual_interest_rate ?? listing?.interest_rate ?? 0);
@@ -2109,10 +2066,6 @@ const ClientProfile = () => {
     reserveData.mode_of_payment === "cash"
       ? moneyInputValue(reserveData.deferred_cash_amount)
       : 0;
-  const reserveBalloonPayment =
-    reserveData.mode_of_payment === "installment"
-      ? moneyInputValue(reserveData.balloon_payment_amount)
-      : 0;
   const reserveBalanceRaw =
     reservePurchasePrice -
     reserveReservationFee -
@@ -2127,28 +2080,10 @@ const ClientProfile = () => {
           36,
         )
       : 0;
-  const reserveFirstDueDate = reserveData.due_date || reserveData.starting_date || getLocalDate();
-  const reserveMonthlyStartDate =
-    reserveData.mode_of_payment === "installment" && reserveDownpayment > 0
-      ? addMonthsToDateInputValue(reserveFirstDueDate, reserveDownpaymentGives)
-      : reserveFirstDueDate;
-  const reserveBalloonDueDate =
-    reserveData.mode_of_payment === "installment" &&
-    reserveBalloonPayment > 0 &&
-    reserveTermsMonths > 0
-      ? addMonthsToDateInputValue(
-          reserveMonthlyStartDate,
-          Math.max(reserveTermsMonths - 1, 0),
-        )
-      : "";
-
   const reserveInterestRate = selectedListing
     ? getListingInterestRate(selectedListing)
     : moneyInputValue(reserveData.interest_rate);
-  const reserveAmortizedBalance = Math.max(
-    reserveOfferBalance - reserveBalloonPayment,
-    0,
-  );
+  const reserveAmortizedBalance = reserveOfferBalance;
   const computedMonthlyAmortization =
     reserveData.mode_of_payment === "installment" && reserveTermsMonths > 0
       ? calculateAmortizedMonthlyPayment({
@@ -2189,8 +2124,8 @@ const ClientProfile = () => {
       key: "offer_balance",
       label: "Balance for Amortization",
       value: formatMoney(reserveAmortizedBalance),
-      formula: `${formatMoney(reservePurchasePrice)} - ${formatMoney(reserveReservationFee)} - ${formatMoney(reserveDownpayment)} - ${formatMoney(reserveDeferredCash)} - ${formatMoney(reserveBalloonPayment)} balloon`,
-      note: "Balloon payment is separated from the monthly amortized balance.",
+      formula: `${formatMoney(reservePurchasePrice)} - ${formatMoney(reserveReservationFee)} - ${formatMoney(reserveDownpayment)} - ${formatMoney(reserveDeferredCash)}`,
+      note: "Reservation and downpayment are separate from the monthly term. Balloon payments are handled later as principal-only payments.",
     },
     {
       key: "monthly_preview",
@@ -3844,10 +3779,7 @@ const ClientProfile = () => {
                       paymentMode === "cash"
                         ? reserveData.deferred_cash_amount
                         : "0",
-                    balloon_payment_amount:
-                      paymentMode === "installment"
-                        ? reserveData.balloon_payment_amount || "0"
-                        : "0",
+                    balloon_payment_amount: "0",
                     balloon_due_date: "",
                     payment_terms_months:
                       paymentMode === "installment"
@@ -4173,37 +4105,6 @@ const ClientProfile = () => {
                       </p>
                     </div>
 
-                    <Input
-                      label="Balloon Payment Amount"
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      value={reserveData.balloon_payment_amount}
-                      onChange={(e) => {
-                        setReserveData({
-                          ...reserveData,
-                          balloon_payment_amount: e.target.value,
-                          monthly_amortization: "",
-                        });
-                        setReserveValidationMessage("");
-                      }}
-                    />
-
-                    {reserveBalloonPayment > 0 ? (
-                      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                        <p className="text-xs font-semibold text-slate-500">
-                          Balloon Due Date
-                        </p>
-                        <p className="mt-1 text-sm font-bold text-slate-900">
-                          {reserveBalloonDueDate
-                            ? formatDate(reserveBalloonDueDate)
-                            : "End of term"}
-                        </p>
-                        <p className="mt-1 text-xs text-slate-500">
-                          Automatically due on the final monthly schedule date.
-                        </p>
-                      </div>
-                    ) : null}
 
                     <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2">
                       <p className="text-xs font-semibold text-blue-700">
@@ -4215,7 +4116,7 @@ const ClientProfile = () => {
                           : "-"}
                       </p>
                       <p className="mt-1 text-xs text-slate-600">
-                        Automatically calculated from balance, term, balloon, and listing interest rate.
+                        Automatically calculated from balance, term, and listing interest rate.
                       </p>
                     </div>
                   </>
@@ -5899,5 +5800,6 @@ const MiniDetail = ({
 };
 
 export default ClientProfile;
+
 
 

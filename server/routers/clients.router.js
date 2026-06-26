@@ -26,3 +26,4 @@ router.put('/clients/:id/employment-details', replaceClientEmploymentDetails)
 router.delete('/clients/:id', deleteClient)
 
 export default router
+

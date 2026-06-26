@@ -19,3 +19,4 @@ export const formatIpForDisplay = (ipAddress) => {
 
   return ipAddress
 }
+

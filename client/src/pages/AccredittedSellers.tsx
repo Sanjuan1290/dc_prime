@@ -491,3 +491,4 @@ const AccredittedSellers = () => {
 }
 
 export default AccredittedSellers
+

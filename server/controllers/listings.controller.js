@@ -1649,3 +1649,4 @@ export const deleteListing = async (req, res) => {
 
   return res.status(200).json({ message: 'Listing deleted successfully' })
 }
+

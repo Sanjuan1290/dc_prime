@@ -1018,3 +1018,4 @@ const ComputedBox = ({ label, value }: { label: string; value: string }) => (
 )
 
 export default CashAdvances
+

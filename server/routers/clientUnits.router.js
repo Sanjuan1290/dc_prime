@@ -35,3 +35,4 @@ router.get('/available-listings', getAvailableListings)
 router.post('/clients/:clientId/reserve-listing', reserveListing)
 
 export default router
+

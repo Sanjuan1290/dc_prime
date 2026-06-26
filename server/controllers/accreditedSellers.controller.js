@@ -1049,3 +1049,4 @@ export const deleteAccreditedSeller = async (req, res) => {
 
   res.status(200).json({ message: 'Accredited seller deleted successfully' })
 }
+
