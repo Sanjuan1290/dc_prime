@@ -139,6 +139,7 @@ const paymentTypes = [
   "reservation",
   "downpayment",
   "monthly",
+  "advance_payment",
   "balloon",
   "full_payment",
   "other",
@@ -315,8 +316,12 @@ const getSuggestionHelpText = (paymentType: string) => {
     return "Suggested amount based on locked monthly amortization"
   }
 
+  if (paymentType === "advance_payment") {
+    return "Advance payment is saved as Excess MA and auto-applies to future monthly dues"
+  }
+
   if (paymentType === "excess_ma") {
-    return "Use saved excess MA to pay the current monthly due"
+    return "Use saved Excess MA to pay the current monthly due"
   }
 
   if (paymentType === "balloon") {
@@ -324,7 +329,7 @@ const getSuggestionHelpText = (paymentType: string) => {
   }
 
   if (paymentType === "full_payment") {
-    return "Suggested amount based on remaining balance"
+    return "Suggested payoff amount after available Excess MA"
   }
 
   if (paymentType === "legal_misc") {
@@ -1026,15 +1031,21 @@ const PaymentModal = ({
       return "Loading suggested amount..."
     }
 
+    if (formData.payment_type === "advance_payment") {
+      return selectedClientUnit
+        ? `${suggestionHelpText}. Available Excess MA: ${formatMoney(availableExcessMa)}.`
+        : "Select a client unit before recording an advance payment."
+    }
+
     if (formData.payment_type === "balloon") {
       return selectedClientUnit
-        ? `${suggestionHelpText}. Current principal balance: ${formatMoney(displayBalance)}. Enter the amount the client wants to pay as balloon.`
+        ? `${suggestionHelpText}. Principal balance: ${formatMoney(displayBalance)}. Available Excess MA: ${formatMoney(availableExcessMa)}. Suggested payoff balloon: ${formatMoney(suggestedAmount || 0)}.`
         : "Select a client unit to load the current principal balance."
     }
 
     if (formData.payment_type === "full_payment") {
       return selectedClientUnit
-        ? `${suggestionHelpText}: ${formatMoney(displayBalance)}`
+        ? `${suggestionHelpText}: ${formatMoney(suggestedAmount || 0)}. Principal balance: ${formatMoney(displayBalance)} minus Excess MA: ${formatMoney(availableExcessMa)}.`
         : "Select a client unit to load the payoff amount."
     }
 

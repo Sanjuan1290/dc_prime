@@ -223,10 +223,11 @@ const buildPaymentSuggestions = async (connectionOrDb, clientUnitId) => {
       )
     : 0
   const legalMiscSuggestion = 0
-  const fullPaymentSuggestion = principalBalance
-  const balloonSuggestion = principalBalance
-  const advancePaymentSuggestion = monthlySuggestion
   const excessMaAvailable = roundAmount(scheduleDue.excessMaAvailable || 0)
+  const payoffSuggestion = roundAmount(Math.max(principalBalance - excessMaAvailable, 0))
+  const fullPaymentSuggestion = payoffSuggestion
+  const balloonSuggestion = payoffSuggestion
+  const advancePaymentSuggestion = monthlySuggestion
   const excessMaSuggestion = roundAmount(Math.min(excessMaAvailable, monthlySuggestion || balance || 0))
 
   const suggestions = {

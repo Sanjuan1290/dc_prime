@@ -224,14 +224,12 @@ const getInitialInterestRate = (unit: Record<string, any>) => {
     if (parsed > 0) return String(parsed)
   }
 
-  return "11.5"
+  return "0"
 }
 
 const StatementOfAccountPrint = () => {
   const { clientUnitId = "" } = useParams()
   const [showInterestBreakdown, setShowInterestBreakdown] = useState(false)
-  const [interestRate, setInterestRate] = useState("11.5")
-  const [hasLoadedInitialRate, setHasLoadedInitialRate] = useState(false)
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["soa-print-data", clientUnitId],
@@ -243,14 +241,9 @@ const StatementOfAccountPrint = () => {
     if (clientUnitId) logPrint(clientUnitId)
   }, [clientUnitId])
 
-  useEffect(() => {
-    if (data?.unit && !hasLoadedInitialRate) {
-      setInterestRate(getInitialInterestRate(data.unit))
-      setHasLoadedInitialRate(true)
-    }
-  }, [data?.unit, hasLoadedInitialRate])
-
-  const annualInterestRate = Math.max(toNumber(interestRate), 0)
+  const annualInterestRate = data?.unit
+    ? Math.max(toNumber(getInitialInterestRate(data.unit)), 0)
+    : 0
 
   const interestRows = useMemo(() => {
     if (!data) return []
@@ -292,18 +285,6 @@ const StatementOfAccountPrint = () => {
             {showInterestBreakdown ? "Hide Interest Breakdown" : "Show Interest Breakdown"}
           </button>
         </div>
-
-        <label className="interest-control">
-          <span>Annual Interest Rate</span>
-          <input
-            min="0"
-            step="0.01"
-            type="number"
-            value={interestRate}
-            onChange={(event) => setInterestRate(event.target.value)}
-          />
-          <span>%</span>
-        </label>
       </div>
 
       <section className="sheet sheet-landscape">
@@ -362,12 +343,6 @@ const StatementOfAccountPrint = () => {
                   <td>Total Amount Payable</td>
                   <td>{amount(data.totals.total_amount_payable)}</td>
                 </tr>
-                {showInterestBreakdown ? (
-                  <tr>
-                    <td>Interest Breakdown Rate</td>
-                    <td>{annualInterestRate.toFixed(2)}% annually</td>
-                  </tr>
-                ) : null}
               </tbody>
             </table>
           </div>
@@ -489,8 +464,6 @@ const printStyles = `
   .toolbar-left { display: flex; flex-wrap: wrap; gap: 8px; }
   .toolbar button { padding: 8px 12px; border: 1px solid #111; background: white; cursor: pointer; font-weight: 700; }
   .toolbar .secondary-button { border-color: #2563eb; color: #1d4ed8; }
-  .interest-control { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; }
-  .interest-control input { width: 90px; border: 1px solid #cbd5e1; border-radius: 6px; padding: 7px 8px; font: inherit; }
   .soa-page { color: #111; font-family: Arial, sans-serif; }
   .sheet { margin: 16px auto; background: white; padding: 8mm; box-shadow: 0 0 0 1px #e5e7eb; }
   .sheet-landscape { width: 297mm; min-height: 210mm; }

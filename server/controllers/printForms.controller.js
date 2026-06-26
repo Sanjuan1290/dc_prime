@@ -1,7 +1,7 @@
 import { db } from '../db/connect.js'
 import { safeCreateAuditLog } from '../utils/createAuditLog.js'
 import { getClientIp } from '../utils/getClientIp.js'
-import { rebuildAndGetPaymentScheduleRows, mapScheduleRowForPrint } from '../utils/paymentSchedule.js'
+import { rebuildPaymentSchedule, getPaymentScheduleRows, mapScheduleRowForPrint } from '../utils/paymentSchedule.js'
 
 const toNumber = (value) => Number(value || 0)
 
@@ -312,7 +312,8 @@ export const getClientUnitPrintData = async (req, res) => {
     return res.status(404).json({ message: 'Client unit not found' })
   }
 
-  const scheduleRows = await rebuildAndGetPaymentScheduleRows(db, clientUnitId)
+  const scheduleSummary = await rebuildPaymentSchedule(db, clientUnitId)
+  const scheduleRows = await getPaymentScheduleRows(db, clientUnitId)
   const schedule = scheduleRows.map(mapScheduleRowForPrint)
   const totalPaid = normalizeMoney(
     printData.payments.reduce((sum, payment) => (
@@ -325,7 +326,10 @@ export const getClientUnitPrintData = async (req, res) => {
     printData.unit.offer_purchase_price || printData.unit.total_contract_price
   )
   const statementBalance = normalizeMoney(
-    scheduleRows.reduce((sum, row) => sum + toNumber(row.balance), 0)
+    Math.max(
+      toNumber(scheduleSummary?.principal_balance) - toNumber(scheduleSummary?.excess_ma_available),
+      0
+    )
   )
   const statementTotal = normalizeMoney(
     scheduleRows.reduce((sum, row) => sum + toNumber(row.total_due), 0)

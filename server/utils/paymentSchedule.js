@@ -273,6 +273,11 @@ const isExcessMaPayment = (paymentType) => {
   return String(paymentType || '').toLowerCase() === 'excess_ma'
 }
 
+const isAdvancePayment = (paymentType) => {
+  const normalizedType = String(paymentType || '').toLowerCase()
+  return normalizedType === 'advance' || normalizedType === 'advance_payment'
+}
+
 const isBalloonPayment = (paymentType) => {
   return String(paymentType || '').toLowerCase() === 'balloon'
 }
@@ -282,6 +287,11 @@ const getEffectiveAmountPaid = (row) => {
 }
 
 const refreshRowBalance = (row) => {
+  if (row?.is_excess_ma_credit === true || String(row?.description || '').toLowerCase() === 'advance payment') {
+    row.balance = 0
+    return row.balance
+  }
+
   row.balance = money(Math.max(money(row.total_due) - getEffectiveAmountPaid(row), 0))
   return row.balance
 }
@@ -295,6 +305,8 @@ const preferredScheduleTypes = (paymentType) => {
       return ['downpayment', 'monthly', 'full_payment']
     case 'monthly':
       return ['monthly']
+    case 'advance':
+    case 'advance_payment':
     case 'excess_ma':
       return ['monthly']
     case 'balloon':
@@ -330,59 +342,100 @@ const findNextRowIndex = (rows, paymentType) => {
   return rows.findIndex((row) => money(row.balance) > 0)
 }
 
-const createBalloonReductionRow = ({ payment, paymentDate, paymentReference, appliedAmount, totalContractPrice }) => ({
-  due_date: paymentDate,
-  description: 'Balloon Principal Reduction',
-  schedule_type: 'balloon',
-  principal_due: money(appliedAmount),
-  interest_due: 0,
-  penalty_due: 0,
-  total_due: money(appliedAmount),
-  amount_paid: money(appliedAmount),
-  advance_applied: 0,
-  balance: 0,
-  date_paid: paymentDate,
-  reference_no: null,
-  reference_details: [
-    {
+
+const isExcessMaCreditRow = (row) => {
+  return row?.is_excess_ma_credit === true || String(row?.description || '').toLowerCase() === 'advance payment'
+}
+
+const createPrincipalReductionRow = ({
+  payment,
+  paymentDate,
+  paymentReference,
+  description,
+  scheduleType,
+  cashAmount,
+  excessMaAmount = 0,
+  totalContractPrice,
+}) => {
+  const paidCash = money(cashAmount)
+  const usedExcess = money(excessMaAmount)
+  const totalApplied = money(paidCash + usedExcess)
+
+  const row = {
+    due_date: paymentDate,
+    description,
+    schedule_type: scheduleType,
+    principal_due: totalApplied,
+    interest_due: 0,
+    penalty_due: 0,
+    total_due: totalApplied,
+    amount_paid: totalApplied,
+    advance_applied: 0,
+    balance: 0,
+    date_paid: paymentDate,
+    reference_no: null,
+    reference_details: [],
+    status: 'paid',
+    running_balance: totalContractPrice,
+    sort_order: 999999,
+  }
+
+  if (paidCash > 0) {
+    pushReferenceDetail(row, {
       payment_id: Number(payment.id),
       reference_id: paymentReference,
-      applied_amount: money(appliedAmount),
+      applied_amount: paidCash,
       payment_date: paymentDate,
-      payment_type: payment.payment_type || 'balloon',
-    },
-  ],
-  status: 'paid',
-  running_balance: totalContractPrice,
-  sort_order: 999999,
-})
+      payment_type: payment.payment_type || scheduleType,
+    })
+  }
 
-const createExcessMaReductionRow = ({ appliedAmount, totalContractPrice, paymentDate }) => ({
-  due_date: paymentDate || toDateOnly(new Date()),
-  description: 'Excess MA Principal Reduction',
-  schedule_type: 'excess_ma',
-  principal_due: money(appliedAmount),
-  interest_due: 0,
-  penalty_due: 0,
-  total_due: money(appliedAmount),
-  amount_paid: money(appliedAmount),
-  advance_applied: 0,
-  balance: 0,
-  date_paid: paymentDate || toDateOnly(new Date()),
-  reference_no: 'EXCESS-MA-AUTO',
-  reference_details: [
-    {
-      payment_id: 0,
-      reference_id: 'EXCESS-MA-AUTO',
-      applied_amount: money(appliedAmount),
-      payment_date: paymentDate || toDateOnly(new Date()),
-      payment_type: 'excess_ma_auto',
-    },
-  ],
-  status: 'paid',
-  running_balance: totalContractPrice,
-  sort_order: 999999,
-})
+  if (usedExcess > 0) {
+    pushReferenceDetail(row, {
+      payment_id: Number(payment.id),
+      reference_id: 'excess_ma',
+      applied_amount: usedExcess,
+      payment_date: paymentDate,
+      payment_type: 'excess_ma_used',
+    })
+  }
+
+  return row
+}
+
+const createAdvancePaymentRow = ({ payment, paymentDate, paymentReference, amount, totalContractPrice }) => {
+  const paidAmount = money(amount)
+
+  const row = {
+    due_date: paymentDate,
+    description: 'Advance Payment',
+    schedule_type: 'other',
+    principal_due: 0,
+    interest_due: 0,
+    penalty_due: 0,
+    total_due: paidAmount,
+    amount_paid: paidAmount,
+    advance_applied: paidAmount,
+    balance: 0,
+    date_paid: paymentDate,
+    reference_no: null,
+    reference_details: [],
+    status: 'paid',
+    running_balance: totalContractPrice,
+    sort_order: 999999,
+    is_excess_ma_credit: true,
+  }
+
+  pushReferenceDetail(row, {
+    payment_id: Number(payment.id),
+    reference_id: paymentReference,
+    applied_amount: paidAmount,
+    payment_date: paymentDate,
+    payment_type: 'excess_ma_saved',
+  })
+
+  return row
+}
 
 const reduceFutureMonthlyRowsFromEnd = (rows, reductionAmount, { fullRowsOnly = false } = {}) => {
   let remainingReduction = money(reductionAmount)
@@ -425,6 +478,19 @@ const reduceFutureMonthlyRowsFromEnd = (rows, reductionAmount, { fullRowsOnly = 
   return appliedReduction
 }
 
+const removeRemainingUnpaidContractRows = (rows) => {
+  for (let index = rows.length - 1; index >= 0; index -= 1) {
+    const row = rows[index]
+    const type = String(row.schedule_type || '').toLowerCase()
+    const removableType = ['monthly', 'balloon', 'full_payment'].includes(type)
+
+    if (!removableType) continue
+    if (money(row.amount_paid) > 0 || money(row.advance_applied) > 0) continue
+
+    rows.splice(index, 1)
+  }
+}
+
 const sortRowsForStatement = (rows) => {
   rows.sort((first, second) => {
     const firstDate = toDateOnly(first.due_date) || ''
@@ -440,19 +506,20 @@ const sortRowsForStatement = (rows) => {
   })
 }
 
-const applyAmountToRow = ({ row, payment, paymentDate, paymentReference, appliedAmount, markAsAdvance = false }) => {
+const applyAmountToRow = ({ row, payment, paymentDate, paymentReference, appliedAmount, markAsAdvance = false, datePaidOverride = null }) => {
   const applied = money(appliedAmount)
   if (applied <= 0) return 0
 
   row.amount_paid = money(row.amount_paid + applied)
   refreshRowBalance(row)
-  row.date_paid = row.balance <= 0 ? paymentDate : row.date_paid || paymentDate
+  const appliedDate = datePaidOverride || paymentDate
+  row.date_paid = row.balance <= 0 ? appliedDate : row.date_paid || appliedDate
 
   pushReferenceDetail(row, {
     payment_id: payment.id,
     reference_id: paymentReference,
     applied_amount: applied,
-    payment_date: paymentDate,
+    payment_date: appliedDate,
     payment_type: payment.payment_type || 'other',
   })
 
@@ -487,24 +554,25 @@ const getRowExcessMaUsed = (row) => {
   ), 0))
 }
 
-const applyExcessMaCreditToRow = ({ row, payment, paymentDate, paymentReference, appliedAmount, markAsAdvance = false }) => {
+const applyExcessMaCreditToRow = ({ row, payment, paymentDate, paymentReference, appliedAmount, markAsAdvance = false, datePaidOverride = null }) => {
   const applied = money(appliedAmount)
   if (applied <= 0) return 0
 
   row.amount_paid = money(row.amount_paid + applied)
   refreshRowBalance(row)
-  row.date_paid = row.balance <= 0 ? paymentDate : row.date_paid || paymentDate
+  const appliedDate = datePaidOverride || paymentDate
+  row.date_paid = row.balance <= 0 ? appliedDate : row.date_paid || appliedDate
 
   pushReferenceDetail(row, {
     payment_id: payment.id,
     reference_id: paymentReference,
     applied_amount: applied,
-    payment_date: paymentDate,
+    payment_date: appliedDate,
     payment_type: 'excess_ma_used',
   })
 
   if (row.balance <= 0) {
-    row.status = markAsAdvance || isFutureDate(row.due_date, paymentDate)
+    row.status = markAsAdvance || isFutureDate(row.due_date, appliedDate)
       ? 'advance'
       : 'paid'
   } else {
@@ -530,7 +598,16 @@ const annotateRowsWithExcessMa = (rows) => {
   return rows
 }
 
-const applyExcessMaToCurrentMonthlyRows = ({ rows, payment, paymentDate, paymentReference, amount, availableExcessMa }) => {
+const applyExcessMaToCurrentMonthlyRows = ({
+  rows,
+  payment,
+  paymentDate,
+  paymentReference,
+  amount,
+  availableExcessMa,
+  autoApply = false,
+  fullRowsOnly = false,
+}) => {
   let remainingPayment = money(Math.min(money(amount), money(availableExcessMa)))
   let appliedTotal = 0
 
@@ -541,14 +618,17 @@ const applyExcessMaToCurrentMonthlyRows = ({ rows, payment, paymentDate, payment
     const row = rows[rowIndex]
     const rowBalance = money(row.balance)
     if (rowBalance <= 0) break
+    if (fullRowsOnly && remainingPayment < rowBalance) break
 
+    const effectivePaymentDate = autoApply ? row.due_date : paymentDate
     const applied = applyExcessMaCreditToRow({
       row,
       payment,
-      paymentDate,
+      paymentDate: effectivePaymentDate,
       paymentReference,
       appliedAmount: Math.min(rowBalance, remainingPayment),
-      markAsAdvance: isFutureDate(row.due_date, paymentDate),
+      markAsAdvance: false,
+      datePaidOverride: effectivePaymentDate,
     })
 
     appliedTotal = money(appliedTotal + applied)
@@ -573,15 +653,18 @@ const applyNormalPaymentToRows = ({ rows, payment, paymentDate, paymentReference
     if (rowBalance <= 0) break
 
     const dueApplied = Math.min(rowBalance, remainingPayment)
-    const isFutureApplication = isFutureDate(row.due_date, paymentDate)
+    const isMonthly = paymentType === 'monthly'
+    const appliedDate = isMonthly ? row.due_date : paymentDate
+    const isFutureApplication = isMonthly ? false : isFutureDate(row.due_date, paymentDate)
 
     applyAmountToRow({
       row,
       payment,
-      paymentDate,
+      paymentDate: appliedDate,
       paymentReference,
       appliedAmount: dueApplied,
       markAsAdvance: isFutureApplication,
+      datePaidOverride: appliedDate,
     })
 
     remainingPayment = money(remainingPayment - dueApplied)
@@ -595,10 +678,11 @@ const applyNormalPaymentToRows = ({ rows, payment, paymentDate, paymentReference
         const appliedExcessMa = applyExcessMaCreditToRow({
           row,
           payment,
-          paymentDate,
-          paymentReference,
+          paymentDate: row.due_date,
+          paymentReference: 'excess_ma',
           appliedAmount: excessToUse,
-          markAsAdvance: isFutureApplication,
+          markAsAdvance: false,
+          datePaidOverride: row.due_date,
         })
 
         excessMaUsed = money(excessMaUsed + appliedExcessMa)
@@ -610,13 +694,14 @@ const applyNormalPaymentToRows = ({ rows, payment, paymentDate, paymentReference
       row.amount_paid = money(row.amount_paid + excessMa)
       row.advance_applied = money(row.advance_applied + excessMa)
       row.balance = 0
-      row.status = isFutureApplication ? 'advance' : 'paid'
+      row.status = 'paid'
+      row.date_paid = row.due_date
 
       pushReferenceDetail(row, {
         payment_id: payment.id,
         reference_id: paymentReference,
         applied_amount: excessMa,
-        payment_date: paymentDate,
+        payment_date: row.due_date,
         payment_type: 'excess_ma_saved',
       })
 
@@ -638,36 +723,120 @@ const applyNormalPaymentToRows = ({ rows, payment, paymentDate, paymentReference
   }
 }
 
-const applyAutomaticExcessMaFromEnd = ({ rows, availableExcessMa, totalContractPrice, paymentDate }) => {
-  const appliedExcessMa = reduceFutureMonthlyRowsFromEnd(
-    rows,
-    availableExcessMa,
-    { fullRowsOnly: true }
-  )
-
-  if (appliedExcessMa > 0) {
-    rows.push(
-      createExcessMaReductionRow({
-        appliedAmount: appliedExcessMa,
-        totalContractPrice,
-        paymentDate,
-      })
-    )
+const applyAutomaticExcessMaToMonthlyRows = ({ rows, availableExcessMa }) => {
+  const autoPayment = {
+    id: 0,
+    payment_type: 'excess_ma',
   }
 
-  return appliedExcessMa
+  return applyExcessMaToCurrentMonthlyRows({
+    rows,
+    payment: autoPayment,
+    paymentDate: null,
+    paymentReference: 'EXCESS-MA-AUTO',
+    amount: availableExcessMa,
+    availableExcessMa,
+    autoApply: true,
+    fullRowsOnly: true,
+  })
+}
+
+const getAppliedPrincipalTotal = (rows) => {
+  return money(rows.reduce((sum, row) => {
+    if (isExcessMaCreditRow(row)) return sum
+
+    const principalApplied = row.schedule_type === 'monthly'
+      ? getEffectiveAmountPaid(row)
+      : money(row.amount_paid)
+
+    return sum + principalApplied
+  }, 0))
+}
+
+const getCurrentPrincipalBalance = (rows, totalContractPrice) => {
+  return money(Math.max(money(totalContractPrice) - getAppliedPrincipalTotal(rows), 0))
+}
+
+const applyClosingPrincipalPayment = ({
+  rows,
+  payment,
+  paymentDate,
+  paymentReference,
+  amount,
+  availableExcessMa,
+  totalContractPrice,
+  description,
+  scheduleType,
+}) => {
+  const principalBalance = getCurrentPrincipalBalance(rows, totalContractPrice)
+  if (principalBalance <= 0) {
+    return {
+      appliedCash: 0,
+      excessMaUsed: 0,
+      closed: true,
+    }
+  }
+
+  const cashToApply = Math.min(money(amount), principalBalance)
+  const excessNeeded = money(Math.max(principalBalance - cashToApply, 0))
+  const excessToUse = Math.min(money(availableExcessMa), excessNeeded)
+  const totalApplied = money(cashToApply + excessToUse)
+
+  if (totalApplied <= 0) {
+    return {
+      appliedCash: 0,
+      excessMaUsed: 0,
+      closed: false,
+    }
+  }
+
+  rows.push(createPrincipalReductionRow({
+    payment,
+    paymentDate,
+    paymentReference,
+    description,
+    scheduleType,
+    cashAmount: cashToApply,
+    excessMaAmount: excessToUse,
+    totalContractPrice,
+  }))
+
+  const closed = money(principalBalance - totalApplied) <= 0
+  if (closed) {
+    removeRemainingUnpaidContractRows(rows)
+  }
+
+  return {
+    appliedCash: cashToApply,
+    excessMaUsed: excessToUse,
+    closed,
+  }
 }
 
 const applyPaymentsToRows = (rows, payments, totalContractPrice) => {
   let excessMaGenerated = 0
   let excessMaUsed = 0
-  let latestExcessMaDate = null
 
   for (const payment of payments) {
     let remainingPayment = money(payment.amount)
     const paymentDate = toDateOnly(payment.payment_date)
     const paymentReference = payment.reference_id || payment.payment_method || `Payment #${payment.id}`
     const paymentType = payment.payment_type || 'other'
+
+    if (isAdvancePayment(paymentType)) {
+      if (remainingPayment > 0) {
+        rows.push(createAdvancePaymentRow({
+          payment,
+          paymentDate,
+          paymentReference,
+          amount: remainingPayment,
+          totalContractPrice,
+        }))
+        excessMaGenerated = money(excessMaGenerated + remainingPayment)
+      }
+
+      continue
+    }
 
     if (isExcessMaPayment(paymentType)) {
       const availableExcessMa = money(excessMaGenerated - excessMaUsed)
@@ -684,27 +853,63 @@ const applyPaymentsToRows = (rows, payments, totalContractPrice) => {
       continue
     }
 
+    if (paymentType === 'full_payment') {
+      const result = applyClosingPrincipalPayment({
+        rows,
+        payment,
+        paymentDate,
+        paymentReference,
+        amount: remainingPayment,
+        availableExcessMa: money(excessMaGenerated - excessMaUsed),
+        totalContractPrice,
+        description: 'Full Payment',
+        scheduleType: 'full_payment',
+      })
+
+      excessMaUsed = money(excessMaUsed + result.excessMaUsed)
+      continue
+    }
+
     if (isBalloonPayment(paymentType)) {
+      const principalBalance = getCurrentPrincipalBalance(rows, totalContractPrice)
+      const availableExcessMa = money(excessMaGenerated - excessMaUsed)
+      const closesAccount = money(remainingPayment + availableExcessMa) >= principalBalance
+
+      if (closesAccount) {
+        const result = applyClosingPrincipalPayment({
+          rows,
+          payment,
+          paymentDate,
+          paymentReference,
+          amount: remainingPayment,
+          availableExcessMa,
+          totalContractPrice,
+          description: 'Balloon Principal Reduction',
+          scheduleType: 'balloon',
+        })
+
+        excessMaUsed = money(excessMaUsed + result.excessMaUsed)
+        continue
+      }
+
       const appliedBalloonReduction = reduceFutureMonthlyRowsFromEnd(
         rows,
         remainingPayment
       )
 
       if (appliedBalloonReduction > 0) {
-        rows.push(
-          createBalloonReductionRow({
-            payment,
-            paymentDate,
-            paymentReference,
-            appliedAmount: appliedBalloonReduction,
-            totalContractPrice,
-          })
-        )
-
-        remainingPayment = money(remainingPayment - appliedBalloonReduction)
+        rows.push(createPrincipalReductionRow({
+          payment,
+          paymentDate,
+          paymentReference,
+          description: 'Balloon Principal Reduction',
+          scheduleType: 'balloon',
+          cashAmount: appliedBalloonReduction,
+          totalContractPrice,
+        }))
       }
 
-      if (remainingPayment <= 0) continue
+      continue
     }
 
     const application = applyNormalPaymentToRows({
@@ -722,20 +927,21 @@ const applyPaymentsToRows = (rows, payments, totalContractPrice) => {
 
     if (application.excessMaGenerated > 0) {
       excessMaGenerated = money(excessMaGenerated + application.excessMaGenerated)
-      latestExcessMaDate = paymentDate || latestExcessMaDate
     }
   }
 
   let availableExcessMa = money(excessMaGenerated - excessMaUsed)
-  const autoAppliedExcessMa = applyAutomaticExcessMaFromEnd({
+  const autoAppliedExcessMa = applyAutomaticExcessMaToMonthlyRows({
     rows,
     availableExcessMa,
-    totalContractPrice,
-    paymentDate: latestExcessMaDate || toDateOnly(new Date()),
   })
 
   excessMaUsed = money(excessMaUsed + autoAppliedExcessMa)
   availableExcessMa = money(excessMaGenerated - excessMaUsed)
+
+  if (getCurrentPrincipalBalance(rows, totalContractPrice) <= 0) {
+    removeRemainingUnpaidContractRows(rows)
+  }
 
   sortRowsForStatement(rows)
 
@@ -752,13 +958,17 @@ const applyPaymentsToRows = (rows, payments, totalContractPrice) => {
           : 'not_due'
     } else if (money(row.balance) <= 0) {
       row.status = row.status === 'advance' ? 'advance' : 'paid'
+    } else if (money(row.advance_applied) > 0 && getEffectiveAmountPaid(row) <= 0) {
+      row.status = isPastDate(row.due_date) ? 'past_due' : 'not_due'
     } else {
       row.status = 'partial'
     }
 
-    const principalApplied = row.schedule_type === 'monthly'
-      ? getEffectiveAmountPaid(row)
-      : money(row.amount_paid)
+    const principalApplied = isExcessMaCreditRow(row)
+      ? 0
+      : row.schedule_type === 'monthly'
+        ? getEffectiveAmountPaid(row)
+        : money(row.amount_paid)
 
     runningBalance = money(Math.max(runningBalance - principalApplied, 0))
     row.running_balance = runningBalance
