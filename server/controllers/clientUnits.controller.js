@@ -98,6 +98,32 @@ const parseDateOnly = (value) => {
   return dateString
 }
 
+const addMonthsToDateOnly = (dateString, months) => {
+  const parsed = parseDateOnly(dateString)
+  if (!parsed) return null
+
+  const [year, month, day] = parsed.split('-').map(Number)
+  const date = new Date(year, month - 1, day)
+  const originalDay = date.getDate()
+  date.setMonth(date.getMonth() + Number(months || 0))
+
+  if (date.getDate() < originalDay) {
+    date.setDate(0)
+  }
+
+  const nextYear = date.getFullYear()
+  const nextMonth = String(date.getMonth() + 1).padStart(2, '0')
+  const nextDay = String(date.getDate()).padStart(2, '0')
+  return `${nextYear}-${nextMonth}-${nextDay}`
+}
+
+const stringifyJsonValue = (value) => {
+  if (value === undefined || value === null || value === '') return null
+  if (typeof value === 'string') return value
+
+  return JSON.stringify(value)
+}
+
 const getDueDayFromDate = (dateString) => {
   if (!dateString) return null
   return Number(dateString.slice(8, 10))
@@ -610,6 +636,7 @@ const buildReservationTerms = ({
   downpaymentPercent,
   downpaymentGives,
   downpaymentDiscountRate,
+  downpaymentTerms = [],
 }) => {
   if (isMissing(modeOfPayment) || !allowedModeOfPayments.includes(modeOfPayment)) {
     return {
@@ -695,6 +722,7 @@ const buildReservationTerms = ({
   let computedDownpaymentGross = 0
   let computedDownpaymentDiscountAmount = 0
   let computedDownpaymentNet = 0
+  let computedDownpaymentTerms = []
 
   if (isInstallment) {
     const targetDownpayment = normalizeMoney(
@@ -703,15 +731,48 @@ const buildReservationTerms = ({
 
     computedDownpaymentGross = normalizeMoney(Math.max(targetDownpayment, 0))
 
-    computedDownpaymentDiscountAmount = parsedDownpaymentGives === 1
-      ? normalizeMoney(
-          computedDownpaymentGross *
-            (downpaymentDiscountRateValidation.value / 100)
-        )
-      : 0
+    const termInputs = Array.isArray(downpaymentTerms) ? downpaymentTerms : []
+    const grossPerTerm = normalizeMoney(computedDownpaymentGross / parsedDownpaymentGives)
+    let remainingGross = computedDownpaymentGross
 
+    for (let index = 1; index <= parsedDownpaymentGives; index += 1) {
+      const termInput = termInputs.find((item) => Number(item?.installment_no) === index) || {}
+      const grossAmount = index === parsedDownpaymentGives
+        ? remainingGross
+        : grossPerTerm
+      const discountRateValidation = validateNonNegativeRate(
+        !isMissing(termInput.discount_rate)
+          ? termInput.discount_rate
+          : index === 1
+            ? downpaymentDiscountRateValidation.value
+            : 0,
+        `${index}${index === 1 ? 'st' : index === 2 ? 'nd' : index === 3 ? 'rd' : 'th'} downpayment discount`
+      )
+
+      if (!discountRateValidation.isValid) {
+        return discountRateValidation
+      }
+
+      const discountAmount = normalizeMoney(grossAmount * (discountRateValidation.value / 100))
+      const netAmount = normalizeMoney(Math.max(grossAmount - discountAmount, 0))
+
+      computedDownpaymentTerms.push({
+        installment_no: index,
+        due_date: parseDateOnly(termInput.due_date) || addMonthsToDateOnly(finalDueDate, index - 1),
+        gross_amount: grossAmount,
+        discount_rate: discountRateValidation.value,
+        discount_amount: discountAmount,
+        net_amount: netAmount,
+      })
+
+      remainingGross = normalizeMoney(remainingGross - grossAmount)
+    }
+
+    computedDownpaymentDiscountAmount = normalizeMoney(
+      computedDownpaymentTerms.reduce((sum, term) => sum + term.discount_amount, 0)
+    )
     computedDownpaymentNet = normalizeMoney(
-      Math.max(computedDownpaymentGross - computedDownpaymentDiscountAmount, 0)
+      computedDownpaymentTerms.reduce((sum, term) => sum + term.net_amount, 0)
     )
   }
 
@@ -765,8 +826,14 @@ const buildReservationTerms = ({
 
     finalPaymentTermsMonths = parsedTermsMonths
 
+    const listingInterestRate = Number(listing.annual_interest_rate || 0)
+    const incomingInterestRate = Number(interestRate || 0)
+    const finalInterestRateInput = !isMissing(interestRate) && incomingInterestRate > 0
+      ? incomingInterestRate
+      : listingInterestRate
+
     const interestRateValidation = validateNonNegativeRate(
-      isMissing(interestRate) ? Number(listing.annual_interest_rate || 0) : interestRate,
+      finalInterestRateInput,
       'Interest rate'
     )
 
@@ -839,6 +906,7 @@ const buildReservationTerms = ({
       downpaymentDiscountRate: downpaymentDiscountRateValidation.value,
       downpaymentDiscountAmount: computedDownpaymentDiscountAmount,
       downpaymentNetAmount: computedDownpaymentNet,
+      downpaymentTerms: computedDownpaymentTerms,
       deferredCashAmount: deferredCashValidation.value,
       balloonPaymentAmount: balloonPaymentValidation.value,
       balloonDueDate: null,
@@ -1609,6 +1677,38 @@ export const getAvailableListings = async (req, res) => {
 }
 
 
+const replaceClientUnitDownpaymentTerms = async (connectionOrDb, clientUnitId, terms = []) => {
+  await connectionOrDb.query(
+    `DELETE FROM client_unit_downpayment_terms WHERE client_unit_id = ?`,
+    [clientUnitId]
+  )
+
+  if (!Array.isArray(terms) || terms.length === 0) return
+
+  await connectionOrDb.query(
+    `
+    INSERT INTO client_unit_downpayment_terms (
+      client_unit_id,
+      installment_no,
+      due_date,
+      gross_amount,
+      discount_rate,
+      discount_amount,
+      net_amount
+    ) VALUES ?
+    `,
+    [terms.map((term) => [
+      clientUnitId,
+      term.installment_no,
+      term.due_date,
+      term.gross_amount,
+      term.discount_rate,
+      term.discount_amount,
+      term.net_amount,
+    ])]
+  )
+}
+
 export const getClientUnitPaymentSchedules = async (req, res) => {
   const { id } = req.params
 
@@ -1650,6 +1750,7 @@ export const reserveListing = async (req, res) => {
     downpayment_percent = 30,
     downpayment_gives = 3,
     downpayment_discount_rate = 0,
+    downpayment_terms = [],
     deferred_cash_amount = 0,
     balloon_payment_amount = 0,
     payment_terms_months,
@@ -1760,6 +1861,7 @@ export const reserveListing = async (req, res) => {
       downpaymentPercent: downpayment_percent,
       downpaymentGives: downpayment_gives,
       downpaymentDiscountRate: downpayment_discount_rate,
+      downpaymentTerms: downpayment_terms,
       deferredCashAmount: deferred_cash_amount,
       balloonPaymentAmount: balloon_payment_amount,
       paymentTermsMonths: payment_terms_months,
@@ -1868,7 +1970,7 @@ export const reserveListing = async (req, res) => {
         mainSeller.seller_group_bnm_override_rate || null,
         mainSeller.seller_group_broker_override_rate || null,
         mainSeller.seller_group_manager_override_rate || null,
-        mainSeller.seller_group_rate_snapshot_json || null,
+        stringifyJsonValue(mainSeller.seller_group_rate_snapshot_json),
         status,
         finalModeOfPayment,
         finalBuyerType,
@@ -1897,6 +1999,8 @@ export const reserveListing = async (req, res) => {
     )
 
     const clientUnitId = result.insertId
+
+    await replaceClientUnitDownpaymentTerms(connection, clientUnitId, terms.downpaymentTerms)
 
     await replaceClientUnitCoBuyer({
       connection,
@@ -1974,6 +2078,7 @@ export const reserveListing = async (req, res) => {
         downpayment_discount_rate: terms.downpaymentDiscountRate,
         downpayment_discount_amount: terms.downpaymentDiscountAmount,
         downpayment_net_amount: terms.downpaymentNetAmount,
+        downpayment_terms: terms.downpaymentTerms,
         deferred_cash_amount: terms.deferredCashAmount,
         balloon_payment_amount: terms.balloonPaymentAmount,
         balloon_due_date: terms.balloonDueDate,
@@ -3200,4 +3305,7 @@ export const deleteClientUnit = async (req, res) => {
     connection.release()
   }
 }
+
+
+
 

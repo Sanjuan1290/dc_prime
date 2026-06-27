@@ -438,6 +438,11 @@ type ListingDocumentDefaultsResponse = {
   data?: ReserveDocumentRequirement[];
 };
 
+type DownpaymentTermForm = {
+  installment_no: number;
+  discount_rate: string;
+};
+
 type ReserveListingData = {
   listing_id: number | "";
   seller_id: number | "";
@@ -459,6 +464,7 @@ type ReserveListingData = {
   downpayment_discount_rate: string;
   downpayment_discount_rate_option: string;
   downpayment_discount_rate_custom: string;
+  downpayment_terms: DownpaymentTermForm[];
   deferred_cash_amount: string;
   balloon_payment_amount: string;
   balloon_due_date: string;
@@ -565,6 +571,7 @@ const createDefaultReserveData = (): ReserveListingData => ({
   downpayment_discount_rate: "0",
   downpayment_discount_rate_option: "0",
   downpayment_discount_rate_custom: "",
+  downpayment_terms: [],
   deferred_cash_amount: "0",
   balloon_payment_amount: "0",
   balloon_due_date: "",
@@ -616,6 +623,66 @@ const getValidDiscountOption = (
   );
 };
 
+
+const getDownpaymentGiveCount = (reserveData: ReserveListingData) => {
+  if (reserveData.mode_of_payment !== "installment") return 0;
+
+  return Math.max(
+    getSelectedNumber(
+      reserveData.downpayment_gives_option,
+      reserveData.downpayment_gives_custom,
+      3,
+    ),
+    1,
+  );
+};
+
+const getDownpaymentTermDiscountRate = (
+  reserveData: ReserveListingData,
+  installmentNo: number,
+) => {
+  const term = reserveData.downpayment_terms.find(
+    (item) => Number(item.installment_no) === Number(installmentNo),
+  );
+
+  if (term) {
+    const parsed = Number(term.discount_rate || 0);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  if (installmentNo === 1 && getDownpaymentGiveCount(reserveData) === 1) {
+    return getSelectedNumber(
+      reserveData.downpayment_discount_rate_option,
+      reserveData.downpayment_discount_rate_custom,
+      0,
+    );
+  }
+
+  return 0;
+};
+
+const buildDownpaymentTermsPayload = (reserveData: ReserveListingData) => {
+  const gives = getDownpaymentGiveCount(reserveData);
+
+  return Array.from({ length: gives }, (_, index) => {
+    const installmentNo = index + 1;
+
+    return {
+      installment_no: installmentNo,
+      discount_rate: getDownpaymentTermDiscountRate(reserveData, installmentNo),
+    };
+  });
+};
+
+const updateDownpaymentTermDiscount = (
+  terms: DownpaymentTermForm[],
+  installmentNo: number,
+  discountRate: string,
+): DownpaymentTermForm[] => {
+  const next = terms.filter((item) => Number(item.installment_no) !== installmentNo);
+  next.push({ installment_no: installmentNo, discount_rate: discountRate });
+  return next.sort((a, b) => a.installment_no - b.installment_no);
+};
 
 const getSellerDirectToDeveloperRate = (seller?: Seller | null) => {
   const rate = seller?.direct_to_developer_rate ?? seller?.commission_rate ?? "";
@@ -1083,12 +1150,12 @@ const reserveListing = async ({
           : 0,
       downpayment_discount_rate:
         reserveData.mode_of_payment === "installment"
-          ? getSelectedNumber(
-              reserveData.downpayment_discount_rate_option,
-              reserveData.downpayment_discount_rate_custom,
-              0,
-            )
+          ? getDownpaymentTermDiscountRate(reserveData, 1)
           : 0,
+      downpayment_terms:
+        reserveData.mode_of_payment === "installment"
+          ? buildDownpaymentTermsPayload(reserveData)
+          : [],
       deferred_cash_amount:
         reserveData.mode_of_payment === "cash"
           ? Number(reserveData.deferred_cash_amount || 0)
@@ -2020,37 +2087,30 @@ const ClientProfile = () => {
     reserveData.mode_of_payment === "installment"
       ? Math.max(reserveDownpaymentTarget, 0)
       : 0;
-  const reserveDownpaymentGives =
-    reserveData.mode_of_payment === "installment"
-      ? Math.max(
-          getSelectedNumber(
-            reserveData.downpayment_gives_option,
-            reserveData.downpayment_gives_custom,
-            3,
-          ),
-          1,
-        )
+  const reserveDownpaymentGives = getDownpaymentGiveCount(reserveData);
+  const reserveGrossPerGive =
+    reserveData.mode_of_payment === "installment" && reserveDownpaymentGives > 0
+      ? reserveDownpaymentGross / reserveDownpaymentGives
       : 0;
-  const reserveIsSpotDownpayment =
-    reserveData.mode_of_payment === "installment" &&
-    reserveDownpaymentGives === 1;
-  const reserveDownpaymentDiscountRate = reserveIsSpotDownpayment
-    ? getSelectedNumber(
-        reserveData.downpayment_discount_rate_option,
-        reserveData.downpayment_discount_rate_custom,
-        0,
-      )
-    : 0;
-  const reserveDownpaymentDiscountAmount = reserveIsSpotDownpayment
-    ? reserveDownpaymentGross * (reserveDownpaymentDiscountRate / 100)
-    : 0;
+  const reserveDownpaymentTermDiscounts = Array.from(
+    { length: reserveDownpaymentGives },
+    (_, index) => {
+      const installmentNo = index + 1;
+      const discountRate = getDownpaymentTermDiscountRate(reserveData, installmentNo);
+      return {
+        installment_no: installmentNo,
+        discount_rate: discountRate,
+        discount_amount: reserveGrossPerGive * (discountRate / 100),
+      };
+    },
+  );
+  const reserveDownpaymentDiscountAmount = reserveDownpaymentTermDiscounts.reduce(
+    (sum, item) => sum + item.discount_amount,
+    0,
+  );
   const reserveDownpayment =
     reserveData.mode_of_payment === "installment"
       ? Math.max(reserveDownpaymentGross - reserveDownpaymentDiscountAmount, 0)
-      : 0;
-  const reserveDownpaymentPerGive =
-    reserveData.mode_of_payment === "installment" && reserveDownpaymentGives > 0
-      ? reserveDownpayment / reserveDownpaymentGives
       : 0;
   const reserveDeferredCash =
     reserveData.mode_of_payment === "cash"
@@ -2279,11 +2339,11 @@ const ClientProfile = () => {
       }
 
       if (
-        reserveIsSpotDownpayment &&
-        (!Number.isFinite(reserveDownpaymentDiscountRate) ||
-          reserveDownpaymentDiscountRate < 0)
+        reserveDownpaymentTermDiscounts.some(
+          (item) => !Number.isFinite(item.discount_rate) || item.discount_rate < 0,
+        )
       ) {
-        return "Spot downpayment discount must be a non-negative percentage";
+        return "Downpayment discounts must be non-negative percentages";
       }
 
       if (!isPresentMoneyInputValid(reserveData.interest_rate)) {
@@ -3947,13 +4007,10 @@ const ClientProfile = () => {
                           nextGives === "custom"
                             ? reserveData.downpayment_gives_custom
                             : nextGives;
-                        const nextDiscountOption =
-                          nextGives === "1"
-                            ? getValidDiscountOption(
-                                reserveData.downpayment_discount_rate_option,
-                                "7.5",
-                              )
-                            : "0";
+                        const nextDiscountOption = getValidDiscountOption(
+                          reserveData.downpayment_discount_rate_option,
+                          "0",
+                        );
 
                         setReserveData({
                           ...reserveData,
@@ -3994,51 +4051,46 @@ const ClientProfile = () => {
                       />
                     ) : null}
 
-                    {reserveIsSpotDownpayment ? (
-                      <Select
-                        label="Spot DP Discount"
-                        value={reserveData.downpayment_discount_rate_option}
-                        onChange={(e) => {
-                          setReserveData({
-                            ...reserveData,
-                            downpayment_discount_rate_option: e.target.value,
-                            downpayment_discount_rate:
-                              e.target.value === "custom"
-                                ? reserveData.downpayment_discount_rate_custom
-                                : e.target.value,
-                            monthly_amortization: "",
-                          });
-                          setReserveValidationMessage("");
-                        }}
-                      >
-                        <option value="2.5">2.5%</option>
-                        <option value="5">5%</option>
-                        <option value="7.5">7.5%</option>
-                        <option value="10">10%</option>
-                        <option value="custom">Custom %</option>
-                      </Select>
-                    ) : null}
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 md:col-span-2">
+                      <h4 className="text-sm font-bold text-slate-900">Downpayment Discount Per Give</h4>
+                      <p className="mt-1 text-xs text-slate-500">
+                        Each downpayment term can have its own discount percentage. Use 0 when there is no discount.
+                      </p>
 
-                    {reserveIsSpotDownpayment &&
-                    reserveData.downpayment_discount_rate_option ===
-                      "custom" ? (
-                      <Input
-                        label="Custom DP Discount %"
-                        type="number"
-                        min={0}
-                        step="0.01"
-                        value={reserveData.downpayment_discount_rate_custom}
-                        onChange={(e) => {
-                          setReserveData({
-                            ...reserveData,
-                            downpayment_discount_rate_custom: e.target.value,
-                            downpayment_discount_rate: e.target.value,
-                            monthly_amortization: "",
-                          });
-                          setReserveValidationMessage("");
-                        }}
-                      />
-                    ) : null}
+                      <div className="mt-3 grid gap-3 md:grid-cols-3">
+                        {Array.from({ length: reserveDownpaymentGives }, (_, index) => {
+                          const installmentNo = index + 1;
+                          const currentRate = String(
+                            getDownpaymentTermDiscountRate(reserveData, installmentNo),
+                          );
+
+                          return (
+                            <Input
+                              key={installmentNo}
+                              label={`${installmentNo}${installmentNo === 1 ? "st" : installmentNo === 2 ? "nd" : installmentNo === 3 ? "rd" : "th"} DP Discount %`}
+                              type="number"
+                              min={0}
+                              step="0.01"
+                              value={currentRate}
+                              onChange={(e) => {
+                                setReserveData({
+                                  ...reserveData,
+                                  downpayment_terms: updateDownpaymentTermDiscount(
+                                    reserveData.downpayment_terms,
+                                    installmentNo,
+                                    e.target.value,
+                                  ),
+                                  downpayment_discount_rate:
+                                    installmentNo === 1 ? e.target.value : reserveData.downpayment_discount_rate,
+                                  monthly_amortization: "",
+                                });
+                                setReserveValidationMessage("");
+                              }}
+                            />
+                          );
+                        })}
+                      </div>
+                    </div>
 
                     <Select
                       label="Monthly Terms"
@@ -5827,6 +5879,9 @@ const MiniDetail = ({
 };
 
 export default ClientProfile;
+
+
+
 
 
 

@@ -242,9 +242,14 @@ const validateParentSeller = async ({ role, parentSellerId, connection }) => {
 const normalizeSellerProfile = ({ role, body, userFullName, userEmail, userStatus }) => {
   const sellerProfile = body?.seller_profile || {}
   const finalStatus = sellerProfile.status || userStatus || 'active'
+  const contactNo = normalizeText(sellerProfile.contact_no)
 
   if (!allowedStatuses.includes(finalStatus)) {
     return { isValid: false, message: 'Invalid seller status' }
+  }
+
+  if (isMissing(contactNo)) {
+    return { isValid: false, message: 'Seller contact number is required' }
   }
 
   return {
@@ -252,7 +257,7 @@ const normalizeSellerProfile = ({ role, body, userFullName, userEmail, userStatu
     sellerProfile: {
       full_name: normalizeText(sellerProfile.full_name) || userFullName,
       email: normalizeText(sellerProfile.email) || userEmail,
-      contact_no: normalizeText(sellerProfile.contact_no) || null,
+      contact_no: contactNo,
       seller_role: role,
       parent_seller_id: nullableValue(sellerProfile.parent_seller_id),
       seller_group_id: nullableValue(sellerProfile.seller_group_id),
@@ -936,4 +941,7 @@ export const linkUserToSeller = async (req, res) => {
 
   res.status(200).json({ message: 'User linked to seller successfully' })
 }
+
+
+
 

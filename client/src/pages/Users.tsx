@@ -810,6 +810,15 @@ const Users = () => {
   }
 
 
+  const handleSaveUser = () => {
+    if (isSellerRole(form.role) && !form.seller_profile.contact_no.trim()) {
+      setMessage("Seller contact number is required.")
+      return
+    }
+
+    saveMutation.mutate({ id: editUser?.id, form })
+  }
+
   const handleRemoveGroup = (group: SellerGroup) => {
     const activeMembers = Number(group.active_member_count || 0)
     const confirmed = window.confirm(
@@ -1008,7 +1017,7 @@ const Users = () => {
           footer={
             <div className="flex justify-end gap-2">
               <Button onClick={() => setIsOpen(false)}>Cancel</Button>
-              <Button disabled={saveMutation.isPending} onClick={() => saveMutation.mutate({ id: editUser?.id, form })} variant="primary">
+              <Button disabled={saveMutation.isPending} onClick={handleSaveUser} variant="primary">
                 {saveMutation.isPending ? "Saving..." : "Save User"}
               </Button>
             </div>
@@ -1035,7 +1044,7 @@ const Users = () => {
               </div>
 
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <Input label="Seller Contact No." value={form.seller_profile.contact_no} onChange={(e) => updateSellerProfile({ contact_no: e.target.value })} />
+                <Input label="Seller Contact No." value={form.seller_profile.contact_no} onChange={(e) => updateSellerProfile({ contact_no: e.target.value })} required />
                 <Input label="Accreditation Date" type="date" value={form.seller_profile.accreditation_date} onChange={(e) => updateSellerProfile({ accreditation_date: e.target.value })} />
 
                 {form.role !== "broker_network_manager" ? (
@@ -1423,4 +1432,7 @@ const Users = () => {
 }
 
 export default Users
+
+
+
 

@@ -91,7 +91,21 @@ const getClientUnitPlan = async (connectionOrDb, clientUnitId) => {
       l.net_selling_price,
       l.legal_misc_fee,
       l.annual_interest_rate AS listing_annual_interest_rate,
-      l.total_contract_price AS listing_total_contract_price
+      l.total_contract_price AS listing_total_contract_price,
+      (
+        SELECT JSON_ARRAYAGG(
+          JSON_OBJECT(
+            'installment_no', dpt.installment_no,
+            'due_date', DATE_FORMAT(dpt.due_date, '%Y-%m-%d'),
+            'gross_amount', dpt.gross_amount,
+            'discount_rate', dpt.discount_rate,
+            'discount_amount', dpt.discount_amount,
+            'net_amount', dpt.net_amount
+          )
+        )
+        FROM client_unit_downpayment_terms dpt
+        WHERE dpt.client_unit_id = cu.id
+      ) AS downpayment_terms_json
     FROM client_units cu
     INNER JOIN listings l ON l.id = cu.listing_id
     WHERE cu.id = ?
@@ -164,6 +178,33 @@ const getAnnualInterestRate = (unit) => {
   return 0
 }
 
+const parseDownpaymentTerms = (value) => {
+  if (!value) return []
+
+  let parsed = value
+  if (typeof value === 'string') {
+    try {
+      parsed = JSON.parse(value)
+    } catch {
+      return []
+    }
+  }
+
+  if (!Array.isArray(parsed)) return []
+
+  return parsed
+    .map((term) => ({
+      installment_no: Number(term.installment_no),
+      due_date: toDateOnly(term.due_date),
+      gross_amount: money(term.gross_amount),
+      discount_rate: money(term.discount_rate),
+      discount_amount: money(term.discount_amount),
+      net_amount: money(term.net_amount),
+    }))
+    .filter((term) => Number.isInteger(term.installment_no) && term.installment_no > 0)
+    .sort((a, b) => a.installment_no - b.installment_no)
+}
+
 const getOfferBalanceAmount = ({
   unit,
   totalContractPrice,
@@ -208,6 +249,7 @@ const buildBaseRows = (unit) => {
     unit.downpayment_amount
   )
   const downpaymentGives = Math.max(Number(unit.downpayment_gives || 0), 1)
+  const downpaymentTerms = parseDownpaymentTerms(unit.downpayment_terms_json)
   const deferredCashAmount = money(unit.deferred_cash_amount)
   const terms = Math.max(Number(unit.payment_terms_months || 0), 0)
   const monthlyAmortization = money(unit.monthly_amortization)
@@ -252,6 +294,7 @@ const buildBaseRows = (unit) => {
       total_due: due,
       amount_paid: 0,
       advance_applied: 0,
+      excess_ma_used: 0,
       balance: due,
       date_paid: null,
       reference_no: null,
@@ -295,25 +338,40 @@ const buildBaseRows = (unit) => {
   }
 
   if (downpaymentNet > 0) {
-    const perDownpayment = money(downpaymentNet / downpaymentGives)
-    let remainingDownpayment = downpaymentNet
-
-    for (let index = 1; index <= downpaymentGives; index += 1) {
-      const amount = index === downpaymentGives
-        ? remainingDownpayment
-        : perDownpayment
-
-      pushRow({
-        dueDate: addMonths(firstDueDate, index - 1),
-        description: `${ordinal(index)} Downpayment`,
-        scheduleType: 'downpayment',
-        principalDue: amount,
-        interestDue: 0,
-        totalDue: amount,
-        sortOrder: sortOrder++,
+    if (downpaymentTerms.length > 0) {
+      downpaymentTerms.forEach((term, index) => {
+        const amount = money(term.net_amount)
+        pushRow({
+          dueDate: term.due_date || addMonths(firstDueDate, index),
+          description: `${ordinal(term.installment_no || index + 1)} Downpayment`,
+          scheduleType: 'downpayment',
+          principalDue: amount,
+          interestDue: 0,
+          totalDue: amount,
+          sortOrder: sortOrder++,
+        })
       })
+    } else {
+      const perDownpayment = money(downpaymentNet / downpaymentGives)
+      let remainingDownpayment = downpaymentNet
 
-      remainingDownpayment = money(remainingDownpayment - amount)
+      for (let index = 1; index <= downpaymentGives; index += 1) {
+        const amount = index === downpaymentGives
+          ? remainingDownpayment
+          : perDownpayment
+
+        pushRow({
+          dueDate: addMonths(firstDueDate, index - 1),
+          description: `${ordinal(index)} Downpayment`,
+          scheduleType: 'downpayment',
+          principalDue: amount,
+          interestDue: 0,
+          totalDue: amount,
+          sortOrder: sortOrder++,
+        })
+
+        remainingDownpayment = money(remainingDownpayment - amount)
+      }
     }
   }
 
@@ -400,8 +458,24 @@ const isBalloonPayment = (paymentType) => {
   return String(paymentType || '').toLowerCase() === 'balloon'
 }
 
+const getExcessMaGeneratedFromRow = (row) => money(row.advance_applied)
+
+const getStoredExcessMaUsedFromRow = (row) => {
+  const stored = money(row.excess_ma_used)
+  if (stored > 0) return stored
+
+  return getRowExcessMaUsed(row)
+}
+
+const getActualCashPaidFromRow = (row) => money(row.amount_paid)
+
 const getEffectiveAmountPaid = (row) => {
-  return money(Math.max(money(row.amount_paid) - money(row.advance_applied), 0))
+  return money(Math.max(
+    getActualCashPaidFromRow(row) -
+      getExcessMaGeneratedFromRow(row) +
+      getStoredExcessMaUsedFromRow(row),
+    0
+  ))
 }
 
 const refreshRowBalance = (row) => {
@@ -465,6 +539,10 @@ const isExcessMaCreditRow = (row) => {
   return row?.is_excess_ma_credit === true || String(row?.description || '').toLowerCase() === 'advance payment'
 }
 
+const getDisplayScheduleRows = (rows) => {
+  return rows.filter((row) => !isExcessMaCreditRow(row))
+}
+
 const createPrincipalReductionRow = ({
   payment,
   paymentDate,
@@ -487,8 +565,9 @@ const createPrincipalReductionRow = ({
     interest_due: 0,
     penalty_due: 0,
     total_due: totalApplied,
-    amount_paid: totalApplied,
+    amount_paid: paidCash,
     advance_applied: 0,
+    excess_ma_used: usedExcess,
     balance: 0,
     date_paid: paymentDate,
     reference_no: null,
@@ -511,7 +590,7 @@ const createPrincipalReductionRow = ({
   if (usedExcess > 0) {
     pushReferenceDetail(row, {
       payment_id: Number(payment.id),
-      reference_id: 'excess_ma',
+      reference_id: `EXCESS-MA-${String(toDateOnly(paymentDate) || '').replaceAll('-', '')}-${String(payment?.id || 0).padStart(4, '0')}`,
       applied_amount: usedExcess,
       payment_date: paymentDate,
       payment_type: 'excess_ma_used',
@@ -534,6 +613,7 @@ const createAdvancePaymentRow = ({ payment, paymentDate, paymentReference, amoun
     total_due: paidAmount,
     amount_paid: paidAmount,
     advance_applied: paidAmount,
+    excess_ma_used: 0,
     balance: 0,
     date_paid: paymentDate,
     reference_no: null,
@@ -676,7 +756,7 @@ const applyExcessMaCreditToRow = ({ row, payment, paymentDate, paymentReference,
   const applied = money(appliedAmount)
   if (applied <= 0) return 0
 
-  row.amount_paid = money(row.amount_paid + applied)
+  row.excess_ma_used = money(money(row.excess_ma_used) + applied)
   refreshRowBalance(row)
   const appliedDate = datePaidOverride || paymentDate
   row.date_paid = row.balance <= 0 ? appliedDate : row.date_paid || appliedDate
@@ -686,7 +766,7 @@ const applyExcessMaCreditToRow = ({ row, payment, paymentDate, paymentReference,
     reference_id: paymentReference,
     applied_amount: applied,
     payment_date: appliedDate,
-    payment_type: 'excess_ma_used',
+    payment_type: payment?.payment_type === 'excess_ma_auto' ? 'excess_ma_auto' : 'excess_ma_used',
   })
 
   if (row.balance <= 0) {
@@ -700,12 +780,13 @@ const applyExcessMaCreditToRow = ({ row, payment, paymentDate, paymentReference,
   return applied
 }
 
+
 const annotateRowsWithExcessMa = (rows) => {
   let runningExcessMa = 0
 
   rows.forEach((row) => {
-    const generated = money(row.advance_applied)
-    const used = getRowExcessMaUsed(row)
+    const generated = getExcessMaGeneratedFromRow(row)
+    const used = getStoredExcessMaUsedFromRow(row)
 
     runningExcessMa = money(Math.max(runningExcessMa + generated - used, 0))
     row.excess_ma_generated = generated
@@ -714,6 +795,14 @@ const annotateRowsWithExcessMa = (rows) => {
   })
 
   return rows
+}
+
+
+const buildExcessMaAutoReference = (row, rowIndex) => {
+  const dueDate = String(toDateOnly(row?.due_date) || toDateOnly(new Date()) || '')
+    .replaceAll('-', '')
+  const order = String(row?.sort_order || rowIndex + 1 || 1).padStart(4, '0')
+  return `EXCESS-MA-${dueDate}-${order}`
 }
 
 const applyExcessMaToCurrentMonthlyRows = ({
@@ -739,11 +828,17 @@ const applyExcessMaToCurrentMonthlyRows = ({
     if (fullRowsOnly && remainingPayment < rowBalance) break
 
     const effectivePaymentDate = autoApply ? row.due_date : paymentDate
+    const effectivePaymentReference = autoApply
+      ? buildExcessMaAutoReference(row, rowIndex)
+      : paymentReference
+    const effectivePayment = autoApply
+      ? { ...payment, payment_type: 'excess_ma_auto' }
+      : payment
     const applied = applyExcessMaCreditToRow({
       row,
-      payment,
+      payment: effectivePayment,
       paymentDate: effectivePaymentDate,
-      paymentReference,
+      paymentReference: effectivePaymentReference,
       appliedAmount: Math.min(rowBalance, remainingPayment),
       markAsAdvance: false,
       datePaidOverride: effectivePaymentDate,
@@ -797,7 +892,7 @@ const applyNormalPaymentToRows = ({ rows, payment, paymentDate, paymentReference
           row,
           payment,
           paymentDate: row.due_date,
-          paymentReference: 'excess_ma',
+          paymentReference: buildExcessMaAutoReference(row, rowIndex),
           appliedAmount: excessToUse,
           markAsAdvance: false,
           datePaidOverride: row.due_date,
@@ -844,14 +939,14 @@ const applyNormalPaymentToRows = ({ rows, payment, paymentDate, paymentReference
 const applyAutomaticExcessMaToMonthlyRows = ({ rows, availableExcessMa }) => {
   const autoPayment = {
     id: 0,
-    payment_type: 'excess_ma',
+    payment_type: 'excess_ma_auto',
   }
 
   return applyExcessMaToCurrentMonthlyRows({
     rows,
     payment: autoPayment,
     paymentDate: null,
-    paymentReference: 'EXCESS-MA-AUTO',
+    paymentReference: null,
     amount: availableExcessMa,
     availableExcessMa,
     autoApply: true,
@@ -1086,7 +1181,9 @@ const applyPaymentsToRows = (rows, payments, totalContractPrice) => {
   for (const row of rows) {
     refreshRowBalance(row)
 
-    if (money(row.amount_paid) <= 0) {
+    const effectiveAppliedToDue = getEffectiveAmountPaid(row)
+
+    if (effectiveAppliedToDue <= 0 && !isExcessMaCreditRow(row)) {
       row.status = isPastDate(row.due_date)
         ? 'past_due'
         : toDateOnly(row.due_date) <= toDateOnly(new Date())
@@ -1094,8 +1191,6 @@ const applyPaymentsToRows = (rows, payments, totalContractPrice) => {
           : 'not_due'
     } else if (money(row.balance) <= 0) {
       row.status = row.status === 'advance' ? 'advance' : 'paid'
-    } else if (money(row.advance_applied) > 0 && getEffectiveAmountPaid(row) <= 0) {
-      row.status = isPastDate(row.due_date) ? 'past_due' : 'not_due'
     } else {
       row.status = 'partial'
     }
@@ -1142,6 +1237,7 @@ const replacePaymentSchedules = async (connectionOrDb, clientUnitId, rows) => {
       total_due,
       amount_paid,
       advance_applied,
+      excess_ma_used,
       balance,
       date_paid,
       reference_no,
@@ -1162,6 +1258,7 @@ const replacePaymentSchedules = async (connectionOrDb, clientUnitId, rows) => {
       money(row.total_due),
       money(row.amount_paid),
       money(row.advance_applied),
+      money(row.excess_ma_used),
       money(row.balance),
       row.date_paid,
       row.reference_no,
@@ -1196,11 +1293,12 @@ export const rebuildPaymentSchedule = async (connectionOrDb, clientUnitId) => {
         : sum + Number(payment.amount || 0)
     ), 0)
   )
+  const displayRows = getDisplayScheduleRows(rows)
   const statementTotal = money(
-    rows.reduce((sum, row) => sum + money(row.total_due), 0)
+    displayRows.reduce((sum, row) => sum + money(row.total_due), 0)
   )
   const statementBalance = money(
-    rows.reduce((sum, row) => sum + money(row.balance), 0)
+    displayRows.reduce((sum, row) => sum + money(row.balance), 0)
   )
   const principalBalance = getCurrentPrincipalBalance(rows, totalContractPrice)
 
@@ -1212,7 +1310,7 @@ export const rebuildPaymentSchedule = async (connectionOrDb, clientUnitId) => {
     balance: statementBalance,
     statement_balance: statementBalance,
     principal_balance: principalBalance,
-    rows,
+    rows: displayRows,
     excess_ma_generated: scheduleApplication.excessMaGenerated,
     excess_ma_used: scheduleApplication.excessMaUsed,
     excess_ma_available: scheduleApplication.excessMaAvailable,
@@ -1234,6 +1332,7 @@ export const getPaymentScheduleRows = async (connectionOrDb, clientUnitId) => {
       total_due,
       amount_paid,
       advance_applied,
+      excess_ma_used,
       balance,
       DATE_FORMAT(date_paid, '%Y-%m-%d') AS date_paid,
       reference_no,
@@ -1260,7 +1359,8 @@ export const getPaymentScheduleRows = async (connectionOrDb, clientUnitId) => {
     })(),
   }))
 
-  return annotateRowsWithExcessMa(parsedRows)
+  const annotatedRows = annotateRowsWithExcessMa(parsedRows)
+  return getDisplayScheduleRows(annotatedRows)
 }
 
 export const rebuildAndGetPaymentScheduleRows = async (connectionOrDb, clientUnitId) => {
@@ -1299,7 +1399,7 @@ export const mapScheduleRowForPrint = (row) => ({
   amount_paid: row.amount_paid,
   excess_ma: row.excess_ma_generated ?? row.advance_applied,
   excess_ma_generated: row.excess_ma_generated ?? row.advance_applied,
-  excess_ma_used: row.excess_ma_used ?? getRowExcessMaUsed(row),
+  excess_ma_used: getStoredExcessMaUsedFromRow(row),
   excess_ma_balance: row.excess_ma_balance ?? 0,
   excess_used: row.excess_ma_used ?? getRowExcessMaUsed(row),
   reference: row.reference_no,
@@ -1307,5 +1407,8 @@ export const mapScheduleRowForPrint = (row) => ({
   running_balance: row.running_balance,
   status: row.status,
 })
+
+
+
 
 

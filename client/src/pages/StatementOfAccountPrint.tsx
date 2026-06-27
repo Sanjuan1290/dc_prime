@@ -184,9 +184,9 @@ const buildInterestBreakdownRows = (
   let principalBalance = Math.max(startingBalance, 0)
 
   return schedule.map((row) => {
-    const scheduleType = String(row.schedule_type || '').toLowerCase()
     const amountPaid = Math.max(toNumber(row.amount_paid), 0)
     const excessMaGenerated = Math.max(toNumber(row.excess_ma_generated ?? row.excess_ma), 0)
+    const excessMaUsed = Math.max(toNumber(row.excess_ma_used ?? row.excess_used), 0)
     const penalty = Math.max(toNumber(row.penalty), 0)
     const beginningBalance = principalBalance
     const rowPrincipalDue = Math.max(toNumber(row.principal_due), 0)
@@ -196,28 +196,23 @@ const buildInterestBreakdownRows = (
       ? rowInterestDue || Math.min(beginningBalance * monthlyRate, toNumber(row.due_amount))
       : 0
 
-    const paymentForPrincipalAndInterest = Math.max(amountPaid - penalty - excessMaGenerated, 0)
-    const paidInterest = isInterestBearingRow(row)
-      ? Math.min(scheduledInterest, paymentForPrincipalAndInterest)
-      : 0
-    const paidPrincipal = Math.min(
-      rowPrincipalDue || beginningBalance,
-      Math.max(paymentForPrincipalAndInterest - paidInterest, 0)
+    const actualAppliedToDue = Math.max(
+      amountPaid - excessMaGenerated + excessMaUsed - penalty,
+      0
     )
 
-    const projectedPrincipal = rowPrincipalDue > 0
-      ? rowPrincipalDue
-      : isInterestBearingRow(row)
-        ? Math.max(toNumber(row.due_amount) - scheduledInterest, 0)
-        : Math.max(toNumber(row.due_amount) - penalty, 0)
+    const paidInterest = isInterestBearingRow(row)
+      ? Math.min(scheduledInterest, actualAppliedToDue)
+      : 0
 
-    const principalForEndingBalance = scheduleType === 'other' && row.description?.toLowerCase() === 'advance payment'
-      ? 0
-      : projectedPrincipal
+    const paidPrincipal = Math.min(
+      rowPrincipalDue || beginningBalance,
+      Math.max(actualAppliedToDue - paidInterest, 0)
+    )
 
     const endingBalance = row.running_balance !== null && row.running_balance !== undefined && row.running_balance !== ''
       ? Math.max(toNumber(row.running_balance), 0)
-      : Math.max(beginningBalance - principalForEndingBalance, 0)
+      : Math.max(beginningBalance - paidPrincipal, 0)
 
     principalBalance = endingBalance
 
@@ -225,11 +220,12 @@ const buildInterestBreakdownRows = (
       ...row,
       beginning_balance: beginningBalance,
       monthly_interest: scheduledInterest,
-      principal_paid: amountPaid > 0 ? paidPrincipal : projectedPrincipal,
+      principal_paid: paidPrincipal,
       ending_balance: endingBalance,
     }
   })
 }
+
 
 const getInitialInterestRate = (unit: Record<string, any>) => {
   const candidates = [
@@ -372,7 +368,7 @@ const StatementOfAccountPrint = () => {
           <>
             <div className="interest-note">
               Interest breakdown is a display-only view. Interest applies to monthly amortization rows only.
-              Principal paid = Amount Paid - Excess MA Generated - Penalty - Interest. Excess MA Used is included as a payment against the current monthly due.
+              Principal paid = Amount Paid + Excess MA Used - Excess MA Generated - Penalty - Interest. Unpaid future rows show ₱0.00 principal paid.
             </div>
 
             <table className="soa-table interest-table">
@@ -387,6 +383,7 @@ const StatementOfAccountPrint = () => {
                   <th>Penalty</th>
                   <th>Date Paid</th>
                   <th>Amount Paid</th>
+                  <th>Excess MA Used</th>
                   <th>Excess MA Balance</th>
                   <th>Reference ID</th>
                   <th>Status</th>
@@ -405,6 +402,7 @@ const StatementOfAccountPrint = () => {
                     <td className="money">{Number(row.penalty || 0).toFixed(2)}</td>
                     <td>{formatDateOnly(row.date_paid)}</td>
                     <td className="money">{row.amount_paid ? amount(row.amount_paid) : ""}</td>
+                    <td className="money">{amount(row.excess_ma_used ?? row.excess_used ?? 0)}</td>
                     <td className="money">{amount(row.excess_ma_balance)}</td>
                     <td className="reference-cell">{displayReference(row)}</td>
                     <td>{display(row.status)}</td>
@@ -424,6 +422,7 @@ const StatementOfAccountPrint = () => {
                 <th>Penalty</th>
                 <th>Date Paid</th>
                 <th>Amount Paid</th>
+                <th>Excess MA Used</th>
                 <th>Reference ID</th>
                 <th>Excess MA Balance</th>
                 <th>Running Balance</th>
@@ -438,6 +437,7 @@ const StatementOfAccountPrint = () => {
                   <td className="money">{Number(row.penalty || 0).toFixed(2)}</td>
                   <td>{formatDateOnly(row.date_paid)}</td>
                   <td className="money">{row.amount_paid ? amount(row.amount_paid) : ""}</td>
+                  <td className="money">{amount(row.excess_ma_used ?? row.excess_used ?? 0)}</td>
                   <td className="reference-cell">{displayReference(row)}</td>
                   <td className="money">{amount(row.excess_ma_balance)}</td>
                   <td className="money strong">{amount(row.running_balance)}</td>
@@ -525,4 +525,7 @@ const printStyles = `
 `
 
 export default StatementOfAccountPrint
+
+
+
 
