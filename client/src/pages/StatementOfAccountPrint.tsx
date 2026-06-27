@@ -27,6 +27,9 @@ type ScheduleRow = {
   running_balance: number | string
   status?: string | null
   schedule_type?: string | null
+  principal_due?: number | string | null
+  interest_due?: number | string | null
+  balance?: number | string | null
   excess_ma?: number | string | null
   excess_ma_generated?: number | string | null
   excess_ma_used?: number | string | null
@@ -181,31 +184,48 @@ const buildInterestBreakdownRows = (
   let principalBalance = Math.max(startingBalance, 0)
 
   return schedule.map((row) => {
+    const scheduleType = String(row.schedule_type || '').toLowerCase()
     const amountPaid = Math.max(toNumber(row.amount_paid), 0)
     const excessMaGenerated = Math.max(toNumber(row.excess_ma_generated ?? row.excess_ma), 0)
     const penalty = Math.max(toNumber(row.penalty), 0)
     const beginningBalance = principalBalance
+    const rowPrincipalDue = Math.max(toNumber(row.principal_due), 0)
+    const rowInterestDue = Math.max(toNumber(row.interest_due), 0)
+
+    const scheduledInterest = isInterestBearingRow(row)
+      ? rowInterestDue || Math.min(beginningBalance * monthlyRate, toNumber(row.due_amount))
+      : 0
+
     const paymentForPrincipalAndInterest = Math.max(amountPaid - penalty - excessMaGenerated, 0)
-
-    const monthlyInterest =
-      paymentForPrincipalAndInterest > 0 && isInterestBearingRow(row)
-        ? Math.min(beginningBalance * monthlyRate, paymentForPrincipalAndInterest)
-        : 0
-
-    const principalPaid = Math.min(
-      beginningBalance,
-      Math.max(paymentForPrincipalAndInterest - monthlyInterest, 0)
+    const paidInterest = isInterestBearingRow(row)
+      ? Math.min(scheduledInterest, paymentForPrincipalAndInterest)
+      : 0
+    const paidPrincipal = Math.min(
+      rowPrincipalDue || beginningBalance,
+      Math.max(paymentForPrincipalAndInterest - paidInterest, 0)
     )
 
-    const endingBalance = Math.max(beginningBalance - principalPaid, 0)
+    const projectedPrincipal = rowPrincipalDue > 0
+      ? rowPrincipalDue
+      : isInterestBearingRow(row)
+        ? Math.max(toNumber(row.due_amount) - scheduledInterest, 0)
+        : Math.max(toNumber(row.due_amount) - penalty, 0)
+
+    const principalForEndingBalance = scheduleType === 'other' && row.description?.toLowerCase() === 'advance payment'
+      ? 0
+      : projectedPrincipal
+
+    const endingBalance = row.running_balance !== null && row.running_balance !== undefined && row.running_balance !== ''
+      ? Math.max(toNumber(row.running_balance), 0)
+      : Math.max(beginningBalance - principalForEndingBalance, 0)
 
     principalBalance = endingBalance
 
     return {
       ...row,
       beginning_balance: beginningBalance,
-      monthly_interest: monthlyInterest,
-      principal_paid: principalPaid,
+      monthly_interest: scheduledInterest,
+      principal_paid: amountPaid > 0 ? paidPrincipal : projectedPrincipal,
       ending_balance: endingBalance,
     }
   })

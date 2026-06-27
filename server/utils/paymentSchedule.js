@@ -90,6 +90,7 @@ const getClientUnitPlan = async (connectionOrDb, clientUnitId) => {
       l.reservation_fee AS listing_reservation_fee,
       l.net_selling_price,
       l.legal_misc_fee,
+      l.annual_interest_rate AS listing_annual_interest_rate,
       l.total_contract_price AS listing_total_contract_price
     FROM client_units cu
     INNER JOIN listings l ON l.id = cu.listing_id
@@ -146,6 +147,52 @@ const pushReferenceDetail = (row, detail) => {
     : nextReference
 }
 
+const getAnnualInterestRate = (unit) => {
+  const candidates = [
+    unit.interest_rate,
+    unit.annual_interest_rate,
+    unit.listing_annual_interest_rate,
+    unit.interest_rate_percent,
+    unit.contract_interest_rate,
+  ]
+
+  for (const value of candidates) {
+    const parsed = Number(value)
+    if (Number.isFinite(parsed) && parsed > 0) return parsed
+  }
+
+  return 0
+}
+
+const getOfferBalanceAmount = ({
+  unit,
+  totalContractPrice,
+  reservationFee,
+  downpaymentNet,
+  deferredCashAmount,
+}) => {
+  const explicitBalance = firstPositive(
+    unit.offer_balance_amount,
+    unit.amortized_principal_amount,
+    unit.original_principal_balance,
+    unit.contract_balance_amount,
+    unit.principal_balance
+  )
+
+  if (explicitBalance > 0) return explicitBalance
+
+  const computedBalance = money(
+    Math.max(
+      totalContractPrice - reservationFee - downpaymentNet - deferredCashAmount,
+      0
+    )
+  )
+
+  if (computedBalance > 0) return computedBalance
+
+  return money(unit.balance)
+}
+
 const buildBaseRows = (unit) => {
   const totalContractPrice = firstPositive(
     unit.offer_purchase_price,
@@ -164,21 +211,44 @@ const buildBaseRows = (unit) => {
   const deferredCashAmount = money(unit.deferred_cash_amount)
   const terms = Math.max(Number(unit.payment_terms_months || 0), 0)
   const monthlyAmortization = money(unit.monthly_amortization)
+  const annualInterestRate = getAnnualInterestRate(unit)
+  const monthlyRate = annualInterestRate / 100 / 12
+  const balloonPaymentAmount = money(unit.balloon_payment_amount)
   const startingDate = toDateOnly(unit.starting_date) || toDateOnly(unit.created_at) || toDateOnly(new Date())
   const firstDueDate = toDateOnly(unit.due_date) || startingDate
   const rows = []
 
-  const pushRow = ({ dueDate, description, scheduleType, totalDue, sortOrder }) => {
-    const due = money(totalDue)
-    if (due <= 0) return
+  let scheduledRunningBalance = money(totalContractPrice)
+
+  const pushRow = ({
+    dueDate,
+    description,
+    scheduleType,
+    principalDue,
+    interestDue = 0,
+    penaltyDue = 0,
+    totalDue,
+    runningBalance = null,
+    sortOrder,
+  }) => {
+    const principal = money(principalDue ?? totalDue)
+    const interest = money(interestDue)
+    const penalty = money(penaltyDue)
+    const due = money(totalDue ?? principal + interest + penalty)
+
+    if (due <= 0 && principal <= 0 && interest <= 0 && penalty <= 0) return
+
+    const nextRunningBalance = runningBalance === null || runningBalance === undefined
+      ? money(Math.max(scheduledRunningBalance - principal, 0))
+      : money(Math.max(runningBalance, 0))
 
     rows.push({
       due_date: toDateOnly(dueDate),
       description,
       schedule_type: normalizeScheduleType(scheduleType),
-      principal_due: due,
-      interest_due: 0,
-      penalty_due: 0,
+      principal_due: principal,
+      interest_due: interest,
+      penalty_due: penalty,
       total_due: due,
       amount_paid: 0,
       advance_applied: 0,
@@ -187,9 +257,11 @@ const buildBaseRows = (unit) => {
       reference_no: null,
       reference_details: [],
       status: 'not_due',
-      running_balance: totalContractPrice,
+      running_balance: nextRunningBalance,
       sort_order: sortOrder,
     })
+
+    scheduledRunningBalance = nextRunningBalance
   }
 
   let sortOrder = 1
@@ -197,6 +269,8 @@ const buildBaseRows = (unit) => {
     dueDate: startingDate,
     description: 'Reservation Fee',
     scheduleType: 'reservation',
+    principalDue: reservationFee,
+    interestDue: 0,
     totalDue: reservationFee,
     sortOrder: sortOrder++,
   })
@@ -211,6 +285,8 @@ const buildBaseRows = (unit) => {
       dueDate: firstDueDate,
       description: 'Cash Balance',
       scheduleType: 'full_payment',
+      principalDue: cashBalance,
+      interestDue: 0,
       totalDue: cashBalance,
       sortOrder: sortOrder++,
     })
@@ -231,6 +307,8 @@ const buildBaseRows = (unit) => {
         dueDate: addMonths(firstDueDate, index - 1),
         description: `${ordinal(index)} Downpayment`,
         scheduleType: 'downpayment',
+        principalDue: amount,
+        interestDue: 0,
         totalDue: amount,
         sortOrder: sortOrder++,
       })
@@ -240,33 +318,56 @@ const buildBaseRows = (unit) => {
   }
 
   const monthlyStart = addMonths(firstDueDate, downpaymentNet > 0 ? downpaymentGives : 0)
-  const amortizedPrincipal = money(
-    Math.max(
-      totalContractPrice -
-        reservationFee -
-        downpaymentNet -
-        deferredCashAmount -
-        money(unit.balloon_payment_amount),
-      0
-    )
-  )
+  const offerBalanceAmount = getOfferBalanceAmount({
+    unit,
+    totalContractPrice,
+    reservationFee,
+    downpaymentNet,
+    deferredCashAmount,
+  })
+  const amortizedPrincipal = money(Math.max(offerBalanceAmount - balloonPaymentAmount, 0))
   const monthlyBase = monthlyAmortization > 0
     ? monthlyAmortization
     : terms > 0
       ? money(amortizedPrincipal / terms)
       : 0
 
-  // Interest-bearing amortization must generate the contracted number of
-  // monthly rows. Do not cap the rows at the remaining principal/TCP, because
-  // monthly amortization already includes interest.
+  let currentMonthlyBalance = amortizedPrincipal
+
   for (let index = 1; index <= terms; index += 1) {
+    if (currentMonthlyBalance <= 0) break
+
+    const isLastMonth = index === terms
+    const interestDue = monthlyRate > 0
+      ? money(currentMonthlyBalance * monthlyRate)
+      : 0
+    let principalDue = money(monthlyBase - interestDue)
+
+    if (monthlyRate <= 0) {
+      principalDue = money(monthlyBase)
+    }
+
+    if (isLastMonth || principalDue > currentMonthlyBalance) {
+      principalDue = money(currentMonthlyBalance)
+    }
+
+    principalDue = money(Math.max(principalDue, 0))
+    const totalDue = money(principalDue + interestDue)
+    const endingBalance = money(Math.max(currentMonthlyBalance - principalDue, 0))
+    const projectedContractBalance = money(endingBalance + balloonPaymentAmount)
+
     pushRow({
       dueDate: addMonths(monthlyStart, index - 1),
       description: `${ordinal(index)} Monthly Payment`,
       scheduleType: 'monthly',
-      totalDue: monthlyBase,
+      principalDue,
+      interestDue,
+      totalDue,
+      runningBalance: projectedContractBalance,
       sortOrder: sortOrder++,
     })
+
+    currentMonthlyBalance = endingBalance
   }
 
   const scheduledBalloonAmount = money(unit.balloon_payment_amount)
@@ -276,6 +377,8 @@ const buildBaseRows = (unit) => {
       dueDate: addMonths(monthlyStart, terms),
       description: 'Balloon Payment',
       scheduleType: 'balloon',
+      principalDue: scheduledBalloonAmount,
+      interestDue: 0,
       totalDue: scheduledBalloonAmount,
       sortOrder: sortOrder++,
     })
@@ -756,16 +859,30 @@ const applyAutomaticExcessMaToMonthlyRows = ({ rows, availableExcessMa }) => {
   })
 }
 
+const getPrincipalPaidFromRow = (row) => {
+  if (isExcessMaCreditRow(row)) return 0
+
+  const paid = getEffectiveAmountPaid(row)
+  const principalDue = money(row.principal_due)
+
+  if (paid <= 0 || principalDue <= 0) return 0
+
+  if (row.schedule_type === 'monthly') {
+    const principalPaid = money(
+      Math.max(
+        paid - money(row.interest_due) - money(row.penalty_due),
+        0
+      )
+    )
+
+    return money(Math.min(principalPaid, principalDue))
+  }
+
+  return money(Math.min(paid, principalDue))
+}
+
 const getAppliedPrincipalTotal = (rows) => {
-  return money(rows.reduce((sum, row) => {
-    if (isExcessMaCreditRow(row)) return sum
-
-    const principalApplied = row.schedule_type === 'monthly'
-      ? getEffectiveAmountPaid(row)
-      : money(row.amount_paid)
-
-    return sum + principalApplied
-  }, 0))
+  return money(rows.reduce((sum, row) => sum + getPrincipalPaidFromRow(row), 0))
 }
 
 const getCurrentPrincipalBalance = (rows, totalContractPrice) => {
@@ -960,7 +1077,11 @@ const applyPaymentsToRows = (rows, payments, totalContractPrice) => {
 
   sortRowsForStatement(rows)
 
-  let runningBalance = totalContractPrice
+  // Running balance in the SOA must show the actual outstanding balance as of
+  // posted payments only. Monthly rows can still store projected
+  // principal_due/interest_due for the amortization breakdown, but unpaid
+  // future rows must NOT reduce the displayed running balance.
+  let actualRunningBalance = money(totalContractPrice)
 
   for (const row of rows) {
     refreshRowBalance(row)
@@ -979,14 +1100,10 @@ const applyPaymentsToRows = (rows, payments, totalContractPrice) => {
       row.status = 'partial'
     }
 
-    const principalApplied = isExcessMaCreditRow(row)
-      ? 0
-      : row.schedule_type === 'monthly'
-        ? getEffectiveAmountPaid(row)
-        : money(row.amount_paid)
+    const actualPrincipalPaid = getPrincipalPaidFromRow(row)
 
-    runningBalance = money(Math.max(runningBalance - principalApplied, 0))
-    row.running_balance = runningBalance
+    actualRunningBalance = money(Math.max(actualRunningBalance - actualPrincipalPaid, 0))
+    row.running_balance = actualRunningBalance
   }
 
   annotateRowsWithExcessMa(rows)
@@ -1039,18 +1156,18 @@ const replacePaymentSchedules = async (connectionOrDb, clientUnitId, rows) => {
       row.due_date,
       row.description,
       normalizeScheduleType(row.schedule_type),
-      row.principal_due,
-      row.interest_due,
-      row.penalty_due,
-      row.total_due,
-      row.amount_paid,
-      row.advance_applied,
-      row.balance,
+      money(row.principal_due),
+      money(row.interest_due),
+      money(row.penalty_due),
+      money(row.total_due),
+      money(row.amount_paid),
+      money(row.advance_applied),
+      money(row.balance),
       row.date_paid,
       row.reference_no,
       JSON.stringify(row.reference_details || []),
       row.status,
-      row.running_balance,
+      money(row.running_balance),
       row.sort_order,
     ])]
   )
@@ -1085,14 +1202,7 @@ export const rebuildPaymentSchedule = async (connectionOrDb, clientUnitId) => {
   const statementBalance = money(
     rows.reduce((sum, row) => sum + money(row.balance), 0)
   )
-  const lastRunningBalanceRow = [...rows]
-    .reverse()
-    .find((row) => row.running_balance !== undefined && row.running_balance !== null)
-  const principalBalance = money(
-    lastRunningBalanceRow
-      ? lastRunningBalanceRow.running_balance
-      : Math.max(totalContractPrice - totalPaid, 0)
-  )
+  const principalBalance = getCurrentPrincipalBalance(rows, totalContractPrice)
 
   return {
     client_unit_id: Number(clientUnitId),
@@ -1180,8 +1290,11 @@ export const mapScheduleRowForPrint = (row) => ({
   due_date: row.due_date,
   description: row.description,
   schedule_type: row.schedule_type,
+  principal_due: row.principal_due,
+  interest_due: row.interest_due,
   due_amount: row.total_due,
   penalty: row.penalty_due,
+  balance: row.balance,
   date_paid: row.date_paid,
   amount_paid: row.amount_paid,
   excess_ma: row.excess_ma_generated ?? row.advance_applied,
