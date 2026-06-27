@@ -1,5 +1,20 @@
 const money = (value) => Number(Number(value || 0).toFixed(2))
 
+const allowedScheduleTypes = new Set([
+  'reservation',
+  'downpayment',
+  'monthly',
+  'balloon',
+  'legal_misc',
+  'penalty',
+  'other',
+])
+
+const normalizeScheduleType = (scheduleType) => {
+  const normalized = String(scheduleType || '').trim().toLowerCase()
+  return allowedScheduleTypes.has(normalized) ? normalized : 'other'
+}
+
 const toDateOnly = (value) => {
   if (!value) return null
 
@@ -160,7 +175,7 @@ const buildBaseRows = (unit) => {
     rows.push({
       due_date: toDateOnly(dueDate),
       description,
-      schedule_type: scheduleType,
+      schedule_type: normalizeScheduleType(scheduleType),
       principal_due: due,
       interest_due: 0,
       penalty_due: 0,
@@ -364,7 +379,7 @@ const createPrincipalReductionRow = ({
   const row = {
     due_date: paymentDate,
     description,
-    schedule_type: scheduleType,
+    schedule_type: normalizeScheduleType(scheduleType),
     principal_due: totalApplied,
     interest_due: 0,
     penalty_due: 0,
@@ -1023,7 +1038,7 @@ const replacePaymentSchedules = async (connectionOrDb, clientUnitId, rows) => {
       clientUnitId,
       row.due_date,
       row.description,
-      row.schedule_type,
+      normalizeScheduleType(row.schedule_type),
       row.principal_due,
       row.interest_due,
       row.penalty_due,

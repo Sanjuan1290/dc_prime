@@ -92,6 +92,8 @@ type PaymentSuggestions = {
     payment_type: string
     description: string
     due_amount: number
+    due_date?: string | null
+    status?: string | null
   } | null
   terms?: {
     downpayment_percent?: number
@@ -157,6 +159,24 @@ const getPaymentDateValue = (date: string | null | undefined) => {
   const formattedDate = formatDateOnly(date)
 
   return formattedDate === "-" ? "" : formattedDate
+}
+
+const isFuturePaymentDate = (date: string | null | undefined) => {
+  const formattedDate = getPaymentDateValue(date)
+
+  return formattedDate !== "" && formattedDate > getLocalDate()
+}
+
+const getPaymentDateRuleMessage = (paymentType: string) => {
+  if (paymentType === "advance_payment") {
+    return "Use today's received date. Advance Payment stores the amount as Excess MA and lets the system auto-pay future dues on their due dates."
+  }
+
+  if (paymentType === "monthly") {
+    return "Future dates are blocked. To pay ahead of a monthly due, choose Advance Payment instead."
+  }
+
+  return "Future payment dates are blocked. Use the actual date the payment was received."
 }
 
 const paymentStatuses = ["pending", "verified", "rejected"]
@@ -364,6 +384,7 @@ const Payments = () => {
   const [page, setPage] = useState(1)
   const [rowsPerPage, setRowsPerPage] = useState(10)
   const [successMessage, setSuccessMessage] = useState("")
+  const [paymentFormError, setPaymentFormError] = useState("")
 
   const {
     data: payments = [],
@@ -394,6 +415,7 @@ const Payments = () => {
     mutationFn: createPayment,
     onSuccess: () => {
       invalidateAfterPaymentChange()
+      setPaymentFormError("")
       setIsAddOpen(false)
       setFormData(emptyFormData)
       setClientUnitSearch("")
@@ -405,6 +427,7 @@ const Payments = () => {
     mutationFn: updatePayment,
     onSuccess: () => {
       invalidateAfterPaymentChange()
+      setPaymentFormError("")
       setEditPayment(null)
       setStatusPayment(null)
       setEditFormData(emptyFormData)
@@ -563,6 +586,7 @@ const Payments = () => {
     setIsAmountManuallyEdited(false)
     setClientUnitSearch("")
     setSuccessMessage("")
+    setPaymentFormError("")
     setIsAddOpen(true)
   }
 
@@ -571,21 +595,47 @@ const Payments = () => {
     setEditFormData(paymentToFormData(payment))
     setEditClientUnitSearch("")
     setSuccessMessage("")
+    setPaymentFormError("")
   }
 
   const openStatusModal = (payment: Payment) => {
     setStatusPayment(payment)
     setStatusFormData(paymentToFormData(payment))
     setSuccessMessage("")
+    setPaymentFormError("")
+  }
+
+  const validatePaymentForm = (paymentData: PaymentFormData) => {
+    if (isFuturePaymentDate(paymentData.payment_date)) {
+      return "Payment Date cannot be a future date. Use the actual received date. If the client is paying ahead, choose Advance Payment."
+    }
+
+    return ""
   }
 
   const handleCreatePayment = () => {
+    const validationMessage = validatePaymentForm(formData)
+
+    if (validationMessage) {
+      setPaymentFormError(validationMessage)
+      return
+    }
+
+    setPaymentFormError("")
     createPaymentMutation.mutate(formData)
   }
 
   const handleUpdatePayment = () => {
     if (!editPayment) return
 
+    const validationMessage = validatePaymentForm(editFormData)
+
+    if (validationMessage) {
+      setPaymentFormError(validationMessage)
+      return
+    }
+
+    setPaymentFormError("")
     updatePaymentMutation.mutate({
       id: editPayment.id,
       paymentData: editFormData,
@@ -595,6 +645,14 @@ const Payments = () => {
   const handleUpdatePaymentStatus = () => {
     if (!statusPayment) return
 
+    const validationMessage = validatePaymentForm(statusFormData)
+
+    if (validationMessage) {
+      setPaymentFormError(validationMessage)
+      return
+    }
+
+    setPaymentFormError("")
     updatePaymentMutation.mutate({
       id: statusPayment.id,
       paymentData: statusFormData,
@@ -606,6 +664,7 @@ const Payments = () => {
   }
 
   const mutationError =
+    paymentFormError ||
     createPaymentMutation.error?.message ||
     updatePaymentMutation.error?.message ||
     deletePaymentMutation.error?.message
@@ -848,6 +907,7 @@ const Payments = () => {
           paymentSuggestions={paymentSuggestions}
           isSuggestionsLoading={isPaymentSuggestionsLoading}
           onAmountManualEditChange={setIsAmountManuallyEdited}
+          setPaymentFormError={setPaymentFormError}
           onClose={() => setIsAddOpen(false)}
           onSave={handleCreatePayment}
           isPending={createPaymentMutation.isPending}
@@ -890,6 +950,7 @@ const Payments = () => {
           setClientUnitSearch={setEditClientUnitSearch}
           clientUnits={filteredEditClientUnits}
           selectedClientUnit={selectedEditClientUnit}
+          setPaymentFormError={setPaymentFormError}
           onClose={() => setEditPayment(null)}
           onSave={handleUpdatePayment}
           isPending={updatePaymentMutation.isPending}
@@ -983,6 +1044,7 @@ type PaymentModalProps = {
   paymentSuggestions?: PaymentSuggestions | null
   isSuggestionsLoading?: boolean
   onAmountManualEditChange?: (isEdited: boolean) => void
+  setPaymentFormError: (message: string) => void
   onClose: () => void
   onSave: () => void
   isPending: boolean
@@ -1000,6 +1062,7 @@ const PaymentModal = ({
   paymentSuggestions = null,
   isSuggestionsLoading = false,
   onAmountManualEditChange,
+  setPaymentFormError,
   onClose,
   onSave,
   isPending,
@@ -1083,6 +1146,7 @@ const PaymentModal = ({
             value={clientUnitSearch}
             onChange={(e) => {
               setClientUnitSearch(e.target.value)
+              setPaymentFormError("")
               onAmountManualEditChange?.(false)
               setFormData({
                 ...formData,
@@ -1108,6 +1172,7 @@ const PaymentModal = ({
                     ].join(" ")}
                     key={unit.id}
                     onClick={() => {
+                      setPaymentFormError("")
                       setFormData({
                         ...formData,
                         client_unit_id: unit.id,
@@ -1177,6 +1242,7 @@ const PaymentModal = ({
             label="Payment Type"
             value={formData.payment_type}
             onChange={(e) => {
+              setPaymentFormError("")
               const nextType = e.target.value
               const nextSuggestedAmount = paymentSuggestions?.suggestions?.[nextType]
 
@@ -1210,6 +1276,7 @@ const PaymentModal = ({
               step="0.01"
               value={formData.amount}
               onChange={(e) => {
+                setPaymentFormError("")
                 onAmountManualEditChange?.(true)
                 setFormData({
                   ...formData,
@@ -1248,18 +1315,25 @@ const PaymentModal = ({
             </div>
           ) : null}
 
-          <Input
-            label="Payment Date"
-            type="date"
-            value={formData.payment_date}
-            onChange={(e) =>
-              setFormData({
-                ...formData,
-                payment_date: e.target.value,
-              })
-            }
-            required
-          />
+          <div>
+            <Input
+              label="Payment Date"
+              type="date"
+              max={getLocalDate()}
+              value={formData.payment_date}
+              onChange={(e) => {
+                setPaymentFormError("")
+                setFormData({
+                  ...formData,
+                  payment_date: e.target.value,
+                })
+              }}
+              required
+            />
+            <p className="mt-1 text-xs text-slate-500">
+              {getPaymentDateRuleMessage(formData.payment_type)}
+            </p>
+          </div>
 
           <Select
             label="Payment Method"

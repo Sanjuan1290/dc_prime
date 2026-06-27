@@ -47,6 +47,16 @@ const getTodayDateOnly = () => {
   return toDateOnly(new Date())
 }
 
+const isFutureDateOnly = (value) => {
+  const date = toDateOnly(value)
+
+  return Boolean(date && date > getTodayDateOnly())
+}
+
+const isMonthlyPaymentType = (paymentType) => {
+  return String(paymentType || '').toLowerCase() === 'monthly'
+}
+
 
 const isCashPaymentMethod = (paymentMethod) => {
   return String(paymentMethod || '').toLowerCase() === 'cash'
@@ -656,6 +666,29 @@ export const createPayment = async (req, res) => {
       ? 'excess_ma'
       : nullableValue(payment_method)
     const finalPaymentDate = toDateOnly(payment_date) || getTodayDateOnly()
+
+    if (isFutureDateOnly(finalPaymentDate)) {
+      await connection.rollback()
+      return res.status(400).json({
+        message: 'Payment Date cannot be a future date. Use the actual received date. If the client is paying ahead, choose Advance Payment.',
+      })
+    }
+
+    if (finalStatus === 'verified' && isMonthlyPaymentType(finalPaymentType)) {
+      const scheduleDue = await getNextPaymentScheduleDue(connection, client_unit_id)
+      const nextMonthlyRow = scheduleDue.rows?.find((row) => (
+        row.schedule_type === 'monthly' &&
+        normalizeMoney(row.balance) > 0
+      ))
+
+      if (nextMonthlyRow?.due_date && finalPaymentDate < nextMonthlyRow.due_date) {
+        await connection.rollback()
+        return res.status(400).json({
+          message: `Monthly payment is not yet due. Next monthly due date is ${nextMonthlyRow.due_date}. Use Advance Payment if the client wants to pay ahead.`,
+        })
+      }
+    }
+
     const finalReferenceId = isCashPaymentMethod(finalPaymentMethod) || isExcessMaPayment(finalPaymentType)
       ? null
       : nullableValue(reference_id)
@@ -852,6 +885,14 @@ export const updatePayment = async (req, res) => {
     const nextPaymentDate = !isMissing(payment_date)
       ? toDateOnly(payment_date)
       : existingPayment.payment_date
+
+    if (isFutureDateOnly(nextPaymentDate)) {
+      await connection.rollback()
+      return res.status(400).json({
+        message: 'Payment Date cannot be a future date. Use the actual received date. If the client is paying ahead, choose Advance Payment.',
+      })
+    }
+
     let nextReferenceId = !isMissing(reference_id)
       ? nullableValue(reference_id)
       : existingPayment.reference_id
