@@ -81,6 +81,33 @@ const firstPositive = (...values) => {
   return 0
 }
 
+const truthyValue = (value) => (
+  value === true ||
+  value === 1 ||
+  value === '1' ||
+  String(value || '').trim().toLowerCase() === 'true' ||
+  String(value || '').trim().toLowerCase() === 'yes'
+)
+
+const normalizeLegalMiscPaymentMode = (value) => {
+  const normalized = String(value || '').trim().toLowerCase()
+
+  if (['deferred', 'pay_later', 'separate'].includes(normalized)) {
+    return 'deferred'
+  }
+
+  return 'included'
+}
+
+const isLegalMiscDeferred = (unit = {}) => {
+  return truthyValue(unit.defer_legal_misc_fee) ||
+    normalizeLegalMiscPaymentMode(unit.legal_misc_payment_mode) === 'deferred'
+}
+
+const getDeferredLegalMiscAmount = (unit = {}) => {
+  return isLegalMiscDeferred(unit) ? money(unit.legal_misc_fee) : 0
+}
+
 const getClientUnitPlan = async (connectionOrDb, clientUnitId) => {
   const [rows] = await connectionOrDb.query(
     `
@@ -211,6 +238,7 @@ const getOfferBalanceAmount = ({
   reservationFee,
   downpaymentNet,
   deferredCashAmount,
+  legalMiscDeferredAmount = 0,
 }) => {
   const explicitBalance = firstPositive(
     unit.offer_balance_amount,
@@ -224,7 +252,11 @@ const getOfferBalanceAmount = ({
 
   const computedBalance = money(
     Math.max(
-      totalContractPrice - reservationFee - downpaymentNet - deferredCashAmount,
+      totalContractPrice -
+        reservationFee -
+        downpaymentNet -
+        deferredCashAmount -
+        legalMiscDeferredAmount,
       0
     )
   )
@@ -240,6 +272,8 @@ const buildBaseRows = (unit) => {
     unit.listing_total_contract_price,
     unit.net_selling_price
   )
+  const legalMiscDeferredAmount = getDeferredLegalMiscAmount(unit)
+  const legalMiscDueDate = toDateOnly(unit.legal_misc_due_date)
   const reservationFee = firstPositive(
     unit.reservation_fee_amount,
     unit.listing_reservation_fee
@@ -382,6 +416,7 @@ const buildBaseRows = (unit) => {
     reservationFee,
     downpaymentNet,
     deferredCashAmount,
+    legalMiscDeferredAmount,
   })
   const amortizedPrincipal = money(Math.max(offerBalanceAmount - balloonPaymentAmount, 0))
   const monthlyBase = monthlyAmortization > 0
@@ -438,6 +473,18 @@ const buildBaseRows = (unit) => {
       principalDue: scheduledBalloonAmount,
       interestDue: 0,
       totalDue: scheduledBalloonAmount,
+      sortOrder: sortOrder++,
+    })
+  }
+
+  if (legalMiscDeferredAmount > 0) {
+    pushRow({
+      dueDate: legalMiscDueDate || addMonths(monthlyStart, terms + (scheduledBalloonAmount > 0 ? 1 : 0)),
+      description: 'Legal / Miscellaneous Fee',
+      scheduleType: 'legal_misc',
+      principalDue: legalMiscDeferredAmount,
+      interestDue: 0,
+      totalDue: legalMiscDeferredAmount,
       sortOrder: sortOrder++,
     })
   }
@@ -503,6 +550,8 @@ const preferredScheduleTypes = (paymentType) => {
       return ['monthly']
     case 'balloon':
       return ['monthly', 'full_payment']
+    case 'legal_misc':
+      return ['legal_misc']
     case 'full_payment':
       return ['reservation', 'downpayment', 'monthly', 'full_payment']
     case 'other':
@@ -680,7 +729,7 @@ const removeRemainingUnpaidContractRows = (rows) => {
   for (let index = rows.length - 1; index >= 0; index -= 1) {
     const row = rows[index]
     const type = String(row.schedule_type || '').toLowerCase()
-    const removableType = ['monthly', 'balloon', 'full_payment'].includes(type)
+    const removableType = ['monthly', 'balloon', 'full_payment', 'legal_misc'].includes(type)
 
     if (!removableType) continue
     if (money(row.amount_paid) > 0 || money(row.advance_applied) > 0) continue
@@ -1407,8 +1456,3 @@ export const mapScheduleRowForPrint = (row) => ({
   running_balance: row.running_balance,
   status: row.status,
 })
-
-
-
-
-

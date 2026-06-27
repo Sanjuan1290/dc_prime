@@ -599,6 +599,24 @@ const getListingPurchasePrice = (listing) => {
   )
 }
 
+const truthyValue = (value) => (
+  value === true ||
+  value === 1 ||
+  value === '1' ||
+  String(value || '').trim().toLowerCase() === 'true' ||
+  String(value || '').trim().toLowerCase() === 'yes'
+)
+
+const normalizeLegalMiscPaymentMode = (paymentMode, deferFlag = false) => {
+  const normalized = String(paymentMode || '').trim().toLowerCase()
+
+  if (truthyValue(deferFlag) || ['deferred', 'pay_later', 'separate'].includes(normalized)) {
+    return 'deferred'
+  }
+
+  return 'included'
+}
+
 const calculateMonthlyAmortization = ({
   balance,
   termsMonths,
@@ -637,6 +655,9 @@ const buildReservationTerms = ({
   downpaymentGives,
   downpaymentDiscountRate,
   downpaymentTerms = [],
+  legalMiscPaymentMode = 'included',
+  deferLegalMiscFee = false,
+  legalMiscDueDate = null,
 }) => {
   if (isMissing(modeOfPayment) || !allowedModeOfPayments.includes(modeOfPayment)) {
     return {
@@ -674,6 +695,26 @@ const buildReservationTerms = ({
   }
 
   const purchasePrice = getListingPurchasePrice(listing)
+  const legalMiscFee = normalizeMoney(listing.legal_misc_fee)
+  const finalLegalMiscPaymentMode = normalizeLegalMiscPaymentMode(
+    legalMiscPaymentMode,
+    deferLegalMiscFee
+  )
+  const legalMiscDeferredAmount = modeOfPayment === 'installment' && finalLegalMiscPaymentMode === 'deferred'
+    ? legalMiscFee
+    : 0
+  const amortizedPurchasePrice = normalizeMoney(Math.max(purchasePrice - legalMiscDeferredAmount, 0))
+  const parsedLegalMiscDueDate = isMissing(legalMiscDueDate)
+    ? null
+    : parseDateOnly(legalMiscDueDate)
+
+  if (!isMissing(legalMiscDueDate) && !parsedLegalMiscDueDate) {
+    return {
+      isValid: false,
+      message: 'Legal/misc due date must be a valid YYYY-MM-DD date',
+    }
+  }
+
   const isInstallment = modeOfPayment === 'installment'
 
   const downpaymentPercentValidation = isInstallment
@@ -726,7 +767,7 @@ const buildReservationTerms = ({
 
   if (isInstallment) {
     const targetDownpayment = normalizeMoney(
-      purchasePrice * (downpaymentPercentValidation.value / 100)
+      amortizedPurchasePrice * (downpaymentPercentValidation.value / 100)
     )
 
     computedDownpaymentGross = normalizeMoney(Math.max(targetDownpayment, 0))
@@ -845,7 +886,7 @@ const buildReservationTerms = ({
   }
 
   const offerBalanceAmount = normalizeMoney(
-    purchasePrice -
+    amortizedPurchasePrice -
       reservationFeeValidation.value -
       downpaymentValidation.value -
       deferredCashValidation.value
@@ -855,7 +896,7 @@ const buildReservationTerms = ({
     return {
       isValid: false,
       message:
-        'Reservation fee, downpayment, and deferred cash amount cannot exceed purchase price',
+        'Reservation fee, downpayment, and deferred cash amount cannot exceed the amortized purchase price',
     }
   }
 
@@ -908,6 +949,10 @@ const buildReservationTerms = ({
       downpaymentNetAmount: computedDownpaymentNet,
       downpaymentTerms: computedDownpaymentTerms,
       deferredCashAmount: deferredCashValidation.value,
+      legalMiscPaymentMode: finalLegalMiscPaymentMode,
+      deferLegalMiscFee: finalLegalMiscPaymentMode === 'deferred' ? 1 : 0,
+      legalMiscDueDate: parsedLegalMiscDueDate,
+      legalMiscDeferredAmount,
       balloonPaymentAmount: balloonPaymentValidation.value,
       balloonDueDate: null,
       offerBalanceAmount,
@@ -1000,6 +1045,9 @@ const clientUnitFields = `
   cu.downpayment_discount_amount,
   cu.downpayment_net_amount,
   cu.deferred_cash_amount,
+  COALESCE(cu.legal_misc_payment_mode, 'included') AS legal_misc_payment_mode,
+  COALESCE(cu.defer_legal_misc_fee, 0) AS defer_legal_misc_fee,
+  DATE_FORMAT(cu.legal_misc_due_date, '%Y-%m-%d') AS legal_misc_due_date,
   cu.offer_balance_amount,
   cu.payment_terms_months,
   cu.interest_rate,
@@ -1752,6 +1800,9 @@ export const reserveListing = async (req, res) => {
     downpayment_discount_rate = 0,
     downpayment_terms = [],
     deferred_cash_amount = 0,
+    legal_misc_payment_mode = 'included',
+    defer_legal_misc_fee = false,
+    legal_misc_due_date = null,
     balloon_payment_amount = 0,
     payment_terms_months,
     interest_rate = 0,
@@ -1863,6 +1914,9 @@ export const reserveListing = async (req, res) => {
       downpaymentDiscountRate: downpayment_discount_rate,
       downpaymentTerms: downpayment_terms,
       deferredCashAmount: deferred_cash_amount,
+      legalMiscPaymentMode: legal_misc_payment_mode,
+      deferLegalMiscFee: defer_legal_misc_fee,
+      legalMiscDueDate: legal_misc_due_date,
       balloonPaymentAmount: balloon_payment_amount,
       paymentTermsMonths: payment_terms_months,
       interestRate: interest_rate,
@@ -1948,6 +2002,9 @@ export const reserveListing = async (req, res) => {
         downpayment_discount_amount,
         downpayment_net_amount,
         deferred_cash_amount,
+        legal_misc_payment_mode,
+        defer_legal_misc_fee,
+        legal_misc_due_date,
         balloon_payment_amount,
         balloon_due_date,
         offer_balance_amount,
@@ -1956,7 +2013,7 @@ export const reserveListing = async (req, res) => {
         monthly_amortization,
         contract_processing_status,
         sale_type
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         clientId,
@@ -1987,6 +2044,9 @@ export const reserveListing = async (req, res) => {
         terms.downpaymentDiscountAmount,
         terms.downpaymentNetAmount,
         terms.deferredCashAmount,
+        terms.legalMiscPaymentMode,
+        terms.deferLegalMiscFee,
+        terms.legalMiscDueDate,
         terms.balloonPaymentAmount,
         terms.balloonDueDate,
         terms.offerBalanceAmount,
@@ -2109,6 +2169,9 @@ export const updateClientUnit = async (req, res) => {
     seller_id,
     due_day,
     due_date,
+    legal_misc_payment_mode,
+    defer_legal_misc_fee,
+    legal_misc_due_date,
     status,
     mode_of_payment,
     buyer_type,
@@ -2158,6 +2221,16 @@ export const updateClientUnit = async (req, res) => {
   if (!isMissing(due_date) && !parsedDueDate) {
     return res.status(400).json({
       message: 'First due date must be a valid YYYY-MM-DD date',
+    })
+  }
+
+  const parsedLegalMiscDueDate = isMissing(legal_misc_due_date)
+    ? null
+    : parseDateOnly(legal_misc_due_date)
+
+  if (!isMissing(legal_misc_due_date) && !parsedLegalMiscDueDate) {
+    return res.status(400).json({
+      message: 'Legal/misc due date must be a valid YYYY-MM-DD date',
     })
   }
 
@@ -2265,6 +2338,14 @@ export const updateClientUnit = async (req, res) => {
       ? existingClientUnit.assigned_user_id
       : nullableValue(assigned_user_id)
 
+    const nextLegalMiscPaymentMode = isMissing(legal_misc_payment_mode) && isMissing(defer_legal_misc_fee)
+      ? existingClientUnit.legal_misc_payment_mode || 'included'
+      : normalizeLegalMiscPaymentMode(legal_misc_payment_mode, defer_legal_misc_fee)
+
+    const nextLegalMiscDueDate = !isMissing(legal_misc_due_date)
+      ? parsedLegalMiscDueDate
+      : existingClientUnit.legal_misc_due_date
+
     await connection.query(
       `
       UPDATE client_units
@@ -2275,7 +2356,10 @@ export const updateClientUnit = async (req, res) => {
         due_date = ?,
         status = ?,
         mode_of_payment = ?,
-        buyer_type = ?
+        buyer_type = ?,
+        legal_misc_payment_mode = ?,
+        defer_legal_misc_fee = ?,
+        legal_misc_due_date = ?
       WHERE id = ?
       `,
       [
@@ -2286,6 +2370,9 @@ export const updateClientUnit = async (req, res) => {
         finalStatus,
         finalModeOfPayment,
         finalBuyerType,
+        nextLegalMiscPaymentMode,
+        nextLegalMiscPaymentMode === 'deferred' ? 1 : 0,
+        nullableValue(nextLegalMiscDueDate),
         id,
       ]
     )
@@ -2387,6 +2474,8 @@ export const updateClientUnit = async (req, res) => {
         actorRole: req.user.role,
       })
     }
+
+    await rebuildPaymentSchedule(connection, id)
 
     await refreshCommissionEligibility(id, connection, {
       actorRole: req.user.role,
@@ -3305,7 +3394,3 @@ export const deleteClientUnit = async (req, res) => {
     connection.release()
   }
 }
-
-
-
-

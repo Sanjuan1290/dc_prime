@@ -232,6 +232,9 @@ type ClientUnit = {
   reservation_fee_amount?: number | string | null;
   downpayment_amount?: number | string | null;
   deferred_cash_amount?: number | string | null;
+  legal_misc_payment_mode?: "included" | "deferred" | string | null;
+  defer_legal_misc_fee?: boolean | number | string | null;
+  legal_misc_due_date?: string | null;
   offer_balance_amount?: number | string | null;
   payment_terms_months?: number | string | null;
   interest_rate?: number | string | null;
@@ -466,6 +469,8 @@ type ReserveListingData = {
   downpayment_discount_rate_custom: string;
   downpayment_terms: DownpaymentTermForm[];
   deferred_cash_amount: string;
+  legal_misc_payment_mode: "included" | "deferred";
+  legal_misc_due_date: string;
   balloon_payment_amount: string;
   balloon_due_date: string;
   payment_terms_months: number | "";
@@ -573,6 +578,8 @@ const createDefaultReserveData = (): ReserveListingData => ({
   downpayment_discount_rate_custom: "",
   downpayment_terms: [],
   deferred_cash_amount: "0",
+  legal_misc_payment_mode: "included",
+  legal_misc_due_date: "",
   balloon_payment_amount: "0",
   balloon_due_date: "",
   payment_terms_months: 36,
@@ -1160,6 +1167,19 @@ const reserveListing = async ({
         reserveData.mode_of_payment === "cash"
           ? Number(reserveData.deferred_cash_amount || 0)
           : 0,
+      legal_misc_payment_mode:
+        reserveData.mode_of_payment === "installment"
+          ? reserveData.legal_misc_payment_mode
+          : "included",
+      defer_legal_misc_fee:
+        reserveData.mode_of_payment === "installment" &&
+        reserveData.legal_misc_payment_mode === "deferred",
+      legal_misc_due_date:
+        reserveData.mode_of_payment === "installment" &&
+        reserveData.legal_misc_payment_mode === "deferred" &&
+        reserveData.legal_misc_due_date
+          ? reserveData.legal_misc_due_date
+          : null,
       balloon_payment_amount: 0,
       balloon_due_date: null,
       payment_terms_months:
@@ -2068,6 +2088,16 @@ const ClientProfile = () => {
   const reservePurchasePrice = selectedListing
     ? Number(selectedListing.total_contract_price || 0)
     : 0;
+  const reserveLegalMiscFee = selectedListing
+    ? Number(selectedListing.legal_misc_fee || 0)
+    : 0;
+  const reserveLegalMiscDeferred =
+    reserveData.mode_of_payment === "installment" &&
+    reserveData.legal_misc_payment_mode === "deferred";
+  const reserveAmortizedPurchasePrice = Math.max(
+    reservePurchasePrice - (reserveLegalMiscDeferred ? reserveLegalMiscFee : 0),
+    0,
+  );
   const reserveReservationFee = moneyInputValue(
     reserveData.reservation_fee_amount,
   );
@@ -2081,7 +2111,7 @@ const ClientProfile = () => {
       : 0;
   const reserveDownpaymentTarget =
     reserveData.mode_of_payment === "installment"
-      ? reservePurchasePrice * (reserveDownpaymentPercent / 100)
+      ? reserveAmortizedPurchasePrice * (reserveDownpaymentPercent / 100)
       : 0;
   const reserveDownpaymentGross =
     reserveData.mode_of_payment === "installment"
@@ -2117,7 +2147,7 @@ const ClientProfile = () => {
       ? moneyInputValue(reserveData.deferred_cash_amount)
       : 0;
   const reserveBalanceRaw =
-    reservePurchasePrice -
+    reserveAmortizedPurchasePrice -
     reserveReservationFee -
     reserveDownpayment -
     reserveDeferredCash;
@@ -2159,6 +2189,9 @@ const ClientProfile = () => {
       label: "Offer Purchase Price",
       value: formatMoney(reservePurchasePrice),
       formula: `TCP from selected listing: Net Selling Price + LMF = ${formatMoney(reservePurchasePrice)}`,
+      note: reserveLegalMiscDeferred
+        ? `Legal/misc ${formatMoney(reserveLegalMiscFee)} is shown later in SOA and removed from monthly amortization.`
+        : "Legal/misc is included in the monthly amortization base.",
     },
     {
       key: "net_dp_payable",
@@ -2167,15 +2200,17 @@ const ClientProfile = () => {
         reserveData.mode_of_payment === "installment"
           ? formatMoney(reserveDownpayment)
           : "-",
-      formula: `(${formatMoney(reservePurchasePrice)} × ${formatNumber(reserveDownpaymentPercent)}%) - ${formatMoney(reserveDownpaymentDiscountAmount)}`,
+      formula: `(${formatMoney(reserveAmortizedPurchasePrice)} × ${formatNumber(reserveDownpaymentPercent)}%) - ${formatMoney(reserveDownpaymentDiscountAmount)}`,
       note: `Gross DP ${formatMoney(reserveDownpaymentTarget)}${reserveDownpaymentDiscountAmount > 0 ? ` minus spot discount ${formatMoney(reserveDownpaymentDiscountAmount)}` : ""}. Reservation fee is separate and only reduces the balance for amortization.`,
     },
     {
       key: "offer_balance",
       label: "Balance for Amortization",
       value: formatMoney(reserveAmortizedBalance),
-      formula: `${formatMoney(reservePurchasePrice)} - ${formatMoney(reserveReservationFee)} - ${formatMoney(reserveDownpayment)} - ${formatMoney(reserveDeferredCash)}`,
-      note: "Reservation and downpayment are separate from the monthly term. Balloon payments are handled later as principal-only payments.",
+      formula: `${formatMoney(reserveAmortizedPurchasePrice)} - ${formatMoney(reserveReservationFee)} - ${formatMoney(reserveDownpayment)} - ${formatMoney(reserveDeferredCash)}`,
+      note: reserveLegalMiscDeferred
+        ? "Reservation, downpayment, and legal/misc pay-later are separate from the monthly term."
+        : "Reservation and downpayment are separate from the monthly term. Balloon payments are handled later as principal-only payments.",
     },
     {
       key: "monthly_preview",
@@ -2510,6 +2545,14 @@ const ClientProfile = () => {
           reserveData.mode_of_payment === "cash"
             ? String(reserveDeferredCash)
             : "0",
+        legal_misc_payment_mode:
+          reserveData.mode_of_payment === "installment"
+            ? reserveData.legal_misc_payment_mode
+            : "included",
+        legal_misc_due_date:
+          reserveData.legal_misc_payment_mode === "deferred"
+            ? reserveData.legal_misc_due_date
+            : "",
         payment_terms_months:
           reserveData.mode_of_payment === "installment"
             ? reserveTermsMonths
@@ -3829,6 +3872,14 @@ const ClientProfile = () => {
                       paymentMode === "cash"
                         ? reserveData.deferred_cash_amount
                         : "0",
+                    legal_misc_payment_mode:
+                      paymentMode === "installment"
+                        ? reserveData.legal_misc_payment_mode
+                        : "included",
+                    legal_misc_due_date:
+                      paymentMode === "installment"
+                        ? reserveData.legal_misc_due_date
+                        : "",
                     balloon_payment_amount: "0",
                     balloon_due_date: "",
                     payment_terms_months:
@@ -3958,6 +4009,56 @@ const ClientProfile = () => {
 
                 {reserveData.mode_of_payment === "installment" ? (
                   <>
+                    <Select
+                      label="Legal / Misc Fee"
+                      value={reserveData.legal_misc_payment_mode}
+                      onChange={(e) => {
+                        const nextMode = e.target.value as "included" | "deferred";
+                        setReserveData({
+                          ...reserveData,
+                          legal_misc_payment_mode: nextMode,
+                          legal_misc_due_date:
+                            nextMode === "deferred"
+                              ? reserveData.legal_misc_due_date
+                              : "",
+                          monthly_amortization: "",
+                        });
+                        setReserveValidationMessage("");
+                      }}
+                    >
+                      <option value="included">Include in monthly</option>
+                      <option value="deferred">Pay later as separate SOA row</option>
+                    </Select>
+
+                    {reserveData.legal_misc_payment_mode === "deferred" ? (
+                      <>
+                        <Input
+                          label="Legal / Misc Due Date (optional)"
+                          type="date"
+                          value={reserveData.legal_misc_due_date}
+                          onChange={(e) => {
+                            setReserveData({
+                              ...reserveData,
+                              legal_misc_due_date: e.target.value,
+                            });
+                            setReserveValidationMessage("");
+                          }}
+                        />
+
+                        <div className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2">
+                          <p className="text-xs font-semibold text-amber-700">
+                            Legal / Misc Pay Later
+                          </p>
+                          <p className="mt-1 text-sm font-bold text-slate-900">
+                            {formatMoney(reserveLegalMiscFee)}
+                          </p>
+                          <p className="mt-1 text-xs text-slate-600">
+                            This stays in the SOA, but it is removed from the monthly amortization base.
+                          </p>
+                        </div>
+                      </>
+                    ) : null}
+
                     <Select
                       label="Downpayment Percentage"
                       value={reserveData.downpayment_percent_option}

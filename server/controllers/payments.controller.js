@@ -232,9 +232,18 @@ const buildPaymentSuggestions = async (connectionOrDb, clientUnitId) => {
           : lockedMonthly || fallbackMonthly
       )
     : 0
-  const legalMiscSuggestion = 0
+  const legalMiscScheduleRow = scheduleDue.rows?.find((row) => (
+    row.schedule_type === 'legal_misc' &&
+    roundAmount(row.balance || row.total_due || 0) > 0
+  ))
+  const legalMiscSuggestion = roundAmount(
+    legalMiscScheduleRow?.balance || legalMiscScheduleRow?.total_due || 0
+  )
   const excessMaAvailable = roundAmount(scheduleDue.excessMaAvailable || 0)
-  const payoffSuggestion = roundAmount(Math.max(principalBalance - excessMaAvailable, 0))
+  const totalPayableBalance = roundAmount(
+    scheduleDue.statementBalance ?? scheduleBalance ?? principalBalance
+  )
+  const payoffSuggestion = roundAmount(Math.max(totalPayableBalance - excessMaAvailable, 0))
   const fullPaymentSuggestion = payoffSuggestion
   const balloonSuggestion = payoffSuggestion
   const advancePaymentSuggestion = monthlySuggestion
@@ -1103,4 +1112,3 @@ export const deletePayment = async (req, res) => {
     connection.release()
   }
 }
-
