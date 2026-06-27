@@ -11,6 +11,7 @@ import {
   FiRefreshCw,
   FiUpload,
   FiDownload,
+  FiTrash2,
   FiUser,
 } from "react-icons/fi";
 import Alert from "../components/ui/Alert";
@@ -231,6 +232,10 @@ type ClientUnit = {
   offer_purchase_price?: number | string | null;
   reservation_fee_amount?: number | string | null;
   downpayment_amount?: number | string | null;
+  downpayment_percent?: number | string | null;
+  downpayment_gives?: number | string | null;
+  downpayment_discount_amount?: number | string | null;
+  downpayment_net_amount?: number | string | null;
   deferred_cash_amount?: number | string | null;
   legal_misc_payment_mode?: "included" | "deferred" | string | null;
   defer_legal_misc_fee?: boolean | number | string | null;
@@ -248,6 +253,9 @@ type ClientUnit = {
   total_paid_by_client?: number | string | null;
   refund_amount?: number | string | null;
   discontinued_amount?: number | string | null;
+  cancelled_contract_price?: number | string | null;
+  cancelled_total_paid?: number | string | null;
+  cancelled_balance_snapshot?: number | string | null;
   settlement_date?: string | null;
   cancellation_remarks?: string | null;
   refund_released_at?: string | null;
@@ -318,6 +326,26 @@ type Seller = {
   reports_under_display?: string | null;
 };
 
+type ClientDocumentFile = {
+  id: number | null;
+  client_document_id: number;
+  client_unit_id?: number;
+  document_id?: number;
+  file_name?: string | null;
+  original_file_name?: string | null;
+  mime_type?: string | null;
+  file_size?: number | string | null;
+  file_url?: string | null;
+  cloudinary_secure_url?: string | null;
+  web_view_link?: string | null;
+  uploaded_at?: string | null;
+  uploaded_by?: number | null;
+  uploaded_by_name?: string | null;
+  is_primary?: number | boolean | string | null;
+  file_status?: string | null;
+  legacy?: boolean;
+};
+
 type ClientDocument = {
   id: number;
   client_unit_id: number;
@@ -337,6 +365,8 @@ type ClientDocument = {
   uploaded_at?: string | null;
   uploaded_by?: number | null;
   uploaded_by_name?: string | null;
+  files?: ClientDocumentFile[];
+  upload_count?: number | string;
   status: "not_submitted" | "submitted" | "approved" | "rejected" | string;
   reviewed_by: number | null;
   reviewed_by_name: string | null;
@@ -451,6 +481,8 @@ type ReserveListingData = {
   seller_id: number | "";
   status: string;
   mode_of_payment: "cash" | "installment";
+  legal_misc_payment_mode: "included" | "deferred";
+  legal_misc_due_date: string;
   buyer_type: BuyerType;
   co_buyer: CoBuyerFormData;
   co_buyer_employment: EmploymentFormData;
@@ -469,8 +501,6 @@ type ReserveListingData = {
   downpayment_discount_rate_custom: string;
   downpayment_terms: DownpaymentTermForm[];
   deferred_cash_amount: string;
-  legal_misc_payment_mode: "included" | "deferred";
-  legal_misc_due_date: string;
   balloon_payment_amount: string;
   balloon_due_date: string;
   payment_terms_months: number | "";
@@ -494,6 +524,8 @@ type EditUnitData = {
   due_date: string;
   status: string;
   mode_of_payment: "cash" | "installment";
+  legal_misc_payment_mode: "included" | "deferred";
+  legal_misc_due_date: string;
   buyer_type: BuyerType;
   co_buyer: CoBuyerFormData;
   co_buyer_employment: EmploymentFormData;
@@ -708,6 +740,8 @@ const defaultEditUnitData: EditUnitData = {
   due_date: "",
   status: "reserved",
   mode_of_payment: "installment",
+  legal_misc_payment_mode: "included",
+  legal_misc_due_date: "",
   buyer_type: "single",
   co_buyer: createBlankCoBuyerData(),
   co_buyer_employment: createBlankEmploymentData("co_buyer"),
@@ -1359,6 +1393,15 @@ const updateClientUnit = async ({
       due_date: unitData.due_date || null,
       status: unitData.status,
       mode_of_payment: unitData.mode_of_payment,
+      legal_misc_payment_mode:
+        unitData.mode_of_payment === "installment"
+          ? unitData.legal_misc_payment_mode
+          : "included",
+      legal_misc_due_date:
+        unitData.mode_of_payment === "installment" &&
+        unitData.legal_misc_payment_mode === "deferred"
+          ? unitData.legal_misc_due_date || null
+          : null,
       buyer_type: unitData.buyer_type,
       co_buyer: unitData.buyer_type === "single" ? null : unitData.co_buyer,
       co_buyer_employment:
@@ -1552,13 +1595,13 @@ const updateClientDocumentStatus = async ({
 
 const uploadClientDocumentFile = async ({
   clientDocumentId,
-  file,
+  files,
 }: {
   clientDocumentId: number;
-  file: File;
+  files: File[];
 }) => {
   const formData = new FormData();
-  formData.append("file", file);
+  files.forEach((file) => formData.append("files", file));
 
   const res = await fetch(
     `${API_URL}/client-documents/${clientDocumentId}/upload`,
@@ -1573,6 +1616,78 @@ const uploadClientDocumentFile = async ({
 
   return res.json();
 };
+
+const deleteClientDocumentFile = async (fileId: number) => {
+  const res = await fetch(`${API_URL}/client-document-files/${fileId}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+
+  if (!res.ok) throw new Error(await getErrorMessage(res));
+
+  return res.json();
+};
+
+const allowedClientDocumentFileTypes = new Set([
+  "image/jpeg",
+  "image/png",
+]);
+
+const isAllowedDocumentImage = (file: ClientDocumentFile) =>
+  allowedClientDocumentFileTypes.has(String(file.mime_type || ""));
+
+const getClientDocumentFiles = (document: ClientDocument): ClientDocumentFile[] => {
+  if (Array.isArray(document.files) && document.files.length > 0) {
+    return document.files.filter(isAllowedDocumentImage);
+  }
+
+  if (document.file_name || document.file_url || document.web_view_link) {
+    return [
+      {
+        id: null,
+        client_document_id: document.id,
+        client_unit_id: document.client_unit_id,
+        document_id: document.document_id,
+        file_name: document.file_name,
+        original_file_name: document.file_name,
+        mime_type: document.mime_type,
+        file_size: document.file_size,
+        file_url: document.file_url || document.web_view_link,
+        cloudinary_secure_url: document.file_url || document.web_view_link,
+        web_view_link: document.web_view_link,
+        uploaded_at: document.uploaded_at,
+        uploaded_by: document.uploaded_by,
+        uploaded_by_name: document.uploaded_by_name,
+        is_primary: true,
+        file_status: "active",
+        legacy: true,
+      },
+    ];
+  }
+
+  return [];
+};
+
+const getClientDocumentFileUrl = (
+  document: ClientDocument,
+  file: ClientDocumentFile,
+) => {
+  return (
+    file.cloudinary_secure_url ||
+    file.web_view_link ||
+    file.file_url ||
+    document.web_view_link ||
+    document.file_url ||
+    "#"
+  );
+};
+
+const getReadableFileType = (mimeType?: string | null) => {
+  if (mimeType === "image/jpeg") return "JPG";
+  if (mimeType === "image/png") return "PNG";
+  return "File";
+};
+
 
 const downloadClientUnitDocumentsPdf = async (unit: ClientUnit) => {
   const res = await fetch(
@@ -1975,6 +2090,8 @@ const ClientProfile = () => {
     mutationFn: updateCancellationSettlement,
     onSuccess: () => {
       invalidateClientProfile();
+      setSettlementUnit(null);
+      setSettlementData(defaultSettlementData);
       setSuccessMessage("Cancellation settlement saved successfully");
     },
   });
@@ -2018,7 +2135,15 @@ const ClientProfile = () => {
     mutationFn: uploadClientDocumentFile,
     onSuccess: () => {
       invalidateClientProfile();
-      setSuccessMessage("Document file uploaded successfully");
+      setSuccessMessage("Document image(s) uploaded successfully");
+    },
+  });
+
+  const deleteDocumentFileMutation = useMutation({
+    mutationFn: deleteClientDocumentFile,
+    onSuccess: () => {
+      invalidateClientProfile();
+      setSuccessMessage("Document image removed successfully");
     },
   });
 
@@ -2291,6 +2416,31 @@ const ClientProfile = () => {
   const totals = useMemo(() => {
     return clientUnits.reduce(
       (summary, unit) => {
+        const status = String(unit.status || "").toLowerCase();
+        const cancellationStatus = String(unit.cancellation_status || "").toLowerCase();
+        const isCancelledAccount =
+          status === "cancelled" ||
+          status === "pending_cancellation" ||
+          ["pending_settlement", "approved_for_refund", "settled"].includes(cancellationStatus);
+
+        if (isCancelledAccount) {
+          summary.cancelledContractPrice += Number(
+            unit.cancelled_contract_price || unit.total_contract_price || 0,
+          );
+          summary.cancelledTotalPaid += Number(
+            unit.cancelled_total_paid || unit.total_paid_by_client || unit.paid_amount || 0,
+          );
+          summary.cancelledBalance += Number(
+            unit.cancelled_balance_snapshot ||
+              Math.max(
+                Number(unit.cancelled_contract_price || unit.total_contract_price || 0) -
+                  Number(unit.cancelled_total_paid || unit.total_paid_by_client || unit.paid_amount || 0),
+                0,
+              ),
+          );
+          return summary;
+        }
+
         summary.totalContractPrice += Number(unit.total_contract_price || 0);
         summary.totalPaid += Number(unit.paid_amount || 0);
         summary.totalBalance += Number(unit.balance || 0);
@@ -2303,6 +2453,9 @@ const ClientProfile = () => {
         totalPaid: 0,
         totalBalance: 0,
         totalCommission: 0,
+        cancelledContractPrice: 0,
+        cancelledTotalPaid: 0,
+        cancelledBalance: 0,
       },
     );
   }, [clientUnits]);
@@ -2461,6 +2614,11 @@ const ClientProfile = () => {
       due_date: unit.due_date ? String(unit.due_date).slice(0, 10) : "",
       status: unit.status || "reserved",
       mode_of_payment: unit.mode_of_payment === "cash" ? "cash" : "installment",
+      legal_misc_payment_mode:
+        unit.legal_misc_payment_mode === "deferred" ? "deferred" : "included",
+      legal_misc_due_date: unit.legal_misc_due_date
+        ? String(unit.legal_misc_due_date).slice(0, 10)
+        : "",
       buyer_type: normalizeBuyerType(unit.buyer_type),
       co_buyer: clientUnitToCoBuyerFormData(unit),
       co_buyer_employment: clientUnitToCoBuyerEmploymentFormData(unit),
@@ -2677,14 +2835,26 @@ const ClientProfile = () => {
 
   const handleDocumentFileChange = (
     document: ClientDocument,
-    file: File | null,
+    fileList: FileList | null,
   ) => {
-    if (!file) return;
+    const files = Array.from(fileList || []);
+    if (files.length === 0) return;
+
+    const invalidFile = files.find(
+      (file) => !allowedClientDocumentFileTypes.has(file.type),
+    );
+
+    if (invalidFile) {
+      window.alert("Only JPG and PNG image files are allowed.");
+      return;
+    }
+
     uploadDocumentMutation.mutate({
       clientDocumentId: document.id,
-      file,
+      files,
     });
   };
+
 
   if (isClientLoading || areUnitsLoading) {
     return <LoadingState label="Loading client profile..." />;
@@ -2849,23 +3019,54 @@ const ClientProfile = () => {
         />
       ) : null}
 
-      <div className="grid gap-4 md:grid-cols-4">
+      {deleteDocumentFileMutation.error ? (
+        <Alert
+          variant="error"
+          title={
+            deleteDocumentFileMutation.error instanceof Error
+              ? deleteDocumentFileMutation.error.message
+              : "Failed to remove document image"
+          }
+        />
+      ) : null}
+
+      <div className="grid gap-4 md:grid-cols-3">
         <StatCard
-          title="Total Contract Price"
+          title="Active Contract Price"
           value={formatMoney(totals.totalContractPrice)}
           icon={<FiHome />}
         />
         <StatCard
-          title="Total Paid"
+          title="Active Total Paid"
           value={formatMoney(totals.totalPaid)}
           icon={<FiFileText />}
         />
         <StatCard
-          title="Balance"
+          title="Active Balance"
           value={formatMoney(totals.totalBalance)}
           icon={<FiFileText />}
         />
       </div>
+
+      {totals.cancelledContractPrice > 0 || totals.cancelledTotalPaid > 0 ? (
+        <div className="mt-4 grid gap-4 md:grid-cols-3">
+          <StatCard
+            title="Cancelled Contract Price"
+            value={formatMoney(totals.cancelledContractPrice)}
+            icon={<FiHome />}
+          />
+          <StatCard
+            title="Cancelled Total Paid"
+            value={formatMoney(totals.cancelledTotalPaid)}
+            icon={<FiFileText />}
+          />
+          <StatCard
+            title="Cancelled Balance Snapshot"
+            value={formatMoney(totals.cancelledBalance)}
+            icon={<FiFileText />}
+          />
+        </div>
+      ) : null}
 
       <div className="mt-6 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
         <h2 className="text-lg font-bold text-slate-900">Client Details</h2>
@@ -3415,6 +3616,7 @@ const ClientProfile = () => {
                   <th className="px-4 py-3 text-left">Unit</th>
                   <th className="px-4 py-3 text-left">Project</th>
                   <th className="px-4 py-3 text-left">TCP</th>
+                  <th className="px-4 py-3 text-left">DP</th>
                   <th className="px-4 py-3 text-left">Paid</th>
                   <th className="px-4 py-3 text-left">Balance</th>
                   <th className="px-4 py-3 text-left">Payment %</th>
@@ -3453,6 +3655,23 @@ const ClientProfile = () => {
 
                       <td className="px-4 py-3 font-semibold text-slate-900">
                         {formatMoney(unit.total_contract_price)}
+                      </td>
+
+                      <td className="px-4 py-3 text-slate-600">
+                        <p className="font-semibold text-slate-900">
+                          {unit.mode_of_payment === "cash"
+                            ? "-"
+                            : formatMoney(
+                                unit.downpayment_net_amount ??
+                                  unit.downpayment_amount ??
+                                  0,
+                              )}
+                        </p>
+                        {unit.mode_of_payment !== "cash" ? (
+                          <p className="text-xs text-slate-500">
+                            {formatNumber(unit.downpayment_percent || 0)}% · {formatNumber(unit.downpayment_gives || 0)} give(s)
+                          </p>
+                        ) : null}
                       </td>
 
                       <td className="px-4 py-3 text-slate-600">
@@ -4533,7 +4752,7 @@ const ClientProfile = () => {
         <Modal
           title={`Edit Unit - ${editUnit.unit_id}`}
           onClose={() => setEditUnit(null)}
-          size="lg"
+          size="xl"
           footer={
             <div className="flex justify-end gap-2">
               <Button onClick={() => setEditUnit(null)}>Cancel</Button>
@@ -4547,145 +4766,398 @@ const ClientProfile = () => {
             </div>
           }
         >
-          <div className="grid gap-4 md:grid-cols-2">
-            <Select
-              label="Assigned Seller / Unit Manager"
-              value={editUnitData.seller_id}
-              onChange={(e) => {
-                const nextSeller = sellers.find(
-                  (seller) => Number(seller.id) === Number(e.target.value),
-                );
-
-                setEditUnitData({
-                  ...editUnitData,
-                  seller_id: e.target.value,
-                  direct_to_developer_rate:
-                    editUnitData.sale_type === "direct_to_developer" &&
-                    !editUnitData.direct_to_developer_rate
-                      ? getSellerDirectToDeveloperRate(nextSeller)
-                      : editUnitData.direct_to_developer_rate,
-                });
-              }}
-            >
-              <option value="">No seller selected</option>
-              {sellers.map((seller) => (
-                <option key={seller.id} value={seller.id}>
-                  {seller.full_name} - {formatText(seller.seller_role)}
-                </option>
-              ))}
-            </Select>
-
-            <Select
-              label="Mode of Payment"
-              value={editUnitData.mode_of_payment}
-              onChange={(e) =>
-                setEditUnitData({
-                  ...editUnitData,
-                  mode_of_payment: e.target.value as "cash" | "installment",
-                })
-              }
-            >
-              <option value="installment">Installment</option>
-              <option value="cash">Cash</option>
-            </Select>
-
-            <Input
-              label="First Due Date"
-              type="date"
-              value={editUnitData.due_date}
-              onChange={(e) =>
-                setEditUnitData({
-                  ...editUnitData,
-                  due_date: e.target.value,
-                })
-              }
-            />
-
-            <Select
-              label="Status"
-              value={editUnitData.status}
-              onChange={(e) =>
-                setEditUnitData({
-                  ...editUnitData,
-                  status: e.target.value,
-                })
-              }
-            >
-              <option value="reserved">Reserved</option>
-              <option value="active">Active</option>
-              <option value="cancelled">Cancelled</option>
-              <option value="fully_paid">Fully Paid</option>
-              <option value="closed">Closed</option>
-            </Select>
-
-            <Select
-              label="Sale Channel"
-              value={editUnitData.sale_type}
-              onChange={(e) => {
-                const saleType = e.target.value as
-                  | "distributed"
-                  | "direct_to_developer";
-
-                setEditUnitData({
-                  ...editUnitData,
-                  sale_type: saleType,
-                  direct_to_developer_rate:
-                    saleType === "direct_to_developer" &&
-                    !editUnitData.direct_to_developer_rate
-                      ? selectedEditDirectToDeveloperRate
-                      : editUnitData.direct_to_developer_rate,
-                  regenerate_commission:
-                    saleType !== editUnitData.sale_type
-                      ? true
-                      : editUnitData.regenerate_commission,
-                });
-              }}
-            >
-              <option value="distributed">Distributed</option>
-              <option value="direct_to_developer">Direct to Developer</option>
-            </Select>
-
-            <div className="md:col-span-2">
-              <UnitBuyerFields
-                buyerType={editUnitData.buyer_type}
-                coBuyer={editUnitData.co_buyer}
-                coBuyerEmployment={editUnitData.co_buyer_employment}
-                onBuyerTypeChange={(buyerType) =>
-                  setEditUnitData({
-                    ...editUnitData,
-                    buyer_type: buyerType,
-                    co_buyer:
-                      buyerType === "single"
-                        ? createBlankCoBuyerData()
-                        : {
-                            ...editUnitData.co_buyer,
-                            buyer_role:
-                              buyerType === "spouses"
-                                ? "spouse"
-                                : "second_buyer",
-                          },
-                    co_buyer_employment:
-                      buyerType === "single"
-                        ? createBlankEmploymentData("co_buyer")
-                        : editUnitData.co_buyer_employment,
-                  })
+          <div className="space-y-5">
+            <div className="grid gap-4 rounded-xl border border-slate-200 bg-slate-50 p-4 md:grid-cols-4">
+              <MiniDetail label="Unit ID" value={editUnit.unit_id} />
+              <MiniDetail label="Project" value={editUnit.project_name} />
+              <MiniDetail
+                label="Area"
+                value={`${formatNumber(editUnit.lot_area_sqm)} sqm`}
+              />
+              <MiniDetail
+                label="TCP"
+                value={formatMoney(editUnit.total_contract_price)}
+              />
+              <MiniDetail
+                label="Paid"
+                value={formatMoney(editUnit.paid_amount)}
+              />
+              <MiniDetail
+                label="Balance"
+                value={formatMoney(editUnit.balance)}
+              />
+              <MiniDetail
+                label="Downpayment"
+                value={
+                  editUnit.mode_of_payment === "cash"
+                    ? "-"
+                    : formatMoney(
+                        editUnit.downpayment_net_amount ??
+                          editUnit.downpayment_amount ??
+                          0,
+                      )
                 }
-                onCoBuyerChange={(coBuyer) =>
-                  setEditUnitData({
-                    ...editUnitData,
-                    co_buyer: coBuyer,
-                  })
-                }
-                onCoBuyerEmploymentChange={(coBuyerEmployment) =>
-                  setEditUnitData({
-                    ...editUnitData,
-                    co_buyer_employment: coBuyerEmployment,
-                  })
+              />
+              <MiniDetail
+                label="Monthly"
+                value={
+                  editUnit.mode_of_payment === "cash"
+                    ? "-"
+                    : editUnit.monthly_amortization !== null &&
+                        editUnit.monthly_amortization !== undefined
+                      ? formatMoney(editUnit.monthly_amortization)
+                      : "-"
                 }
               />
             </div>
 
-            <label className="flex items-center gap-2 rounded-xl border border-slate-200 p-3 text-sm text-slate-700">
+            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <h3 className="text-sm font-bold text-slate-900">
+                Buyer Details
+              </h3>
+              <p className="mt-1 text-xs text-slate-500">
+                Same buyer section as Reserve Listing. Use this when the buyer type or second buyer details were encoded incorrectly.
+              </p>
+
+              <div className="mt-4">
+                <UnitBuyerFields
+                  buyerType={editUnitData.buyer_type}
+                  coBuyer={editUnitData.co_buyer}
+                  coBuyerEmployment={editUnitData.co_buyer_employment}
+                  onBuyerTypeChange={(buyerType) =>
+                    setEditUnitData({
+                      ...editUnitData,
+                      buyer_type: buyerType,
+                      co_buyer:
+                        buyerType === "single"
+                          ? createBlankCoBuyerData()
+                          : {
+                              ...editUnitData.co_buyer,
+                              buyer_role:
+                                buyerType === "spouses"
+                                  ? "spouse"
+                                  : "second_buyer",
+                            },
+                      co_buyer_employment:
+                        buyerType === "single"
+                          ? createBlankEmploymentData("co_buyer")
+                          : editUnitData.co_buyer_employment,
+                    })
+                  }
+                  onCoBuyerChange={(coBuyer) =>
+                    setEditUnitData({
+                      ...editUnitData,
+                      co_buyer: coBuyer,
+                    })
+                  }
+                  onCoBuyerEmploymentChange={(coBuyerEmployment) =>
+                    setEditUnitData({
+                      ...editUnitData,
+                      co_buyer_employment: coBuyerEmployment,
+                    })
+                  }
+                />
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <h3 className="text-sm font-bold text-slate-900">
+                Assignment & Status
+              </h3>
+
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                <Select
+                  label="Assigned Seller / Unit Manager"
+                  value={editUnitData.seller_id}
+                  onChange={(e) => {
+                    const nextSeller = sellers.find(
+                      (seller) => Number(seller.id) === Number(e.target.value),
+                    );
+
+                    setEditUnitData({
+                      ...editUnitData,
+                      seller_id: e.target.value,
+                      direct_to_developer_rate:
+                        editUnitData.sale_type === "direct_to_developer" &&
+                        !editUnitData.direct_to_developer_rate
+                          ? getSellerDirectToDeveloperRate(nextSeller)
+                          : editUnitData.direct_to_developer_rate,
+                    });
+                  }}
+                >
+                  <option value="">No seller selected</option>
+                  {sellers.map((seller) => (
+                    <option key={seller.id} value={seller.id}>
+                      {seller.full_name} - {formatText(seller.seller_role)}
+                    </option>
+                  ))}
+                </Select>
+
+                <Select
+                  label="Mode of Payment"
+                  value={editUnitData.mode_of_payment}
+                  onChange={(e) => {
+                    const paymentMode = e.target.value as "cash" | "installment";
+
+                    setEditUnitData({
+                      ...editUnitData,
+                      mode_of_payment: paymentMode,
+                      legal_misc_payment_mode:
+                        paymentMode === "installment"
+                          ? editUnitData.legal_misc_payment_mode
+                          : "included",
+                      legal_misc_due_date:
+                        paymentMode === "installment"
+                          ? editUnitData.legal_misc_due_date
+                          : "",
+                    });
+                  }}
+                >
+                  <option value="installment">Installment</option>
+                  <option value="cash">Cash</option>
+                </Select>
+
+                <Select
+                  label="Status"
+                  value={editUnitData.status}
+                  onChange={(e) =>
+                    setEditUnitData({
+                      ...editUnitData,
+                      status: e.target.value,
+                    })
+                  }
+                >
+                  <option value="reserved">Reserved</option>
+                  <option value="active">Active</option>
+                  <option value="past_due">Past Due</option>
+                  <option value="pending_cancellation">Pending Cancellation</option>
+                  <option value="cancelled">Cancelled</option>
+                  <option value="fully_paid">Fully Paid</option>
+                  <option value="closed">Closed</option>
+                </Select>
+
+                <Select
+                  label="Sale Channel"
+                  value={editUnitData.sale_type}
+                  onChange={(e) => {
+                    const saleType = e.target.value as
+                      | "distributed"
+                      | "direct_to_developer";
+
+                    setEditUnitData({
+                      ...editUnitData,
+                      sale_type: saleType,
+                      direct_to_developer_rate:
+                        saleType === "direct_to_developer" &&
+                        !editUnitData.direct_to_developer_rate
+                          ? selectedEditDirectToDeveloperRate
+                          : editUnitData.direct_to_developer_rate,
+                      regenerate_commission:
+                        saleType !== editUnitData.sale_type
+                          ? true
+                          : editUnitData.regenerate_commission,
+                    });
+                  }}
+                >
+                  <option value="distributed">Distributed</option>
+                  <option value="direct_to_developer">Direct to Developer</option>
+                </Select>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <h3 className="text-sm font-bold text-slate-900">
+                Payment Terms
+              </h3>
+              <p className="mt-1 text-xs text-slate-500">
+                Current financial terms are shown beside the editable due/legal-misc fields so this matches the Reserve Listing flow.
+              </p>
+
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                <Input
+                  label="First Due Date"
+                  type="date"
+                  value={editUnitData.due_date}
+                  onChange={(e) =>
+                    setEditUnitData({
+                      ...editUnitData,
+                      due_date: e.target.value,
+                    })
+                  }
+                />
+
+                {editUnitData.mode_of_payment === "installment" ? (
+                  <Select
+                    label="Legal / Misc Fee"
+                    value={editUnitData.legal_misc_payment_mode}
+                    onChange={(e) => {
+                      const nextMode = e.target.value as "included" | "deferred";
+
+                      setEditUnitData({
+                        ...editUnitData,
+                        legal_misc_payment_mode: nextMode,
+                        legal_misc_due_date:
+                          nextMode === "deferred"
+                            ? editUnitData.legal_misc_due_date
+                            : "",
+                      });
+                    }}
+                  >
+                    <option value="included">Include in monthly</option>
+                    <option value="deferred">Pay later as separate SOA row</option>
+                  </Select>
+                ) : null}
+
+                {editUnitData.mode_of_payment === "installment" &&
+                editUnitData.legal_misc_payment_mode === "deferred" ? (
+                  <>
+                    <Input
+                      label="Legal / Misc Due Date (optional)"
+                      type="date"
+                      value={editUnitData.legal_misc_due_date}
+                      onChange={(e) =>
+                        setEditUnitData({
+                          ...editUnitData,
+                          legal_misc_due_date: e.target.value,
+                        })
+                      }
+                    />
+
+                    <div className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2">
+                      <p className="text-xs font-semibold text-amber-700">
+                        Legal / Misc Pay Later
+                      </p>
+                      <p className="mt-1 text-sm font-bold text-slate-900">
+                        {formatMoney(editUnit.legal_misc_fee)}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-600">
+                        This stays in the SOA, but it is removed from the monthly amortization base.
+                      </p>
+                    </div>
+                  </>
+                ) : null}
+
+                <MiniDetail
+                  label="Starting Date"
+                  value={formatDate(editUnit.starting_date)}
+                />
+                <MiniDetail
+                  label="Reservation Fee"
+                  value={formatMoney(editUnit.reservation_fee_amount || 0)}
+                />
+                <MiniDetail
+                  label="Downpayment"
+                  value={
+                    editUnit.mode_of_payment === "cash"
+                      ? "-"
+                      : `${formatMoney(
+                          editUnit.downpayment_net_amount ??
+                            editUnit.downpayment_amount ??
+                            0,
+                        )} (${formatNumber(editUnit.downpayment_percent || 0)}%)`
+                  }
+                />
+                <MiniDetail
+                  label="Downpayment Terms"
+                  value={
+                    editUnit.mode_of_payment === "cash"
+                      ? "-"
+                      : `${formatNumber(editUnit.downpayment_gives || 0)} give(s)`
+                  }
+                />
+                <MiniDetail
+                  label="Monthly Terms"
+                  value={
+                    editUnit.mode_of_payment === "cash"
+                      ? "Cash"
+                      : editUnit.payment_terms_months
+                        ? `${formatNumber(editUnit.payment_terms_months)} months`
+                        : "-"
+                  }
+                />
+                <MiniDetail
+                  label="Interest Rate"
+                  value={`${formatNumber(editUnit.interest_rate || 0)}%`}
+                />
+                <MiniDetail
+                  label="Monthly Amortization"
+                  value={
+                    editUnit.mode_of_payment === "cash"
+                      ? "-"
+                      : editUnit.monthly_amortization !== null &&
+                          editUnit.monthly_amortization !== undefined
+                        ? formatMoney(editUnit.monthly_amortization)
+                        : "-"
+                  }
+                />
+                <MiniDetail
+                  label="Balance for Amortization"
+                  value={formatMoney(editUnit.offer_balance_amount ?? editUnit.balance)}
+                />
+              </div>
+            </div>
+
+            {editUnitData.sale_type === "distributed" ? (
+              <div className="rounded-xl border border-blue-100 bg-blue-50 p-4">
+                <h3 className="text-sm font-bold text-slate-900">
+                  Automatic Hierarchy Commission
+                </h3>
+
+                <p className="mt-1 text-xs text-slate-600">
+                  Recalculate only when seller/rates were corrected. This cancels
+                  old pending commission records and creates new ones using the
+                  current saved rates. Released commissions and
+                  cash-advance-linked commissions are locked.
+                </p>
+              </div>
+            ) : null}
+
+            {editUnitData.sale_type === "direct_to_developer" ? (
+              <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-4">
+                <h3 className="text-sm font-bold text-slate-900">
+                  Direct to Developer Commission
+                </h3>
+                <p className="mt-1 text-sm text-slate-600">
+                  Direct-to-developer sales generate only the selected seller
+                  commission. No hierarchy override milestones will be created.
+                </p>
+
+                <div className="mt-4 grid gap-4 md:grid-cols-2">
+                  <Input
+                    disabled={!isSuperAdmin}
+                    label="Direct-to-Developer Commission Rate (%)"
+                    type="number"
+                    min={0}
+                    max={100}
+                    step="0.01"
+                    value={displayedEditDirectToDeveloperRate}
+                    onChange={(e) =>
+                      setEditUnitData({
+                        ...editUnitData,
+                        direct_to_developer_rate: e.target.value,
+                        regenerate_commission: true,
+                      })
+                    }
+                    placeholder={
+                      selectedEditDirectToDeveloperRate || "Use system default"
+                    }
+                  />
+                </div>
+
+                {isSuperAdmin ? (
+                  <p className="mt-2 text-xs font-medium text-emerald-700">
+                    Changing this rate will apply when pending commissions are
+                    recalculated. Released commissions stay locked.
+                  </p>
+                ) : (
+                  <p className="mt-2 text-xs font-medium text-emerald-700">
+                    This rate is controlled by Super Admin.
+                  </p>
+                )}
+              </div>
+            ) : null}
+
+            <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white p-3 text-sm text-slate-700 shadow-sm">
               <input
                 type="checkbox"
                 checked={editUnitData.regenerate_commission}
@@ -4698,72 +5170,12 @@ const ClientProfile = () => {
               />
               Recalculate pending commissions
             </label>
+
+            <p className="text-sm text-slate-500">
+              Seller/rate changes are blocked after a commission release is paid
+              or when this unit has pending/approved/deducted cash advances.
+            </p>
           </div>
-
-          {editUnitData.sale_type === "distributed" ? (
-            <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-4">
-              <h3 className="text-sm font-bold text-slate-900">
-                Automatic Hierarchy Commission
-              </h3>
-
-              <p className="mt-1 text-xs text-slate-600">
-                Recalculate only when seller/rates were corrected. This cancels
-                old pending commission records and creates new ones using the
-                current saved rates. Released commissions and
-                cash-advance-linked commissions are locked.
-              </p>
-            </div>
-          ) : null}
-
-          {editUnitData.sale_type === "direct_to_developer" ? (
-            <div className="mt-4 rounded-xl border border-emerald-100 bg-emerald-50 p-4">
-              <h3 className="text-sm font-bold text-slate-900">
-                Direct to Developer Commission
-              </h3>
-              <p className="mt-1 text-sm text-slate-600">
-                Direct-to-developer sales generate only the selected seller
-                commission. No hierarchy override milestones will be created.
-              </p>
-
-              <div className="mt-4 grid gap-4 md:grid-cols-2">
-                <Input
-                  disabled={!isSuperAdmin}
-                  label="Direct-to-Developer Commission Rate (%)"
-                  type="number"
-                  min={0}
-                  max={100}
-                  step="0.01"
-                  value={displayedEditDirectToDeveloperRate}
-                  onChange={(e) =>
-                    setEditUnitData({
-                      ...editUnitData,
-                      direct_to_developer_rate: e.target.value,
-                      regenerate_commission: true,
-                    })
-                  }
-                  placeholder={
-                    selectedEditDirectToDeveloperRate || "Use system default"
-                  }
-                />
-              </div>
-
-              {isSuperAdmin ? (
-                <p className="mt-2 text-xs font-medium text-emerald-700">
-                  Changing this rate will apply when pending commissions are
-                  recalculated. Released commissions stay locked.
-                </p>
-              ) : (
-                <p className="mt-2 text-xs font-medium text-emerald-700">
-                  This rate is controlled by Super Admin.
-                </p>
-              )}
-            </div>
-          ) : null}
-
-          <p className="mt-3 text-sm text-slate-500">
-            Seller/rate changes are blocked after a commission release is paid
-            or when this unit has pending/approved/deducted cash advances.
-          </p>
         </Modal>
       ) : null}
 
@@ -5012,8 +5424,8 @@ const ClientProfile = () => {
             <div className="space-y-4">
               <Alert
                 variant="warning"
-                title="Set the refund amount before completing cancellation."
-                message="Discontinued Money is the verified payment amount that will not be refunded and will remain with the company. The listing can only return to Available after settlement is settled and Clear for Resale is clicked."
+                title="Cancellation settlement rules"
+                message="Refund can be zero. If refund is 0, all verified payments become discontinued money and super admin can settle the cancellation without releasing a refund. The listing can return to Available only after Clear for Resale is clicked."
               />
 
               <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
@@ -5148,7 +5560,7 @@ const ClientProfile = () => {
                     downloadDocumentsMutation.mutate(selectedDocumentsUnit)
                   }
                 >
-                  Download Docs Images
+                  Download Docs PDF
                 </Button>
               </div>
 
@@ -5299,15 +5711,47 @@ const ClientProfile = () => {
                           </td>
 
                           <td className="px-4 py-3 text-slate-600">
-                            {document.file_name ? (
-                              <a
-                                className="font-semibold text-blue-600 hover:text-blue-700"
-                                href={`${API_URL}/client-documents/${document.id}/file`}
-                                target="_blank"
-                                rel="noreferrer"
-                              >
-                                {document.file_name}
-                              </a>
+                            {getClientDocumentFiles(document).length > 0 ? (
+                              <div className="max-w-[260px] space-y-1">
+                                {getClientDocumentFiles(document).map((file, index) => (
+                                  <div
+                                    key={`${document.id}-${file.id ?? index}`}
+                                    className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5"
+                                  >
+                                    <a
+                                      className="min-w-0 flex-1 truncate font-semibold text-blue-600 hover:text-blue-700"
+                                      href={getClientDocumentFileUrl(document, file)}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      title={file.original_file_name || file.file_name || "Uploaded image"}
+                                    >
+                                      {file.original_file_name || file.file_name || `Image ${index + 1}`}
+                                      <span className="ml-1 text-xs font-normal text-slate-500">
+                                        ({getReadableFileType(file.mime_type)})
+                                      </span>
+                                    </a>
+
+                                    {file.id ? (
+                                      <button
+                                        type="button"
+                                        className="inline-flex items-center gap-1 rounded-md border border-red-200 bg-white px-2 py-1 text-[11px] font-semibold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                        disabled={deleteDocumentFileMutation.isPending}
+                                        onClick={() => {
+                                          const confirmed = window.confirm("Remove this uploaded image?");
+                                          if (!confirmed || !file.id) return;
+                                          deleteDocumentFileMutation.mutate(Number(file.id));
+                                        }}
+                                      >
+                                        <FiTrash2 />
+                                        Remove
+                                      </button>
+                                    ) : null}
+                                  </div>
+                                ))}
+                                <p className="text-xs text-slate-400">
+                                  {getClientDocumentFiles(document).length} uploaded image(s)
+                                </p>
+                              </div>
                             ) : (
                               "-"
                             )}
@@ -5346,18 +5790,20 @@ const ClientProfile = () => {
                                 <FiUpload />
                                 {uploadDocumentMutation.isPending
                                   ? "Uploading..."
-                                  : "Upload"}
+                                  : "Upload Image(s)"}
                                 <input
                                   className="hidden"
                                   type="file"
-                                  accept="image/jpeg,image/png,image/webp,application/pdf"
+                                  accept="image/jpeg,image/png"
+                                  multiple
                                   disabled={uploadDocumentMutation.isPending}
-                                  onChange={(event) =>
+                                  onChange={(event) => {
                                     handleDocumentFileChange(
                                       document,
-                                      event.target.files?.[0] || null,
-                                    )
-                                  }
+                                      event.target.files || null,
+                                    );
+                                    event.currentTarget.value = "";
+                                  }}
                                 />
                               </label>
                             </div>
@@ -5980,9 +6426,3 @@ const MiniDetail = ({
 };
 
 export default ClientProfile;
-
-
-
-
-
-

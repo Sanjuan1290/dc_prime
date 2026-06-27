@@ -964,6 +964,114 @@ const buildReservationTerms = ({
   }
 }
 
+
+const rebuildClientUnitFinancialTerms = async ({
+  connection,
+  clientUnit,
+  listing,
+  modeOfPayment,
+  dueDate,
+  legalMiscPaymentMode,
+  deferLegalMiscFee,
+  legalMiscDueDate,
+}) => {
+  const [storedTermRows] = await connection.query(
+    `
+    SELECT
+      installment_no,
+      DATE_FORMAT(due_date, '%Y-%m-%d') AS due_date,
+      discount_rate
+    FROM client_unit_downpayment_terms
+    WHERE client_unit_id = ?
+    ORDER BY installment_no ASC
+    `,
+    [clientUnit.id]
+  )
+
+  const termsResult = buildReservationTerms({
+    listing,
+    modeOfPayment: modeOfPayment || clientUnit.mode_of_payment || 'installment',
+    startingDate: clientUnit.starting_date || new Date().toISOString().slice(0, 10),
+    dueDate: dueDate || clientUnit.due_date || clientUnit.starting_date || new Date().toISOString().slice(0, 10),
+    reservationFeeAmount: clientUnit.reservation_fee_amount || listing.reservation_fee || 0,
+    downpaymentPercent: clientUnit.downpayment_percent ?? 30,
+    downpaymentGives: clientUnit.downpayment_gives || storedTermRows.length || 1,
+    downpaymentDiscountRate: clientUnit.downpayment_discount_rate || 0,
+    downpaymentTerms: storedTermRows.map((term) => ({
+      installment_no: term.installment_no,
+      due_date: term.due_date,
+      discount_rate: term.discount_rate,
+    })),
+    deferredCashAmount: clientUnit.deferred_cash_amount || 0,
+    legalMiscPaymentMode: legalMiscPaymentMode || clientUnit.legal_misc_payment_mode || 'included',
+    deferLegalMiscFee: deferLegalMiscFee ?? clientUnit.defer_legal_misc_fee,
+    legalMiscDueDate: legalMiscDueDate || clientUnit.legal_misc_due_date || null,
+    balloonPaymentAmount: clientUnit.balloon_payment_amount || 0,
+    paymentTermsMonths: clientUnit.payment_terms_months || 36,
+    interestRate: listing.annual_interest_rate || clientUnit.interest_rate || 0,
+    monthlyAmortization: null,
+  })
+
+  if (!termsResult.isValid) return termsResult
+
+  const terms = termsResult.value
+
+  await connection.query(
+    `
+    UPDATE client_units
+    SET
+      offer_purchase_price = ?,
+      reservation_fee_amount = ?,
+      downpayment_amount = ?,
+      downpayment_percent = ?,
+      downpayment_gives = ?,
+      downpayment_discount_rate = ?,
+      downpayment_discount_amount = ?,
+      downpayment_net_amount = ?,
+      deferred_cash_amount = ?,
+      legal_misc_payment_mode = ?,
+      defer_legal_misc_fee = ?,
+      legal_misc_due_date = ?,
+      legal_misc_deferred_amount = ?,
+      balloon_payment_amount = ?,
+      balloon_due_date = ?,
+      offer_balance_amount = ?,
+      payment_terms_months = ?,
+      interest_rate = ?,
+      monthly_amortization = ?,
+      balance = ?
+    WHERE id = ?
+    `,
+    [
+      terms.offerPurchasePrice,
+      terms.reservationFeeAmount,
+      terms.downpaymentAmount,
+      terms.downpaymentPercent,
+      terms.downpaymentGives,
+      terms.downpaymentDiscountRate,
+      terms.downpaymentDiscountAmount,
+      terms.downpaymentNetAmount,
+      terms.deferredCashAmount,
+      terms.legalMiscPaymentMode,
+      terms.deferLegalMiscFee,
+      nullableValue(terms.legalMiscDueDate),
+      terms.legalMiscDeferredAmount,
+      terms.balloonPaymentAmount,
+      nullableValue(terms.balloonDueDate),
+      terms.offerBalanceAmount,
+      terms.paymentTermsMonths,
+      terms.interestRate,
+      terms.monthlyAmortization,
+      terms.offerBalanceAmount,
+      clientUnit.id,
+    ]
+  )
+
+  await replaceClientUnitDownpaymentTerms(connection, clientUnit.id, terms.downpaymentTerms)
+
+  return termsResult
+}
+
 const clientUnitFields = `
   cu.id,
   cu.client_id,
@@ -1061,6 +1169,9 @@ const clientUnitFields = `
   COALESCE(cu.total_paid_by_client, 0) AS total_paid_by_client,
   COALESCE(cu.refund_amount, 0) AS refund_amount,
   COALESCE(cu.discontinued_amount, 0) AS discontinued_amount,
+  COALESCE(cu.cancelled_contract_price, COALESCE(cu.offer_purchase_price, l.total_contract_price, 0)) AS cancelled_contract_price,
+  COALESCE(cu.cancelled_total_paid, cu.total_paid_by_client, 0) AS cancelled_total_paid,
+  COALESCE(cu.cancelled_balance_snapshot, 0) AS cancelled_balance_snapshot,
   DATE_FORMAT(cu.settlement_date, '%Y-%m-%d') AS settlement_date,
   cu.cancellation_remarks,
   cu.refund_released_at,
@@ -2377,6 +2488,33 @@ export const updateClientUnit = async (req, res) => {
       ]
     )
 
+    const currentListing = await getListingById(connection, existingClientUnit.listing_id)
+
+    if (!currentListing) {
+      await connection.rollback()
+      return res.status(404).json({
+        message: 'Listing not found',
+      })
+    }
+
+    const recalculatedTerms = await rebuildClientUnitFinancialTerms({
+      connection,
+      clientUnit: existingClientUnit,
+      listing: currentListing,
+      modeOfPayment: finalModeOfPayment,
+      dueDate: nextDueDate,
+      legalMiscPaymentMode: nextLegalMiscPaymentMode,
+      deferLegalMiscFee: nextLegalMiscPaymentMode === 'deferred' ? 1 : 0,
+      legalMiscDueDate: nextLegalMiscDueDate,
+    })
+
+    if (!recalculatedTerms.isValid) {
+      await connection.rollback()
+      return res.status(400).json({
+        message: recalculatedTerms.message,
+      })
+    }
+
     await replaceClientUnitCoBuyer({
       connection,
       clientId: existingClientUnit.client_id,
@@ -2621,6 +2759,28 @@ export const changeClientUnitListing = async (req, res) => {
       `,
       [new_listing_id, finalStatus, id]
     )
+
+    const changedListingTerms = await rebuildClientUnitFinancialTerms({
+      connection,
+      clientUnit: {
+        ...existingClientUnit,
+        listing_id: Number(new_listing_id),
+        status: finalStatus,
+      },
+      listing: newListing,
+      modeOfPayment: existingClientUnit.mode_of_payment,
+      dueDate: existingClientUnit.due_date,
+      legalMiscPaymentMode: existingClientUnit.legal_misc_payment_mode || 'included',
+      deferLegalMiscFee: existingClientUnit.defer_legal_misc_fee,
+      legalMiscDueDate: existingClientUnit.legal_misc_due_date,
+    })
+
+    if (!changedListingTerms.isValid) {
+      await connection.rollback()
+      return res.status(400).json({
+        message: changedListingTerms.message,
+      })
+    }
 
     let regeneratedCommission = null
 
@@ -2871,7 +3031,8 @@ export const updateCancellationSettlement = async (req, res) => {
 
   const totalPaid = await getVerifiedPaidTotal(db, id)
   const refundValidation = validateNonNegativeMoney(refund_amount, 'Refund amount', {
-    required: true,
+    required: false,
+    defaultValue: 0,
   })
 
   if (!refundValidation.isValid) {
@@ -2893,6 +3054,14 @@ export const updateCancellationSettlement = async (req, res) => {
   }
 
   const finalDiscontinuedAmount = normalizeMoney(totalPaid - finalRefundAmount)
+  const totalContractPriceSnapshot = normalizeMoney(
+    existingClientUnit.total_contract_price ||
+      existingClientUnit.offer_purchase_price ||
+      0
+  )
+  const cancelledBalanceSnapshot = normalizeMoney(
+    Math.max(totalContractPriceSnapshot - totalPaid, 0)
+  )
   const resultValue = deriveCancellationResult(totalPaid, finalRefundAmount)
   const nextSettlementStatus =
     finalRefundAmount > 0 ? 'approved_for_refund' : 'settled'
@@ -2915,6 +3084,8 @@ export const updateCancellationSettlement = async (req, res) => {
           client_id,
           listing_id,
           total_paid_snapshot,
+          contract_price_snapshot,
+          balance_snapshot,
           refund_amount,
           discontinued_amount,
           settlement_result,
@@ -2923,13 +3094,15 @@ export const updateCancellationSettlement = async (req, res) => {
           remarks,
           approved_by,
           approved_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
         `,
         [
           id,
           existingClientUnit.client_id,
           existingClientUnit.listing_id,
           totalPaid,
+          totalContractPriceSnapshot,
+          cancelledBalanceSnapshot,
           finalRefundAmount,
           finalDiscontinuedAmount,
           resultValue,
@@ -2951,6 +3124,8 @@ export const updateCancellationSettlement = async (req, res) => {
         UPDATE client_unit_cancellation_settlements
         SET
           total_paid_snapshot = ?,
+          contract_price_snapshot = ?,
+          balance_snapshot = ?,
           refund_amount = ?,
           discontinued_amount = ?,
           settlement_result = ?,
@@ -2966,6 +3141,8 @@ export const updateCancellationSettlement = async (req, res) => {
         `,
         [
           totalPaid,
+          totalContractPriceSnapshot,
+          cancelledBalanceSnapshot,
           finalRefundAmount,
           finalDiscontinuedAmount,
           resultValue,
@@ -2985,6 +3162,9 @@ export const updateCancellationSettlement = async (req, res) => {
         cancellation_status = ?,
         cancellation_result = ?,
         total_paid_by_client = ?,
+        cancelled_contract_price = ?,
+        cancelled_total_paid = ?,
+        cancelled_balance_snapshot = ?,
         refund_amount = ?,
         discontinued_amount = ?,
         settlement_date = ?,
@@ -2999,6 +3179,9 @@ export const updateCancellationSettlement = async (req, res) => {
         nextCancellationStatus,
         resultValue,
         totalPaid,
+        totalContractPriceSnapshot,
+        totalPaid,
+        cancelledBalanceSnapshot,
         finalRefundAmount,
         finalDiscontinuedAmount,
         settlementDate,
@@ -3357,7 +3540,76 @@ export const deleteClientUnit = async (req, res) => {
     }
 
     await connection.query(
+      `DELETE cad
+       FROM cash_advance_deductions cad
+       INNER JOIN cash_advances ca ON ca.id = cad.cash_advance_id
+       WHERE ca.client_unit_id = ?`,
+      [id]
+    )
+
+    await connection.query(
+      `DELETE FROM cash_advances WHERE client_unit_id = ?`,
+      [id]
+    )
+
+    await connection.query(
+      `DELETE cr
+       FROM commission_releases cr
+       INNER JOIN commissions cm ON cm.id = cr.commission_id
+       WHERE cm.client_unit_id = ?`,
+      [id]
+    )
+
+    await connection.query(
+      `UPDATE commissions SET parent_commission_id = NULL WHERE client_unit_id = ?`,
+      [id]
+    )
+
+    await connection.query(
+      `DELETE FROM commissions WHERE client_unit_id = ?`,
+      [id]
+    )
+
+    await connection.query(
+      `DELETE FROM payment_schedules WHERE client_unit_id = ?`,
+      [id]
+    )
+
+    await connection.query(
+      `DELETE FROM client_unit_downpayment_terms WHERE client_unit_id = ?`,
+      [id]
+    )
+
+    await connection.query(
+      `DELETE FROM client_unit_form_prints WHERE client_unit_id = ?`,
+      [id]
+    )
+
+    await connection.query(
+      `DELETE FROM proof_income_requests WHERE client_unit_id = ?`,
+      [id]
+    )
+
+    await connection.query(
       `DELETE FROM client_document_list WHERE client_unit_id = ?`,
+      [id]
+    )
+
+    await connection.query(
+      `DELETE ced
+       FROM client_employment_details ced
+       INNER JOIN client_buyers cb ON cb.id = ced.client_buyer_id
+       WHERE cb.client_unit_id = ?`,
+      [id]
+    )
+
+    await connection.query(
+      `DELETE FROM client_buyers WHERE client_unit_id = ?`,
+      [id]
+    )
+
+    await connection.query(
+      `DELETE FROM payments WHERE client_unit_id = ? AND status <> 'verified'`,
       [id]
     )
 

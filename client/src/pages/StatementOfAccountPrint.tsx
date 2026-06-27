@@ -97,6 +97,25 @@ const display = (value: unknown) => {
   return String(value)
 }
 
+const toMoneyNumber = (value: unknown) => {
+  const parsed = Number(value || 0)
+  return Number.isFinite(parsed) ? Number(parsed.toFixed(2)) : 0
+}
+
+const getCurrentContractPrice = (unit: Record<string, any>) => {
+  const listingTcp = toMoneyNumber(unit.total_contract_price)
+  if (listingTcp > 0) return listingTcp
+
+  const netSellingPrice = toMoneyNumber(unit.net_selling_price)
+  const legalMiscFee = toMoneyNumber(unit.legal_misc_fee)
+
+  if (netSellingPrice > 0 || legalMiscFee > 0) {
+    return toMoneyNumber(netSellingPrice + legalMiscFee)
+  }
+
+  return toMoneyNumber(unit.offer_purchase_price)
+}
+
 const stripReferenceAmount = (value: string) => {
   return value
     .replace(/\s*\(₱[\d,]+(?:\.\d{2})?\)/g, "")
@@ -284,6 +303,7 @@ const StatementOfAccountPrint = () => {
   }
 
   const unit = data.unit
+  const currentContractPrice = getCurrentContractPrice(unit)
   const finalInterestBalance = interestRows.at(-1)?.ending_balance ?? toNumber(data.totals.balance)
 
   return (
@@ -349,7 +369,7 @@ const StatementOfAccountPrint = () => {
                 </tr>
                 <tr>
                   <td>Total Contract Price</td>
-                  <td>{amount(unit.offer_purchase_price || unit.total_contract_price)}</td>
+                  <td>{amount(currentContractPrice)}</td>
                 </tr>
                 <tr>
                   <td>Legal Miscellaneous</td>
@@ -525,7 +545,3 @@ const printStyles = `
 `
 
 export default StatementOfAccountPrint
-
-
-
-

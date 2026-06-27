@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactElement, type ReactNode } from "react"
+import { useMemo, useState, type ReactNode } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { FiBell, FiFileText, FiMail, FiMessageSquare, FiRefreshCw } from "react-icons/fi"
 import Alert from "../components/ui/Alert"
@@ -100,6 +100,12 @@ const postJson = async (path: string, body: Record<string, unknown>) => {
   return response.json()
 }
 
+const getErrorText = (error: unknown, fallback = "Request failed") => {
+  if (error instanceof Error && error.message) return error.message
+  if (typeof error === "string" && error.trim()) return error
+  return fallback
+}
+
 const getLastEmailText = (value?: string | null) => {
   return value ? formatDateOnly(value) : "Not yet sent"
 }
@@ -140,6 +146,9 @@ const Notifications = () => {
   const sendEmailMutation = useMutation({
     mutationFn: ({ endpoint, payload }: { endpoint: string; payload: Record<string, unknown> }) =>
       postJson(endpoint, payload),
+    onMutate: () => {
+      setSuccessMessage("")
+    },
     onSuccess: () => {
       setConfirmEmail(null)
       setCustomEmail(null)
@@ -209,7 +218,7 @@ const Notifications = () => {
   }
 
   const handleConfirmSend = () => {
-    if (!confirmEmail) return
+    if (!confirmEmail || sendEmailMutation.isPending) return
 
     sendEmailMutation.mutate({
       endpoint: confirmEmail.endpoint,
@@ -221,7 +230,7 @@ const Notifications = () => {
   }
 
   const handleCustomSend = () => {
-    if (!customEmail) return
+    if (!customEmail || sendEmailMutation.isPending) return
 
     sendEmailMutation.mutate({
       endpoint: "/notifications/send-custom-email",
@@ -241,7 +250,7 @@ const Notifications = () => {
         title="Notifications"
         subtitle="Review due payments, missing documents, and past due accounts before sending client emails."
         actions={
-          <Button icon={<FiRefreshCw />} onClick={invalidateNotifications}>
+          <Button disabled={sendEmailMutation.isPending} icon={<FiRefreshCw />} onClick={invalidateNotifications}>
             Refresh
           </Button>
         }
@@ -249,8 +258,9 @@ const Notifications = () => {
 
       {successMessage ? <Alert variant="success" title={successMessage} /> : null}
       {sendEmailMutation.error ? (
-        <Alert variant="error" title={(sendEmailMutation.error as Error).message} />
+        <Alert variant="error" title={getErrorText(sendEmailMutation.error)} />
       ) : null}
+      {sendEmailMutation.isPending ? <EmailSendingStatus /> : null}
 
       <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-3">
         {statRows.map((stat) => (
@@ -268,7 +278,7 @@ const Notifications = () => {
       </div>
 
       {activeTab === "due" ? (
-        <NotificationSection isLoading={dueQuery.isLoading} error={dueQuery.error} emptyTitle="No payments due this week">
+        <NotificationSection hasRows={dueRows.length > 0} isLoading={dueQuery.isLoading} error={dueQuery.error} emptyTitle="No payments due this week">
           <PaymentDueTable
             rows={dueRows}
             onCustom={(row) => openCustomEmail(row, "payment_due")}
@@ -279,7 +289,7 @@ const Notifications = () => {
       ) : null}
 
       {activeTab === "documents" ? (
-        <NotificationSection isLoading={docsQuery.isLoading} error={docsQuery.error} emptyTitle="No missing document follow-ups">
+        <NotificationSection hasRows={documentRows.length > 0} isLoading={docsQuery.isLoading} error={docsQuery.error} emptyTitle="No missing document follow-ups">
           <MissingDocumentsTable
             rows={documentRows}
             onCustom={(row) => openCustomEmail(row, "missing_documents")}
@@ -290,7 +300,7 @@ const Notifications = () => {
       ) : null}
 
       {activeTab === "pastDue" ? (
-        <NotificationSection isLoading={pastDueQuery.isLoading} error={pastDueQuery.error} emptyTitle="No past due accounts">
+        <NotificationSection hasRows={pastDueRows.length > 0} isLoading={pastDueQuery.isLoading} error={pastDueQuery.error} emptyTitle="No past due accounts">
           <PastDueTable
             rows={pastDueRows}
             onCustom={(row) => openCustomEmail(row, "past_due")}
@@ -303,12 +313,14 @@ const Notifications = () => {
       {confirmEmail ? (
         <Modal
           title={confirmEmail.title}
-          onClose={() => setConfirmEmail(null)}
+          onClose={() => {
+            if (!sendEmailMutation.isPending) setConfirmEmail(null)
+          }}
           footer={
             <div className="flex justify-end gap-2">
-              <Button onClick={() => setConfirmEmail(null)}>Cancel</Button>
+              <Button disabled={sendEmailMutation.isPending} onClick={() => setConfirmEmail(null)}>Cancel</Button>
               <Button disabled={sendEmailMutation.isPending} icon={<FiMail />} onClick={handleConfirmSend} variant="primary">
-                Send Email
+                {sendEmailMutation.isPending ? "Sending..." : "Send Email"}
               </Button>
             </div>
           }
@@ -319,6 +331,7 @@ const Notifications = () => {
               <p><span className="font-semibold">To:</span> {confirmEmail.clientEmail || "No email"}</p>
               <p><span className="font-semibold">Client:</span> {confirmEmail.clientName}</p>
             </div>
+            {sendEmailMutation.isPending ? <EmailSendingStatus compact /> : null}
           </div>
         </Modal>
       ) : null}
@@ -326,18 +339,20 @@ const Notifications = () => {
       {customEmail ? (
         <Modal
           title={`Custom email - ${customEmail.clientName}`}
-          onClose={() => setCustomEmail(null)}
+          onClose={() => {
+            if (!sendEmailMutation.isPending) setCustomEmail(null)
+          }}
           size="lg"
           footer={
             <div className="flex justify-end gap-2">
-              <Button onClick={() => setCustomEmail(null)}>Cancel</Button>
+              <Button disabled={sendEmailMutation.isPending} onClick={() => setCustomEmail(null)}>Cancel</Button>
               <Button
                 disabled={sendEmailMutation.isPending || !customEmail.subject.trim() || !customEmail.message.trim()}
                 icon={<FiMessageSquare />}
                 onClick={handleCustomSend}
                 variant="primary"
               >
-                Send Custom Email
+                {sendEmailMutation.isPending ? "Sending..." : "Send Custom Email"}
               </Button>
             </div>
           }
@@ -347,6 +362,8 @@ const Notifications = () => {
               <p><span className="font-semibold">To:</span> {customEmail.clientEmail || "No email"}</p>
               <p><span className="font-semibold">Unit:</span> {customEmail.unitId}</p>
             </div>
+
+            {sendEmailMutation.isPending ? <EmailSendingStatus compact /> : null}
 
             <Input
               label="Subject"
@@ -372,7 +389,7 @@ const Notifications = () => {
       {logsClientUnitId ? (
         <Modal title="Email History" onClose={() => setLogsClientUnitId(null)} size="lg">
           {logsQuery.isLoading ? <LoadingState label="Loading email history..." /> : null}
-          {logsQuery.error ? <Alert variant="error" title={(logsQuery.error as Error).message} /> : null}
+          {logsQuery.error ? <Alert variant="error" title={getErrorText(logsQuery.error)} /> : null}
           {!logsQuery.isLoading && !logsQuery.error && (logsQuery.data?.logs || []).length === 0 ? (
             <EmptyState title="No email history" description="No emails were sent for this client unit yet." />
           ) : null}
@@ -397,14 +414,22 @@ const Notifications = () => {
   )
 }
 
-const NotificationSection = ({ children, emptyTitle, error, isLoading }: { children: ReactNode; emptyTitle: string; error: unknown; isLoading: boolean }) => {
+const EmailSendingStatus = ({ compact = false }: { compact?: boolean }) => (
+  <div className={`${compact ? "" : "mb-4"} rounded-xl border border-blue-100 bg-blue-50 p-3 text-sm text-blue-800`}>
+    <div className="flex items-center justify-between gap-3">
+      <span className="font-semibold">Sending email...</span>
+      <span className="text-xs font-medium">Please wait</span>
+    </div>
+    <div className="mt-2 h-2 overflow-hidden rounded-full bg-blue-100">
+      <div className="h-full w-2/3 animate-pulse rounded-full bg-blue-600" />
+    </div>
+    <p className="mt-2 text-xs text-blue-700">Gmail SMTP may take a few seconds. Do not close this window while sending.</p>
+  </div>
+)
+
+const NotificationSection = ({ children, emptyTitle, error, hasRows, isLoading }: { children: ReactNode; emptyTitle: string; error: unknown; hasRows: boolean; isLoading: boolean }) => {
   if (isLoading) return <LoadingState label="Loading notifications..." />
-  if (error) return <Alert variant="error" title={(error as Error).message} />
-
-  const hasRows = Array.isArray((children as ReactElement)?.props?.rows)
-    ? (children as ReactElement).props.rows.length > 0
-    : true
-
+  if (error) return <Alert variant="error" title={getErrorText(error)} />
   if (!hasRows) return <EmptyState title={emptyTitle} description="There are no client records that match this follow-up rule." />
 
   return <>{children}</>

@@ -7,6 +7,19 @@ const toNumber = (value) => Number(value || 0)
 
 const normalizeMoney = (value) => Number(Number(value || 0).toFixed(2))
 
+const getUnitContractPrice = (unit = {}) => {
+  const listingTcp = normalizeMoney(unit.total_contract_price)
+  if (listingTcp > 0) return listingTcp
+
+  const netSellingPrice = normalizeMoney(unit.net_selling_price)
+  const legalMiscFee = normalizeMoney(unit.legal_misc_fee)
+  if (netSellingPrice > 0 || legalMiscFee > 0) {
+    return normalizeMoney(netSellingPrice + legalMiscFee)
+  }
+
+  return normalizeMoney(unit.offer_purchase_price)
+}
+
 const addMonths = (date, months) => {
   const next = new Date(date)
   next.setMonth(next.getMonth() + months)
@@ -179,7 +192,7 @@ const fetchPrintData = async (clientUnitId) => {
 
 const buildSchedule = ({ unit, payments }) => {
   const totalAmountPayable = normalizeMoney(
-    unit.offer_purchase_price || unit.total_contract_price
+    getUnitContractPrice(unit)
   )
   const reservationFee = normalizeMoney(
     unit.reservation_fee_amount || unit.listing_reservation_fee
@@ -323,7 +336,7 @@ export const getClientUnitPrintData = async (req, res) => {
     ), 0)
   )
   const totalAmountPayable = normalizeMoney(
-    printData.unit.offer_purchase_price || printData.unit.total_contract_price
+    getUnitContractPrice(printData.unit)
   )
   const statementBalance = normalizeMoney(
     Math.max(
@@ -400,4 +413,3 @@ export const logClientUnitFormPrint = async (req, res) => {
     },
   })
 }
-

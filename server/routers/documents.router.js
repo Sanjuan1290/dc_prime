@@ -18,6 +18,8 @@ import {
   uploadClientDocumentFile,
   openClientDocumentFile,
   downloadClientUnitDocumentsPdf,
+  openClientDocumentUploadedFile,
+  deleteClientDocumentUploadedFile,
 } from '../controllers/documents.controller.js'
 import { auth, adminOnly } from '../middlewares/auth.middleware.js'
 import multer from 'multer'
@@ -25,25 +27,17 @@ import multer from 'multer'
 const router = express.Router()
 
 const DOCUMENT_UPLOAD_ERROR_MESSAGE =
-  'Unsupported file type. Upload PDF, JPG, PNG, WEBP, DOC, or DOCX only.'
+  'Unsupported file type. Upload JPG or PNG images only.'
 
 const ALLOWED_DOCUMENT_MIME_TYPES = new Set([
-  'application/pdf',
   'image/jpeg',
   'image/png',
-  'image/webp',
-  'application/msword',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
 ])
 
 const ALLOWED_DOCUMENT_EXTENSIONS = new Set([
-  'pdf',
   'jpg',
   'jpeg',
   'png',
-  'webp',
-  'doc',
-  'docx',
 ])
 
 const rejectUnsupportedDocument = () => {
@@ -91,10 +85,11 @@ router.post('/client-units/:clientUnitId/documents/checklist', createChecklistFo
 router.post('/client-units/:clientUnitId/documents/apply-existing', applyExistingReusableDocuments)
 
 router.patch('/client-documents/:id/status', updateClientDocumentStatus)
-router.patch('/client-documents/:id/upload', upload.single('file'), uploadClientDocumentFile)
+router.patch('/client-documents/:id/upload', upload.fields([{ name: 'files', maxCount: 10 }, { name: 'file', maxCount: 1 }]), uploadClientDocumentFile)
 router.get('/client-documents/:id/file', openClientDocumentFile)
+router.get('/client-document-files/:fileId/file', openClientDocumentUploadedFile)
+router.delete('/client-document-files/:fileId', deleteClientDocumentUploadedFile)
 
 router.delete('/documents/:id', deleteDocument)
 
 export default router
-

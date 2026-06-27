@@ -1,5 +1,7 @@
 const AUTO_GENERATED_FOOTER = '**** This is an auto-generated email. DO NOT REPLY TO THIS MESSAGE ****'
 
+export const EMAIL_LOGO_CID = 'dc-prime-logo@dcprime'
+
 const escapeHtml = (value = '') => String(value)
   .replaceAll('&', '&amp;')
   .replaceAll('<', '&lt;')
@@ -7,11 +9,7 @@ const escapeHtml = (value = '') => String(value)
   .replaceAll('"', '&quot;')
   .replaceAll("'", '&#039;')
 
-export const getCompanyLogoUrl = () => {
-  if (process.env.EMAIL_LOGO_URL) return process.env.EMAIL_LOGO_URL
-  if (process.env.CLIENT_URL) return `${process.env.CLIENT_URL.replace(/\/$/, '')}/logo2.png`
-  return ''
-}
+export const getCompanyLogoUrl = () => `cid:${EMAIL_LOGO_CID}`
 
 export const buildPlainEmail = ({ greeting, lines = [], details = [] }) => {
   const detailLines = details
@@ -45,7 +43,7 @@ export const buildHtmlEmail = ({ title, greeting, paragraphs = [], details = [],
                   <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
                     <tr>
                       <td style="vertical-align:middle;">
-                        ${logoUrl ? `<img src="${escapeHtml(logoUrl)}" alt="D&C Prime Realty" style="height:46px;display:block;" />` : '<strong style="font-size:18px;">D&C Prime Realty</strong>'}
+                        <img src="${escapeHtml(logoUrl)}" alt="D&C Prime Realty" width="92" style="height:auto;max-height:56px;display:block;border:0;outline:none;text-decoration:none;" />
                       </td>
                       <td align="right" style="font-size:12px;color:#64748b;vertical-align:middle;">D&C Prime Realty</td>
                     </tr>

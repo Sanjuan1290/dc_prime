@@ -108,6 +108,24 @@ const getDeferredLegalMiscAmount = (unit = {}) => {
   return isLegalMiscDeferred(unit) ? money(unit.legal_misc_fee) : 0
 }
 
+const getListingContractPrice = (unit = {}) => {
+  const listingTcp = firstPositive(
+    unit.listing_total_contract_price,
+    unit.total_contract_price
+  )
+
+  if (listingTcp > 0) return listingTcp
+
+  const netSellingPrice = money(unit.net_selling_price)
+  const legalMiscFee = money(unit.legal_misc_fee)
+
+  if (netSellingPrice > 0 || legalMiscFee > 0) {
+    return money(netSellingPrice + legalMiscFee)
+  }
+
+  return firstPositive(unit.offer_purchase_price, unit.balance)
+}
+
 const getClientUnitPlan = async (connectionOrDb, clientUnitId) => {
   const [rows] = await connectionOrDb.query(
     `
@@ -167,6 +185,40 @@ const getVerifiedPayments = async (connectionOrDb, clientUnitId) => {
   return rows
 }
 
+const MAX_REFERENCE_NO_DISPLAY_LENGTH = 140
+const MAX_REFERENCE_PREVIEW_COUNT = 3
+
+const getReferenceValue = (detail = {}) => {
+  return String(
+    detail.reference_id ||
+      detail.reference_no ||
+      detail.reference ||
+      ''
+  ).trim()
+}
+
+const buildReferenceSummary = (referenceDetails = []) => {
+  const uniqueReferences = []
+
+  for (const detail of Array.isArray(referenceDetails) ? referenceDetails : []) {
+    const reference = getReferenceValue(detail)
+    if (!reference || uniqueReferences.includes(reference)) continue
+    uniqueReferences.push(reference)
+  }
+
+  if (uniqueReferences.length === 0) return null
+
+  const visibleReferences = uniqueReferences.slice(0, MAX_REFERENCE_PREVIEW_COUNT)
+  const hiddenCount = Math.max(uniqueReferences.length - visibleReferences.length, 0)
+  const summary = hiddenCount > 0
+    ? `${visibleReferences.join(', ')} + ${hiddenCount} more`
+    : visibleReferences.join(', ')
+
+  return summary.length > MAX_REFERENCE_NO_DISPLAY_LENGTH
+    ? `${summary.slice(0, MAX_REFERENCE_NO_DISPLAY_LENGTH - 1)}…`
+    : summary
+}
+
 const pushReferenceDetail = (row, detail) => {
   const appliedAmount = money(detail.applied_amount)
   if (appliedAmount <= 0) return
@@ -182,10 +234,7 @@ const pushReferenceDetail = (row, detail) => {
     },
   ]
 
-  const nextReference = `${detail.reference_id} (${appliedAmount.toFixed(2)})`
-  row.reference_no = row.reference_no
-    ? `${row.reference_no}, ${nextReference}`
-    : nextReference
+  row.reference_no = buildReferenceSummary(row.reference_details)
 }
 
 const getAnnualInterestRate = (unit) => {
@@ -248,7 +297,8 @@ const getOfferBalanceAmount = ({
     unit.principal_balance
   )
 
-  if (explicitBalance > 0) return explicitBalance
+  // Prefer the computed current-listing balance. Stored offer_balance_amount can be stale
+  // after changing unit or changing legal/misc mode. Use explicit balance only as fallback.
 
   const computedBalance = money(
     Math.max(
@@ -262,16 +312,13 @@ const getOfferBalanceAmount = ({
   )
 
   if (computedBalance > 0) return computedBalance
+  if (explicitBalance > 0) return explicitBalance
 
   return money(unit.balance)
 }
 
 const buildBaseRows = (unit) => {
-  const totalContractPrice = firstPositive(
-    unit.offer_purchase_price,
-    unit.listing_total_contract_price,
-    unit.net_selling_price
-  )
+  const totalContractPrice = getListingContractPrice(unit)
   const legalMiscDeferredAmount = getDeferredLegalMiscAmount(unit)
   const legalMiscDueDate = toDateOnly(unit.legal_misc_due_date)
   const reservationFee = firstPositive(
@@ -1310,7 +1357,7 @@ const replacePaymentSchedules = async (connectionOrDb, clientUnitId, rows) => {
       money(row.excess_ma_used),
       money(row.balance),
       row.date_paid,
-      row.reference_no,
+      buildReferenceSummary(row.reference_details) || row.reference_no || null,
       JSON.stringify(row.reference_details || []),
       row.status,
       money(row.running_balance),
@@ -1323,11 +1370,7 @@ export const rebuildPaymentSchedule = async (connectionOrDb, clientUnitId) => {
   const unit = await getClientUnitPlan(connectionOrDb, clientUnitId)
   if (!unit) return null
 
-  const totalContractPrice = firstPositive(
-    unit.offer_purchase_price,
-    unit.listing_total_contract_price,
-    unit.net_selling_price
-  )
+  const totalContractPrice = getListingContractPrice(unit)
   const payments = await getVerifiedPayments(connectionOrDb, clientUnitId)
   const baseRows = buildBaseRows(unit)
   const scheduleApplication = applyPaymentsToRows(baseRows, payments, totalContractPrice)

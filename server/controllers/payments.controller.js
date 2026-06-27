@@ -145,6 +145,20 @@ const validatePaymentStatus = (status) => {
 
 const roundAmount = (value) => normalizeMoney(value)
 
+const getCurrentContractPrice = (unit = {}) => {
+  const listingTcp = roundAmount(unit.total_contract_price)
+  if (listingTcp > 0) return listingTcp
+
+  const netSellingPrice = roundAmount(unit.net_selling_price)
+  const legalMiscFee = roundAmount(unit.legal_misc_fee)
+
+  if (netSellingPrice > 0 || legalMiscFee > 0) {
+    return roundAmount(netSellingPrice + legalMiscFee)
+  }
+
+  return roundAmount(unit.offer_purchase_price)
+}
+
 const getClientUnitPaymentPlan = async (connectionOrDb, clientUnitId) => {
   const [rows] = await connectionOrDb.query(
     `
@@ -199,7 +213,7 @@ const buildPaymentSuggestions = async (connectionOrDb, clientUnitId) => {
   const summary = await getVerifiedPaymentSummary(connectionOrDb, clientUnitId)
   const scheduleDue = await getNextPaymentScheduleDue(connectionOrDb, clientUnitId)
   const nextScheduleRow = scheduleDue.nextRow
-  const totalContractPrice = roundAmount(unit.offer_purchase_price || unit.total_contract_price)
+  const totalContractPrice = getCurrentContractPrice(unit)
   const paidAmount = roundAmount(summary.paid_amount)
   const scheduleBalance = roundAmount(scheduleDue.totalBalance || 0)
   const principalBalance = roundAmount(
