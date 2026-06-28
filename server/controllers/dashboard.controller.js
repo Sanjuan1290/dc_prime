@@ -426,11 +426,11 @@ export const getGroupPerformance = async (req, res) => {
     ) commission_summary ON commission_summary.client_unit_id = cu.id
     ${whereClause}
     GROUP BY
-      seller_group_id,
-      group_name,
-      group_code,
-      group_head,
-      pool_rate
+      COALESCE(cu.seller_group_id, seller.seller_group_id),
+      COALESCE(cu.seller_group_name_snapshot, sg.group_name, 'Direct to Developer'),
+      COALESCE(sg.group_code, 'DIRECT'),
+      COALESCE(head.full_name, 'Unassigned'),
+      COALESCE(cu.seller_group_pool_rate_snapshot, sg.pool_rate, 0)
     ORDER BY total_sales DESC
     `,
     params

@@ -206,8 +206,8 @@ const roleHomePath = (role?: string) => {
 }
 
 const roleAllowedPaths: Record<string, string[]> = {
-  super_admin: ["/dashboard", "/projects", "/listings", "/clients", "/client", "/accreditted_sellers", "/payments", "/notifications", "/commissions", "/cash-advances", "/documents", "/audit-logs", "/reports", "/employees", "/attendance", "/settings", "/users", "/change-password"],
-  admin: ["/dashboard", "/projects", "/listings", "/clients", "/client", "/accreditted_sellers", "/payments", "/notifications", "/commissions", "/cash-advances", "/documents", "/audit-logs", "/reports", "/employees", "/attendance", "/settings", "/users", "/change-password"],
+  super_admin: ["/dashboard", "/projects", "/listings", "/clients", "/client", "/accreditted_sellers", "/payments", "/notifications", "/commissions", "/cash-advances", "/documents", "/audit-logs", "/reports", "/employees", "/attendance", "/settings", "/users", "/sellers-group", "/change-password"],
+  admin: ["/dashboard", "/projects", "/listings", "/clients", "/client", "/accreditted_sellers", "/payments", "/notifications", "/commissions", "/cash-advances", "/documents", "/audit-logs", "/reports", "/employees", "/attendance", "/settings", "/users", "/sellers-group", "/change-password"],
   broker_network_manager: ["/seller-dashboard", "/available-units", "/my-team", "/team-sales", "/change-password"],
   broker: ["/seller-dashboard", "/available-units", "/my-team", "/team-sales", "/change-password"],
   manager: ["/seller-dashboard", "/available-units", "/my-team", "/team-sales", "/change-password"],
@@ -478,7 +478,6 @@ const SystemLayout = () => {
 }
 
 export default SystemLayout
-
 
 
 

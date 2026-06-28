@@ -28,6 +28,7 @@ import SellerDashboard from "./pages/SellerDashboard"
 import ChangePassword from "./pages/ChangePassword"
 import ProjectPriceListPrint from "./pages/ProjectPriceListPrint"
 import Notifications from "./pages/Notifications"
+import SellerGroups from "./pages/SellerGroups"
 
 
 const App = () => {
@@ -54,6 +55,7 @@ const App = () => {
         <Route path="audit-logs" element={<AuditLogs/>} />
         <Route path="settings" element={<Settings/>} />
         <Route path="users" element={<Users/>} />
+        <Route path="sellers-group" element={<SellerGroups />} />
         <Route path="employees" element={<Employees/>} />
         <Route path="attendance" element={<Attendance/>} />
         <Route path="change-password" element={<ChangePassword />} />
@@ -75,4 +77,3 @@ const App = () => {
 }
 
 export default App
-

@@ -23,6 +23,20 @@ const validateRate = (rate, label) => {
   return null
 }
 
+const normalizeOptionalRate = (value) => {
+  if (isMissing(value)) return null
+  const parsed = Number(value)
+  if (Number.isNaN(parsed)) return undefined
+  return Number(parsed.toFixed(2))
+}
+
+const validateOptionalRate = (rate, label) => {
+  if (rate === undefined) return `${label} must be numeric or null`
+  if (rate === null) return null
+  if (rate < 0 || rate > 100) return `${label} must be between 0 and 100`
+  return null
+}
+
 const roleLabels = {
   broker_network_manager: 'BNM',
   broker: 'Broker',
@@ -374,9 +388,100 @@ const getGroupRows = async (connectionOrDb = db) => {
   }))
 }
 
+const getSellerGroupMembers = async (sellerGroupId, connectionOrDb = db) => {
+  const [members] = await connectionOrDb.query(
+    `
+    SELECT
+      seller.id,
+      seller.full_name,
+      seller.email,
+      seller.contact_no,
+      seller.seller_role,
+      seller.parent_seller_id,
+      parent.full_name AS parent_seller_name,
+      seller.seller_group_id,
+      sg.group_name AS seller_group_name,
+      seller.status,
+      seller.commission_rate,
+      seller.commission_pool_rate,
+      seller.personal_commission_rate,
+      seller.override_commission_rate,
+      seller.direct_to_developer_rate,
+      seller.max_downline_rate,
+      seller.rate_set_by,
+      rateSetter.full_name AS rate_set_by_name,
+      seller.rate_updated_at,
+      COUNT(DISTINCT child.id) AS direct_downline_count
+    FROM accredited_sellers seller
+    LEFT JOIN accredited_sellers parent ON parent.id = seller.parent_seller_id
+    LEFT JOIN seller_groups sg ON sg.id = seller.seller_group_id
+    LEFT JOIN users rateSetter ON rateSetter.id = seller.rate_set_by
+    LEFT JOIN accredited_sellers child
+      ON child.parent_seller_id = seller.id
+      AND child.seller_group_id = seller.seller_group_id
+      AND child.status = 'active'
+    WHERE seller.seller_group_id = ?
+    GROUP BY seller.id
+    ORDER BY FIELD(seller.seller_role, 'broker_network_manager', 'broker', 'manager', 'agent'), seller.full_name ASC
+    `,
+    [sellerGroupId]
+  )
+
+  return members
+}
+
+const buildHierarchyPayload = (members = []) => {
+  const byId = new Map(members.map((member) => [Number(member.id), { ...member, children: [] }]))
+  const roots = []
+
+  for (const member of byId.values()) {
+    const parent = member.parent_seller_id ? byId.get(Number(member.parent_seller_id)) : null
+    if (parent) {
+      parent.children.push(member)
+    } else {
+      roots.push(member)
+    }
+  }
+
+  const getPath = (member, visited = new Set()) => {
+    if (!member || visited.has(Number(member.id))) return []
+    visited.add(Number(member.id))
+    const parent = member.parent_seller_id ? byId.get(Number(member.parent_seller_id)) : null
+    return [...getPath(parent, visited), member.full_name]
+  }
+
+  const membersWithPaths = members.map((member) => ({
+    ...member,
+    hierarchy_path: getPath(byId.get(Number(member.id))).join(' -> '),
+  }))
+
+  return { members: membersWithPaths, hierarchyTree: roots }
+}
+
 export const getSellerGroups = async (_req, res) => {
   const groups = await getGroupRows()
   res.status(200).json({ message: 'Seller groups fetched successfully', groups, data: groups })
+}
+
+export const getSellerGroupDetails = async (req, res) => {
+  const { id } = req.params
+  const groups = await getGroupRows()
+  const group = groups.find((row) => Number(row.id) === Number(id))
+
+  if (!group) {
+    return res.status(404).json({ message: 'Seller group not found' })
+  }
+
+  const rawMembers = await getSellerGroupMembers(id)
+  const { members, hierarchyTree } = buildHierarchyPayload(rawMembers)
+
+  res.status(200).json({
+    message: 'Seller group details fetched successfully',
+    group,
+    members,
+    hierarchyTree,
+    data: { group, members, hierarchyTree },
+  })
 }
 
 export const createSellerGroup = async (req, res) => {
@@ -685,3 +790,139 @@ export const recalculateSellerGroupMembers = async (req, res) => {
   }
 }
 
+export const updateSellerGroupMemberRates = async (req, res) => {
+  const { groupId, sellerId } = req.params
+
+  const [groupRows] = await db.query(
+    `SELECT id, group_name, pool_rate FROM seller_groups WHERE id = ? LIMIT 1`,
+    [groupId]
+  )
+  const group = groupRows[0]
+  if (!group) return res.status(404).json({ message: 'Seller group not found' })
+
+  const [sellerRows] = await db.query(
+    `
+    SELECT
+      id,
+      full_name,
+      seller_group_id,
+      personal_commission_rate,
+      override_commission_rate,
+      commission_pool_rate,
+      direct_to_developer_rate,
+      max_downline_rate
+    FROM accredited_sellers
+    WHERE id = ?
+    LIMIT 1
+    `,
+    [sellerId]
+  )
+  const seller = sellerRows[0]
+  if (!seller) return res.status(404).json({ message: 'Seller not found' })
+
+  if (Number(seller.seller_group_id) !== Number(groupId)) {
+    return res.status(400).json({ message: 'Seller must belong to this seller group.' })
+  }
+
+  const nextRates = {
+    personal_commission_rate: req.body.personal_commission_rate === undefined
+      ? normalizeOptionalRate(seller.personal_commission_rate)
+      : normalizeOptionalRate(req.body.personal_commission_rate),
+    override_commission_rate: req.body.override_commission_rate === undefined
+      ? normalizeOptionalRate(seller.override_commission_rate)
+      : normalizeOptionalRate(req.body.override_commission_rate),
+    commission_pool_rate: req.body.commission_pool_rate === undefined
+      ? normalizeOptionalRate(seller.commission_pool_rate)
+      : normalizeOptionalRate(req.body.commission_pool_rate),
+    direct_to_developer_rate: req.body.direct_to_developer_rate === undefined
+      ? normalizeOptionalRate(seller.direct_to_developer_rate)
+      : normalizeOptionalRate(req.body.direct_to_developer_rate),
+    max_downline_rate: req.body.max_downline_rate === undefined
+      ? normalizeOptionalRate(seller.max_downline_rate)
+      : normalizeOptionalRate(req.body.max_downline_rate),
+  }
+
+  const labels = {
+    personal_commission_rate: 'Personal/direct commission rate',
+    override_commission_rate: 'Override commission rate',
+    commission_pool_rate: 'Commission pool rate',
+    direct_to_developer_rate: 'Direct-to-developer rate',
+    max_downline_rate: 'Max downline rate',
+  }
+
+  for (const [key, rate] of Object.entries(nextRates)) {
+    const error = validateOptionalRate(rate, labels[key])
+    if (error) return res.status(400).json({ message: error })
+  }
+
+  const poolRate = Number(group.pool_rate || 0)
+  const checkedPoolFields = [
+    ['commission_pool_rate', nextRates.commission_pool_rate],
+    ['max_downline_rate', nextRates.max_downline_rate],
+  ]
+
+  for (const [key, rate] of checkedPoolFields) {
+    if (rate !== null && rate > poolRate) {
+      return res.status(400).json({
+        message: `${labels[key]} cannot exceed the seller group pool rate (${poolRate.toFixed(2)}%).`,
+      })
+    }
+  }
+
+  const connection = await db.getConnection()
+
+  try {
+    await connection.beginTransaction()
+
+    await connection.query(
+      `
+      UPDATE accredited_sellers
+      SET
+        personal_commission_rate = ?,
+        override_commission_rate = ?,
+        commission_pool_rate = ?,
+        direct_to_developer_rate = ?,
+        max_downline_rate = ?,
+        rate_set_by = ?,
+        rate_updated_at = NOW(),
+        updated_at = NOW()
+      WHERE id = ?
+        AND seller_group_id = ?
+      `,
+      [
+        nextRates.personal_commission_rate,
+        nextRates.override_commission_rate,
+        nextRates.commission_pool_rate,
+        nextRates.direct_to_developer_rate,
+        nextRates.max_downline_rate,
+        req.user.id,
+        sellerId,
+        groupId,
+      ]
+    )
+
+    await connection.commit()
+
+    await safeCreateAuditLog({
+      userId: req.user.id,
+      action: 'update',
+      module: 'Seller Groups',
+      description: `Updated seller group member rates for ${seller.full_name} in ${group.group_name}`,
+      ipAddress: getClientIp(req),
+    })
+
+    const rawMembers = await getSellerGroupMembers(groupId)
+    const { members, hierarchyTree } = buildHierarchyPayload(rawMembers)
+
+    res.status(200).json({
+      message: 'Seller group member rates updated successfully',
+      members,
+      hierarchyTree,
+    })
+  } catch (error) {
+    await connection.rollback()
+    throw error
+  } finally {
+    connection.release()
+  }
+}
