@@ -24,7 +24,6 @@ import {
   formatNumber,
   formatText,
 } from "../utils/formatters"
-import { paginateRows } from "../utils/pagination"
 
 type ReportType =
   | "sales"
@@ -139,6 +138,20 @@ type ReportResponse = {
   commissions?: CommissionsReport[]
   documents?: DocumentsReport[]
   clients?: ClientsReport[]
+  data?: AnyReportRow[]
+  pagination?: PaginationMeta
+}
+
+type PaginationMeta = {
+  page: number
+  limit: number
+  totalRows: number
+  totalPages: number
+}
+
+type ReportResult = {
+  rows: AnyReportRow[]
+  pagination: PaginationMeta
 }
 
 const reportTypes: ReportType[] = [
@@ -169,8 +182,51 @@ const getReportEndpoint = (reportType: ReportType) => {
   return `${API_URL}/reports/${reportType}`
 }
 
-const fetchReport = async (reportType: ReportType): Promise<AnyReportRow[]> => {
-  const response = await fetch(getReportEndpoint(reportType), {
+const getCurrentMonthRange = () => {
+  const now = new Date()
+  const startDate = new Date(now.getFullYear(), now.getMonth(), 1)
+  const endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0)
+  const formatDate = (value: Date) => {
+    const year = value.getFullYear()
+    const month = String(value.getMonth() + 1).padStart(2, "0")
+    const day = String(value.getDate()).padStart(2, "0")
+    return `${year}-${month}-${day}`
+  }
+
+  return {
+    date_from: formatDate(startDate),
+    date_to: formatDate(endDate),
+  }
+}
+
+type DateRange = {
+  date_from: string
+  date_to: string
+}
+
+const fetchReport = async ({
+  dateRange,
+  limit,
+  page,
+  reportType,
+  search,
+}: {
+  dateRange: DateRange
+  limit: number
+  page: number
+  reportType: ReportType
+  search: string
+}): Promise<ReportResult> => {
+  const params = new URLSearchParams({
+    page: String(page),
+    limit: String(limit),
+  })
+
+  if (search.trim()) params.set("search", search.trim())
+  if (dateRange.date_from) params.set("date_from", dateRange.date_from)
+  if (dateRange.date_to) params.set("date_to", dateRange.date_to)
+
+  const response = await fetch(`${getReportEndpoint(reportType)}?${params}`, {
     credentials: "include",
   })
 
@@ -179,7 +235,18 @@ const fetchReport = async (reportType: ReportType): Promise<AnyReportRow[]> => {
   }
 
   const data = (await response.json()) as ReportResponse
-  return (data[reportType] || []) as AnyReportRow[]
+  const rows = (data[reportType] || data.data || []) as AnyReportRow[]
+
+  return {
+    rows,
+    pagination:
+      data.pagination || {
+        page,
+        limit,
+        totalRows: rows.length,
+        totalPages: Math.max(Math.ceil(rows.length / limit), 1),
+      },
+  }
 }
 
 const normalizeForSearch = (value: unknown) => {
@@ -237,30 +304,73 @@ const getReportTotalAmount = (reportType: ReportType, rows: AnyReportRow[]) => {
 }
 
 const Reports = () => {
+  const currentMonthRange = getCurrentMonthRange()
   const [reportType, setReportType] = useState<ReportType>("sales")
   const [searchInput, setSearchInput] = useState("")
   const [page, setPage] = useState(1)
   const [rowsPerPage, setRowsPerPage] = useState(10)
+  const [dateDraft, setDateDraft] = useState<DateRange>(currentMonthRange)
+  const [dateRange, setDateRange] = useState<DateRange>(currentMonthRange)
+  const [dateError, setDateError] = useState("")
 
   const {
-    data: reportRows = [],
+    data: reportResult,
     isLoading,
     error,
     isFetching,
-  } = useQuery<AnyReportRow[]>({
-    queryKey: ["reports", reportType],
-    queryFn: () => fetchReport(reportType),
+  } = useQuery<ReportResult>({
+    queryKey: [
+      "reports",
+      reportType,
+      page,
+      rowsPerPage,
+      searchInput,
+      dateRange.date_from,
+      dateRange.date_to,
+    ],
+    queryFn: () =>
+      fetchReport({
+        dateRange,
+        limit: rowsPerPage,
+        page,
+        reportType,
+        search: searchInput,
+      }),
   })
+
+  const reportRows = reportResult?.rows || []
+  const reportTotalRows = reportResult?.pagination.totalRows || reportRows.length
 
   const filteredRows = reportRows.filter((row) =>
     rowMatchesSearch(row, searchInput)
   )
 
-  const totalRecords = filteredRows.length
+  const totalRecords = reportTotalRows
   const totalAmount = getReportTotalAmount(reportType, filteredRows)
 
   const resetFilters = () => {
+    const nextRange = getCurrentMonthRange()
     setSearchInput("")
+    setDateDraft(nextRange)
+    setDateRange(nextRange)
+    setDateError("")
+    setPage(1)
+  }
+
+  const applyDateRange = () => {
+    const nextRange = {
+      date_from: dateDraft.date_from || currentMonthRange.date_from,
+      date_to: dateDraft.date_to || currentMonthRange.date_to,
+    }
+
+    if (nextRange.date_from > nextRange.date_to) {
+      setDateError("Start date cannot be after end date.")
+      return
+    }
+
+    setDateError("")
+    setDateDraft(nextRange)
+    setDateRange(nextRange)
     setPage(1)
   }
 
@@ -312,7 +422,7 @@ const Reports = () => {
         />
       </div>
 
-      <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-[260px_minmax(0,1fr)_auto]">
+      <div className="mb-4 grid grid-cols-1 gap-3 xl:grid-cols-[220px_minmax(0,1fr)_170px_170px_auto_auto]">
         <Select
           value={reportType}
           onChange={(e) => {
@@ -338,26 +448,56 @@ const Reports = () => {
           }}
         />
 
+        <Input
+          type="date"
+          value={dateDraft.date_from}
+          onChange={(e) =>
+            setDateDraft((current) => ({
+              ...current,
+              date_from: e.target.value,
+            }))
+          }
+        />
+
+        <Input
+          type="date"
+          value={dateDraft.date_to}
+          onChange={(e) =>
+            setDateDraft((current) => ({
+              ...current,
+              date_to: e.target.value,
+            }))
+          }
+        />
+
+        <Button onClick={applyDateRange} variant="primary">
+          Apply
+        </Button>
+
         <Button icon={<FiRefreshCw />} onClick={resetFilters}>
           Reset
         </Button>
       </div>
 
+      {dateError ? (
+        <div className="mb-4">
+          <Alert message={dateError} title="Invalid date range" variant="error" />
+        </div>
+      ) : null}
+
       {isLoading ? (
         <LoadingState label="Loading report..." />
       ) : (
         <ReportTable
-          page={page}
           reportType={reportType}
           rows={filteredRows}
-          rowsPerPage={rowsPerPage}
         />
       )}
 
       <Pagination
         page={page}
         rowsPerPage={rowsPerPage}
-        totalRows={totalRecords}
+        totalRows={reportTotalRows}
         onPageChange={setPage}
         onRowsPerPageChange={setRowsPerPage}
       />
@@ -366,23 +506,19 @@ const Reports = () => {
 }
 
 type ReportTableProps = {
-  page: number
   reportType: ReportType
   rows: AnyReportRow[]
-  rowsPerPage: number
 }
 
 const cellClass = "px-4 py-3 text-slate-600"
 const headerClass = "px-4 py-3 text-left font-semibold text-slate-600"
 
 const ReportTable = ({
-  page,
   reportType,
   rows,
-  rowsPerPage,
 }: ReportTableProps) => {
   if (reportType === "sales") {
-    const paginatedRows = paginateRows(rows as SalesReport[], page, rowsPerPage)
+    const paginatedRows = rows as SalesReport[]
 
     return (
       <TableContainer>
@@ -445,11 +581,7 @@ const ReportTable = ({
   }
 
   if (reportType === "collections") {
-    const paginatedRows = paginateRows(
-      rows as CollectionsReport[],
-      page,
-      rowsPerPage
-    )
+    const paginatedRows = rows as CollectionsReport[]
 
     return (
       <TableContainer>
@@ -503,11 +635,7 @@ const ReportTable = ({
   }
 
   if (reportType === "inventory") {
-    const paginatedRows = paginateRows(
-      rows as InventoryReport[],
-      page,
-      rowsPerPage
-    )
+    const paginatedRows = rows as InventoryReport[]
 
     return (
       <TableContainer>
@@ -576,11 +704,7 @@ const ReportTable = ({
   }
 
   if (reportType === "commissions") {
-    const paginatedRows = paginateRows(
-      rows as CommissionsReport[],
-      page,
-      rowsPerPage
-    )
+    const paginatedRows = rows as CommissionsReport[]
 
     return (
       <TableContainer>
@@ -646,11 +770,7 @@ const ReportTable = ({
   }
 
   if (reportType === "documents") {
-    const paginatedRows = paginateRows(
-      rows as DocumentsReport[],
-      page,
-      rowsPerPage
-    )
+    const paginatedRows = rows as DocumentsReport[]
 
     return (
       <TableContainer>
@@ -705,7 +825,7 @@ const ReportTable = ({
     )
   }
 
-  const paginatedRows = paginateRows(rows as ClientsReport[], page, rowsPerPage)
+  const paginatedRows = rows as ClientsReport[]
 
   return (
     <TableContainer>
@@ -757,4 +877,3 @@ const ReportTable = ({
 }
 
 export default Reports
-

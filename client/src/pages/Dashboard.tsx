@@ -18,10 +18,13 @@ import {
   FiDollarSign,
   FiFileText,
   FiHome,
+  FiRefreshCw,
   FiUsers,
 } from "react-icons/fi"
 import Alert from "../components/ui/Alert"
+import Button from "../components/ui/Button"
 import EmptyState from "../components/ui/EmptyState"
+import Input from "../components/ui/Input"
 import LoadingState from "../components/ui/LoadingState"
 import PageHeader from "../components/ui/PageHeader"
 import Pagination from "../components/ui/Pagination"
@@ -74,6 +77,29 @@ type AgentPerformanceResponse = {
   agents: AgentPerformance[]
 }
 
+type GroupPerformance = {
+  seller_group_id: number | null
+  group_name: string
+  group_code: string
+  group_head: string
+  pool_rate: number | string
+  sales_count: number | string
+  total_sales: number | string
+  verified_collections: number | string
+  collection_rate: number | string
+  active: number | string
+  fully_paid: number | string
+  cancelled: number | string
+  gross_commission: number | string
+  released_commission: number | string
+  remaining_commission: number | string
+}
+
+type GroupPerformanceResponse = {
+  groups?: GroupPerformance[]
+  data?: GroupPerformance[]
+}
+
 type ChartSize = {
   width: number
   height: number
@@ -99,10 +125,46 @@ type MetricGroup = {
   metrics: MetricCardData[]
 }
 
-const fetchDashboardSummary = async (): Promise<DashboardSummary> => {
-  const res = await fetch(`${API_URL}/dashboard/summary`, {
-    credentials: "include",
+const getCurrentMonthRange = () => {
+  const now = new Date()
+  const startDate = new Date(now.getFullYear(), now.getMonth(), 1)
+  const endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0)
+  const formatDate = (value: Date) => {
+    const year = value.getFullYear()
+    const month = String(value.getMonth() + 1).padStart(2, "0")
+    const day = String(value.getDate()).padStart(2, "0")
+    return `${year}-${month}-${day}`
+  }
+
+  return {
+    date_from: formatDate(startDate),
+    date_to: formatDate(endDate),
+  }
+}
+
+const buildDashboardQuery = (dateRange: DateRange) => {
+  const params = new URLSearchParams({
+    date_from: dateRange.date_from,
+    date_to: dateRange.date_to,
   })
+
+  return params.toString()
+}
+
+type DateRange = {
+  date_from: string
+  date_to: string
+}
+
+const fetchDashboardSummary = async (
+  dateRange: DateRange,
+): Promise<DashboardSummary> => {
+  const res = await fetch(
+    `${API_URL}/dashboard/summary?${buildDashboardQuery(dateRange)}`,
+    {
+    credentials: "include",
+    },
+  )
 
   if (!res.ok) {
     throw new Error(await getErrorMessage(res))
@@ -112,10 +174,15 @@ const fetchDashboardSummary = async (): Promise<DashboardSummary> => {
   return data.summary
 }
 
-const fetchAgentPerformance = async (): Promise<AgentPerformance[]> => {
-  const res = await fetch(`${API_URL}/dashboard/agent-performance`, {
+const fetchAgentPerformance = async (
+  dateRange: DateRange,
+): Promise<AgentPerformance[]> => {
+  const res = await fetch(
+    `${API_URL}/dashboard/agent-performance?${buildDashboardQuery(dateRange)}`,
+    {
     credentials: "include",
-  })
+    },
+  )
 
   if (!res.ok) {
     throw new Error(await getErrorMessage(res))
@@ -123,6 +190,24 @@ const fetchAgentPerformance = async (): Promise<AgentPerformance[]> => {
 
   const data: AgentPerformanceResponse = await res.json()
   return data.agents
+}
+
+const fetchGroupPerformance = async (
+  dateRange: DateRange,
+): Promise<GroupPerformance[]> => {
+  const res = await fetch(
+    `${API_URL}/dashboard/group-performance?${buildDashboardQuery(dateRange)}`,
+    {
+      credentials: "include",
+    },
+  )
+
+  if (!res.ok) {
+    throw new Error(await getErrorMessage(res))
+  }
+
+  const data: GroupPerformanceResponse = await res.json()
+  return data.groups || data.data || []
 }
 
 const safeNum = (value: unknown) => {
@@ -311,16 +396,22 @@ const MetricSection = ({ description, icon, metrics, title }: MetricGroup) => {
 }
 
 const Dashboard = () => {
+  const currentMonthRange = getCurrentMonthRange()
+  const [dateDraft, setDateDraft] = useState<DateRange>(currentMonthRange)
+  const [dateRange, setDateRange] = useState<DateRange>(currentMonthRange)
+  const [dateError, setDateError] = useState("")
   const [agentsPage, setAgentsPage] = useState(1)
   const [agentsRowsPerPage, setAgentsRowsPerPage] = useState(10)
+  const [groupsPage, setGroupsPage] = useState(1)
+  const [groupsRowsPerPage, setGroupsRowsPerPage] = useState(10)
 
   const {
     data: summary,
     isLoading: isSummaryLoading,
     error: summaryError,
   } = useQuery<DashboardSummary>({
-    queryKey: ["dashboard-summary"],
-    queryFn: fetchDashboardSummary,
+    queryKey: ["dashboard-summary", dateRange.date_from, dateRange.date_to],
+    queryFn: () => fetchDashboardSummary(dateRange),
     retry: false,
   })
 
@@ -329,10 +420,55 @@ const Dashboard = () => {
     isLoading: isAgentsLoading,
     error: agentsError,
   } = useQuery<AgentPerformance[]>({
-    queryKey: ["dashboard-agent-performance"],
-    queryFn: fetchAgentPerformance,
+    queryKey: [
+      "dashboard-agent-performance",
+      dateRange.date_from,
+      dateRange.date_to,
+    ],
+    queryFn: () => fetchAgentPerformance(dateRange),
     retry: false,
   })
+
+  const {
+    data: groups = [],
+    isLoading: isGroupsLoading,
+    error: groupsError,
+  } = useQuery<GroupPerformance[]>({
+    queryKey: [
+      "dashboard-group-performance",
+      dateRange.date_from,
+      dateRange.date_to,
+    ],
+    queryFn: () => fetchGroupPerformance(dateRange),
+    retry: false,
+  })
+
+  const applyDateRange = () => {
+    const nextRange = {
+      date_from: dateDraft.date_from || currentMonthRange.date_from,
+      date_to: dateDraft.date_to || currentMonthRange.date_to,
+    }
+
+    if (nextRange.date_from > nextRange.date_to) {
+      setDateError("Start date cannot be after end date.")
+      return
+    }
+
+    setDateError("")
+    setAgentsPage(1)
+    setGroupsPage(1)
+    setDateDraft(nextRange)
+    setDateRange(nextRange)
+  }
+
+  const resetDateRange = () => {
+    const nextRange = getCurrentMonthRange()
+    setDateError("")
+    setAgentsPage(1)
+    setGroupsPage(1)
+    setDateDraft(nextRange)
+    setDateRange(nextRange)
+  }
 
   const totalSales = safeNum(summary?.totalSales)
   const pendingSales = safeNum(summary?.pendingSales)
@@ -626,6 +762,12 @@ const Dashboard = () => {
     total: safeNum(agent.total_sales),
   }))
 
+  const groupChartData = groups.slice(0, 8).map((group) => ({
+    name: group.group_name,
+    collections: safeNum(group.verified_collections),
+    total: safeNum(group.total_sales),
+  }))
+
   const agentTotalPages = Math.max(
     Math.ceil(agents.length / agentsRowsPerPage),
     1,
@@ -636,6 +778,18 @@ const Dashboard = () => {
   const paginatedAgents = agents.slice(
     (safeAgentsPage - 1) * agentsRowsPerPage,
     safeAgentsPage * agentsRowsPerPage,
+  )
+
+  const groupTotalPages = Math.max(
+    Math.ceil(groups.length / groupsRowsPerPage),
+    1,
+  )
+
+  const safeGroupsPage = Math.min(Math.max(groupsPage, 1), groupTotalPages)
+
+  const paginatedGroups = groups.slice(
+    (safeGroupsPage - 1) * groupsRowsPerPage,
+    safeGroupsPage * groupsRowsPerPage,
   )
 
   if (isSummaryLoading) {
@@ -661,6 +815,45 @@ const Dashboard = () => {
         subtitle="Grouped system summary from MySQL"
         title="Dashboard"
       />
+
+      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_auto] md:items-end">
+          <Input
+            label="Start Date"
+            type="date"
+            value={dateDraft.date_from}
+            onChange={(event) =>
+              setDateDraft((current) => ({
+                ...current,
+                date_from: event.target.value,
+              }))
+            }
+          />
+          <Input
+            label="End Date"
+            type="date"
+            value={dateDraft.date_to}
+            onChange={(event) =>
+              setDateDraft((current) => ({
+                ...current,
+                date_to: event.target.value,
+              }))
+            }
+          />
+          <Button onClick={applyDateRange} variant="primary">
+            Apply
+          </Button>
+          <Button icon={<FiRefreshCw />} onClick={resetDateRange}>
+            Reset
+          </Button>
+        </div>
+
+        {dateError ? (
+          <div className="mt-3">
+            <Alert message={dateError} title="Invalid date range" variant="error" />
+          </div>
+        ) : null}
+      </section>
 
       <section className="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
@@ -945,6 +1138,174 @@ const Dashboard = () => {
             totalRows={agents.length}
           />
         ) : null}
+      </section>
+
+      <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="border-b border-slate-200 px-4 py-4">
+          <h2 className="text-base font-bold text-slate-950">
+            Group Performance Details
+          </h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Use this table to compare sales, collections, and commissions by
+            seller group.
+          </p>
+        </div>
+
+        {isGroupsLoading ? (
+          <div className="p-4">
+            <LoadingState message="Loading group performance..." />
+          </div>
+        ) : groupsError ? (
+          <div className="p-4">
+            <Alert
+              message={
+                groupsError instanceof Error
+                  ? groupsError.message
+                  : "Request failed"
+              }
+              title="Failed to load group performance"
+              variant="error"
+            />
+          </div>
+        ) : (
+          <>
+            {groupChartData.length > 0 ? (
+              <div className="border-b border-slate-200 p-4">
+                <MeasuredChart className="h-72 min-h-72 min-w-0">
+                  {({ width, height }) => (
+                    <BarChart
+                      data={groupChartData}
+                      height={height}
+                      margin={{ top: 10, right: 10, left: 10, bottom: 10 }}
+                      width={width}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="name" />
+                      <YAxis
+                        tickFormatter={(value) =>
+                          `${Number(value) / 1000000}M`
+                        }
+                      />
+                      <Tooltip
+                        formatter={(value) => formatMoney(value as number)}
+                      />
+                      <Legend />
+                      <Bar
+                        dataKey="total"
+                        fill="#2563eb"
+                        name="Total Sales"
+                        radius={[8, 8, 0, 0]}
+                      />
+                      <Bar
+                        dataKey="collections"
+                        fill="#10b981"
+                        name="Collections"
+                        radius={[8, 8, 0, 0]}
+                      />
+                    </BarChart>
+                  )}
+                </MeasuredChart>
+              </div>
+            ) : null}
+
+            <TableContainer>
+              <table className="min-w-full divide-y divide-slate-200 text-sm">
+                <thead className="bg-slate-50">
+                  <tr>
+                    {[
+                      "Group",
+                      "Group Code",
+                      "Group Head",
+                      "Pool Rate",
+                      "Sales Count",
+                      "Total Sales",
+                      "Collections",
+                      "Collection Rate",
+                      "Active",
+                      "Fully Paid",
+                      "Cancelled",
+                      "Gross Commission",
+                      "Released",
+                      "Remaining",
+                    ].map((label) => (
+                      <th
+                        className="px-4 py-3 text-left font-semibold text-slate-600"
+                        key={label}
+                      >
+                        {label}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white">
+                  {paginatedGroups.map((group) => (
+                    <tr
+                      className="transition hover:bg-slate-50"
+                      key={`${group.seller_group_id ?? "direct"}-${group.group_name}`}
+                    >
+                      <td className="px-4 py-3 font-medium text-slate-900">
+                        {group.group_name}
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {group.group_code || "-"}
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {group.group_head || "-"}
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {formatPercent(safeNum(group.pool_rate))}
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {formatNumber(group.sales_count)}
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {formatMoney(group.total_sales)}
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {formatMoney(group.verified_collections)}
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {formatPercent(safeNum(group.collection_rate))}
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {formatNumber(group.active)}
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {formatNumber(group.fully_paid)}
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {formatNumber(group.cancelled)}
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {formatMoney(group.gross_commission)}
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {formatMoney(group.released_commission)}
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {formatMoney(group.remaining_commission)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              {groups.length === 0 ? (
+                <EmptyState title="No group performance records" />
+              ) : null}
+            </TableContainer>
+
+            {groups.length > 0 ? (
+              <Pagination
+                onPageChange={setGroupsPage}
+                onRowsPerPageChange={setGroupsRowsPerPage}
+                page={safeGroupsPage}
+                rowsPerPage={groupsRowsPerPage}
+                totalRows={groups.length}
+              />
+            ) : null}
+          </>
+        )}
       </section>
     </div>
   )

@@ -1,6 +1,11 @@
 import { db } from '../db/connect.js'
 import { safeCreateAuditLog } from '../utils/createAuditLog.js'
 import { getClientIp } from '../utils/getClientIp.js'
+import {
+  buildPagination,
+  getPaginationOptions,
+  getSortOptions,
+} from '../utils/queryOptions.js'
 
 const isMissing = (value) => {
   return value === undefined || value === null || value === ''
@@ -641,6 +646,19 @@ const employmentHasProfileValue = (detail) => {
 
 export const getClients = async (req, res) => {
   const { search, region, default_seller_id } = req.query
+  const { page, limit, offset } = getPaginationOptions(req.query)
+  const { sortColumn, sortDir } = getSortOptions(
+    req.query,
+    {
+      id: 'c.id',
+      created_at: 'c.created_at',
+      updated_at: 'c.updated_at',
+      full_name: 'c.full_name',
+      region: 'c.region',
+      profile_status: 'c.profile_status',
+    },
+    { defaultSortBy: 'id', defaultSortDir: 'DESC' }
+  )
 
   const conditions = []
   const params = []
@@ -686,6 +704,19 @@ export const getClients = async (req, res) => {
   const whereClause =
     conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
 
+  const [[countRow]] = await db.query(
+    `
+    SELECT COUNT(*) AS totalRows
+    FROM (
+      SELECT c.id
+      ${clientJoins}
+      ${whereClause}
+      GROUP BY c.id
+    ) counted_clients
+    `,
+    params
+  )
+
   const [clients] = await db.query(
     `
     SELECT
@@ -718,13 +749,22 @@ export const getClients = async (req, res) => {
       seller.seller_role,
       c.created_at,
       c.updated_at
-    ORDER BY c.id DESC
+    ORDER BY ${sortColumn} ${sortDir}, c.id DESC
+    LIMIT ? OFFSET ?
     `,
-    params
+    [...params, limit, offset]
   )
+
+  const pagination = buildPagination({
+    page,
+    limit,
+    totalRows: countRow.totalRows,
+  })
 
   res.status(200).json({
     clients,
+    data: clients,
+    pagination,
   })
 }
 
@@ -1305,4 +1345,3 @@ export const deleteClient = async (req, res) => {
     message: 'Client deleted successfully',
   })
 }
-

@@ -3,6 +3,13 @@ import { safeCreateAuditLog } from '../utils/createAuditLog.js'
 import { getClientIp } from '../utils/getClientIp.js'
 import { refreshCommissionEligibility } from './commissions.controller.js'
 import { getNextPaymentScheduleDue, rebuildPaymentSchedule } from '../utils/paymentSchedule.js'
+import {
+  addDateRangeConditions,
+  buildPagination,
+  getDateRangeFromQuery,
+  getPaginationOptions,
+  getSortOptions,
+} from '../utils/queryOptions.js'
 
 const allowedPaymentStatuses = ['pending', 'verified', 'rejected']
 
@@ -495,7 +502,23 @@ export const recomputeClientUnitBalance = async (
 }
 
 export const getPayments = async (req, res) => {
-  const { search, status, client_unit_id, payment_type } = req.query
+  const { search, status, client_unit_id, payment_type, payment_method } = req.query
+  const { page, limit, offset } = getPaginationOptions(req.query)
+  const { dateFrom, dateTo } = getDateRangeFromQuery(req.query)
+  const { sortColumn, sortDir } = getSortOptions(
+    req.query,
+    {
+      id: 'py.id',
+      payment_date: 'py.payment_date',
+      amount: 'py.amount',
+      status: 'py.status',
+      payment_type: 'py.payment_type',
+      client_name: 'c.full_name',
+      unit_id: 'l.unit_id',
+      created_at: 'py.created_at',
+    },
+    { defaultSortBy: 'payment_date', defaultSortDir: 'DESC' }
+  )
 
   const conditions = []
   const params = []
@@ -541,8 +564,30 @@ export const getPayments = async (req, res) => {
     params.push(payment_type)
   }
 
+  if (!isMissing(payment_method) && payment_method !== 'all') {
+    conditions.push('py.payment_method = ?')
+    params.push(payment_method)
+  }
+
+  addDateRangeConditions({
+    conditions,
+    params,
+    column: 'py.payment_date',
+    dateFrom,
+    dateTo,
+  })
+
   const whereClause =
     conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
+
+  const [[countRow]] = await db.query(
+    `
+    SELECT COUNT(*) AS totalRows
+    ${paymentJoins}
+    ${whereClause}
+    `,
+    params
+  )
 
   const [payments] = await db.query(
     `
@@ -550,15 +595,23 @@ export const getPayments = async (req, res) => {
       ${paymentFields}
     ${paymentJoins}
     ${whereClause}
-    ORDER BY py.payment_date DESC, py.id DESC
+    ORDER BY ${sortColumn} ${sortDir}, py.id DESC
+    LIMIT ? OFFSET ?
     `,
-    params
+    [...params, limit, offset]
   )
+
+  const pagination = buildPagination({
+    page,
+    limit,
+    totalRows: countRow.totalRows,
+  })
 
   res.status(200).json({
     message: 'Payments fetched successfully',
     payments,
     data: payments,
+    pagination,
   })
 }
 

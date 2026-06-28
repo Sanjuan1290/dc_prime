@@ -1,4 +1,8 @@
 import { db } from '../db/connect.js'
+import {
+  addDateRangeConditions,
+  getDateRangeFromQuery,
+} from '../utils/queryOptions.js'
 
 const formatDecimal = (value) => {
   return Number(Number(value || 0).toFixed(2))
@@ -14,6 +18,8 @@ const contractValueExpression = `
 `
 
 export const getDashboardSummary = async (req, res) => {
+  // TODO(perf-cache): this endpoint can later read from dashboard_summary_cache,
+  // collection_summary_daily, and commission_summary_daily once nightly jobs exist.
   const [rows] = await db.query(
     `
     SELECT
@@ -237,6 +243,23 @@ export const getDashboardSummary = async (req, res) => {
 }
 
 export const getAgentPerformance = async (req, res) => {
+  const { dateFrom, dateTo } = getDateRangeFromQuery(req.query, {
+    defaultToCurrentMonth: true,
+  })
+  const dateConditions = []
+  const dateParams = []
+
+  addDateRangeConditions({
+    conditions: dateConditions,
+    params: dateParams,
+    column: 'cu.created_at',
+    dateFrom,
+    dateTo,
+  })
+
+  const dateWhereClause =
+    dateConditions.length > 0 ? `AND ${dateConditions.join(' AND ')}` : ''
+
   const [rows] = await db.query(
     `
     SELECT
@@ -277,19 +300,24 @@ export const getAgentPerformance = async (req, res) => {
     FROM accredited_sellers seller
     LEFT JOIN (
       SELECT DISTINCT
-        seller_id,
-        client_unit_id
-      FROM commissions
+        cm.seller_id,
+        cm.client_unit_id
+      FROM commissions cm
+      INNER JOIN client_units cu ON cu.id = cm.client_unit_id
+      WHERE 1 = 1
+        ${dateWhereClause}
     ) seller_units ON seller_units.seller_id = seller.id
     LEFT JOIN client_units cu ON cu.id = seller_units.client_unit_id
     LEFT JOIN listings listing ON listing.id = cu.listing_id
     LEFT JOIN (
       SELECT
-        seller_id,
-        COALESCE(SUM(gross_commission), 0) AS commission_earned
-      FROM commissions
-      WHERE status <> 'cancelled'
-      GROUP BY seller_id
+        cm.seller_id,
+        COALESCE(SUM(cm.gross_commission), 0) AS commission_earned
+      FROM commissions cm
+      INNER JOIN client_units cu ON cu.id = cm.client_unit_id
+      WHERE cm.status <> 'cancelled'
+        ${dateWhereClause}
+      GROUP BY cm.seller_id
     ) commission_totals ON commission_totals.seller_id = seller.id
     GROUP BY
       seller.id,
@@ -297,7 +325,8 @@ export const getAgentPerformance = async (req, res) => {
       seller.seller_role,
       commission_totals.commission_earned
     ORDER BY net DESC
-    `
+    `,
+    [...dateParams, ...dateParams]
   )
 
   const agents = rows.map((agent) => ({
@@ -310,6 +339,137 @@ export const getAgentPerformance = async (req, res) => {
 
   res.status(200).json({
     agents,
+    dateRange: {
+      date_from: dateFrom,
+      date_to: dateTo,
+    },
   })
 }
 
+export const getGroupPerformance = async (req, res) => {
+  const { dateFrom, dateTo } = getDateRangeFromQuery(req.query, {
+    defaultToCurrentMonth: true,
+  })
+  const conditions = []
+  const params = []
+
+  addDateRangeConditions({
+    conditions,
+    params,
+    column: 'cu.created_at',
+    dateFrom,
+    dateTo,
+  })
+
+  const whereClause =
+    conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
+
+  // TODO(perf-cache): this aggregate can later be served from
+  // group_performance_daily and seller_performance_daily summary tables.
+  const [rows] = await db.query(
+    `
+    SELECT
+      COALESCE(cu.seller_group_id, seller.seller_group_id) AS seller_group_id,
+      COALESCE(cu.seller_group_name_snapshot, sg.group_name, 'Direct to Developer') AS group_name,
+      COALESCE(sg.group_code, 'DIRECT') AS group_code,
+      COALESCE(head.full_name, 'Unassigned') AS group_head,
+      COALESCE(cu.seller_group_pool_rate_snapshot, sg.pool_rate, 0) AS pool_rate,
+      COUNT(DISTINCT cu.id) AS sales_count,
+      COALESCE(
+        SUM(
+          COALESCE(
+            NULLIF(cu.offer_purchase_price, 0),
+            NULLIF(l.total_contract_price, 0),
+            l.net_selling_price + l.legal_misc_fee,
+            l.net_selling_price,
+            0
+          )
+        ),
+        0
+      ) AS total_sales,
+      SUM(CASE WHEN cu.status IN ('reserved', 'active', 'past_due') THEN 1 ELSE 0 END) AS active,
+      SUM(CASE WHEN cu.status IN ('fully_paid', 'closed') THEN 1 ELSE 0 END) AS fully_paid,
+      SUM(CASE WHEN cu.status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled,
+      COALESCE(SUM(payment_summary.verified_collections), 0) AS verified_collections,
+      COALESCE(SUM(commission_summary.gross_commission), 0) AS gross_commission,
+      COALESCE(SUM(commission_summary.released_commission), 0) AS released_commission
+    FROM client_units cu
+    LEFT JOIN listings l ON l.id = cu.listing_id
+    LEFT JOIN accredited_sellers seller ON seller.id = cu.seller_id
+    LEFT JOIN seller_groups sg ON sg.id = COALESCE(cu.seller_group_id, seller.seller_group_id)
+    LEFT JOIN accredited_sellers head ON head.id = sg.group_head_seller_id
+    LEFT JOIN (
+      SELECT
+        client_unit_id,
+        SUM(amount) AS verified_collections
+      FROM payments
+      WHERE status = 'verified'
+        AND (payment_type IS NULL OR payment_type <> 'excess_ma')
+      GROUP BY client_unit_id
+    ) payment_summary ON payment_summary.client_unit_id = cu.id
+    LEFT JOIN (
+      SELECT
+        cm.client_unit_id,
+        SUM(cm.gross_commission) AS gross_commission,
+        SUM(COALESCE(release_summary.released_commission, 0)) AS released_commission
+      FROM commissions cm
+      LEFT JOIN (
+        SELECT
+          commission_id,
+          SUM(net_release_amount) AS released_commission
+        FROM commission_releases
+        WHERE status = 'released'
+        GROUP BY commission_id
+      ) release_summary ON release_summary.commission_id = cm.id
+      WHERE cm.status <> 'cancelled'
+      GROUP BY cm.client_unit_id
+    ) commission_summary ON commission_summary.client_unit_id = cu.id
+    ${whereClause}
+    GROUP BY
+      seller_group_id,
+      group_name,
+      group_code,
+      group_head,
+      pool_rate
+    ORDER BY total_sales DESC
+    `,
+    params
+  )
+
+  const groups = rows.map((group) => {
+    const totalSales = formatDecimal(group.total_sales)
+    const verifiedCollections = formatDecimal(group.verified_collections)
+    const grossCommission = formatDecimal(group.gross_commission)
+    const releasedCommission = formatDecimal(group.released_commission)
+
+    return {
+      seller_group_id: group.seller_group_id,
+      group_name: group.group_name,
+      group_code: group.group_code,
+      group_head: group.group_head,
+      pool_rate: formatDecimal(group.pool_rate),
+      sales_count: Number(group.sales_count || 0),
+      total_sales: totalSales,
+      verified_collections: verifiedCollections,
+      collection_rate:
+        totalSales > 0
+          ? Number(((verifiedCollections / totalSales) * 100).toFixed(2))
+          : 0,
+      active: Number(group.active || 0),
+      fully_paid: Number(group.fully_paid || 0),
+      cancelled: Number(group.cancelled || 0),
+      gross_commission: grossCommission,
+      released_commission: releasedCommission,
+      remaining_commission: formatDecimal(grossCommission - releasedCommission),
+    }
+  })
+
+  res.status(200).json({
+    groups,
+    data: groups,
+    dateRange: {
+      date_from: dateFrom,
+      date_to: dateTo,
+    },
+  })
+}

@@ -5,6 +5,13 @@ import {
   getVisibleSellerIdsForUser,
   isOfficeRole,
 } from "../utils/sellerVisibility.js";
+import {
+  addDateRangeConditions,
+  buildPagination,
+  getDateRangeFromQuery,
+  getPaginationOptions,
+  getSortOptions,
+} from "../utils/queryOptions.js";
 
 const isMissing = (value) => {
   return value === undefined || value === null || value === "";
@@ -2178,6 +2185,21 @@ export const createAutoCommissionForClientUnit = async ({
 export const getCommissions = async (req, res) => {
   const { search, status, seller_id, client_unit_id, source_type, sale_type } =
     req.query;
+  const { page, limit, offset } = getPaginationOptions(req.query);
+  const { dateFrom, dateTo } = getDateRangeFromQuery(req.query);
+  const { sortColumn, sortDir } = getSortOptions(
+    req.query,
+    {
+      id: "cm.id",
+      created_at: "cm.created_at",
+      gross_commission: "cm.gross_commission",
+      status: "cm.status",
+      seller_name: "seller.full_name",
+      client_name: "client.full_name",
+      unit_id: "listing.unit_id",
+    },
+    { defaultSortBy: "id", defaultSortDir: "DESC" },
+  );
 
   const conditions = [];
   const params = [];
@@ -2253,8 +2275,25 @@ export const getCommissions = async (req, res) => {
     params.push(sale_type);
   }
 
+  addDateRangeConditions({
+    conditions,
+    params,
+    column: "cm.created_at",
+    dateFrom,
+    dateTo,
+  });
+
   const whereClause =
     conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+  const [[countRow]] = await db.query(
+    `
+      SELECT COUNT(*) AS totalRows
+      ${commissionJoins}
+      ${whereClause}
+      `,
+    params,
+  );
 
   const [rows] = await db.query(
     `
@@ -2262,15 +2301,23 @@ export const getCommissions = async (req, res) => {
         ${commissionFields}
       ${commissionJoins}
       ${whereClause}
-      ORDER BY cm.id DESC
+      ORDER BY ${sortColumn} ${sortDir}, cm.id DESC
+      LIMIT ? OFFSET ?
       `,
-    params,
+    [...params, limit, offset],
   );
+
+  const pagination = buildPagination({
+    page,
+    limit,
+    totalRows: countRow.totalRows,
+  });
 
   return res.status(200).json({
     message: "Commissions fetched successfully",
     commissions: rows,
     data: rows,
+    pagination,
   });
 };
 
@@ -3829,7 +3876,6 @@ export const getApprovedCashAdvancesBySeller = async (req, res) => {
     data: rows,
   });
 };
-
 
 
 

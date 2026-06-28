@@ -1,4 +1,11 @@
 import { db } from '../db/connect.js'
+import {
+  addDateRangeConditions,
+  buildPagination,
+  getDateRangeFromQuery,
+  getPaginationOptions,
+  getSortOptions,
+} from '../utils/queryOptions.js'
 
 const isMissing = (value) => {
   return value === undefined || value === null || value === ''
@@ -33,26 +40,62 @@ const listingContractValueExpression = `
   )
 `
 
+const getReportPagination = (req) => getPaginationOptions(req.query)
+
+const getReportDateRange = (req) =>
+  getDateRangeFromQuery(req.query, { defaultToCurrentMonth: true })
+
+const sendReportResponse = ({
+  res,
+  key,
+  rows,
+  page,
+  limit,
+  totalRows,
+}) => {
+  const pagination = buildPagination({ page, limit, totalRows })
+
+  res.status(200).json({
+    [key]: rows,
+    data: rows,
+    pagination,
+  })
+}
+
+// TODO(report-jobs): heavy exports can later move to a report_jobs table with
+// background Excel/PDF generation and downloadable files when ready.
+
 export const getSalesReport = async (req, res) => {
   const {
-    date_from,
-    date_to,
     project_id,
     status,
+    search,
   } = req.query
+  const { page, limit, offset } = getReportPagination(req)
+  const { dateFrom, dateTo } = getReportDateRange(req)
+  const { sortColumn, sortDir } = getSortOptions(
+    req.query,
+    {
+      created_at: 'cu.created_at',
+      client_name: 'c.full_name',
+      project_name: 'p.name',
+      unit_id: 'l.unit_id',
+      status: 'cu.status',
+      total_contract_price: 'total_contract_price',
+    },
+    { defaultSortBy: 'created_at', defaultSortDir: 'DESC' }
+  )
 
   const conditions = []
   const params = []
 
-  if (!isMissing(date_from)) {
-    conditions.push('DATE(cu.created_at) >= ?')
-    params.push(date_from)
-  }
-
-  if (!isMissing(date_to)) {
-    conditions.push('DATE(cu.created_at) <= ?')
-    params.push(date_to)
-  }
+  addDateRangeConditions({
+    conditions,
+    params,
+    column: 'cu.created_at',
+    dateFrom,
+    dateTo,
+  })
 
   if (!isMissing(project_id) && project_id !== 'all') {
     conditions.push('p.id = ?')
@@ -64,8 +107,26 @@ export const getSalesReport = async (req, res) => {
     params.push(status)
   }
 
+  if (!isMissing(search)) {
+    const searchTerm = `%${search}%`
+    conditions.push('(c.full_name LIKE ? OR p.name LIKE ? OR l.unit_id LIKE ? OR cu.status LIKE ?)')
+    params.push(searchTerm, searchTerm, searchTerm, searchTerm)
+  }
+
   const whereClause =
     conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
+
+  const [[countRow]] = await db.query(
+    `
+    SELECT COUNT(*) AS totalRows
+    FROM client_units cu
+    INNER JOIN clients c ON c.id = cu.client_id
+    INNER JOIN listings l ON l.id = cu.listing_id
+    INNER JOIN projects p ON p.id = l.project_id
+    ${whereClause}
+    `,
+    params
+  )
 
   const [rows] = await db.query(
     `
@@ -98,13 +159,19 @@ export const getSalesReport = async (req, res) => {
       GROUP BY client_unit_id
     ) payment_summary ON payment_summary.client_unit_id = cu.id
     ${whereClause}
-    ORDER BY cu.created_at DESC, cu.id DESC
+    ORDER BY ${sortColumn} ${sortDir}, cu.id DESC
+    LIMIT ? OFFSET ?
     `,
-    params
+    [...params, limit, offset]
   )
 
-  res.status(200).json({
-    sales: rows.map((row) => ({
+  sendReportResponse({
+    res,
+    key: 'sales',
+    page,
+    limit,
+    totalRows: countRow.totalRows,
+    rows: rows.map((row) => ({
       ...row,
       net_selling_price: formatDecimal(row.net_selling_price),
       legal_misc_rate: formatDecimal(row.legal_misc_rate),
@@ -118,25 +185,37 @@ export const getSalesReport = async (req, res) => {
 
 export const getCollectionsReport = async (req, res) => {
   const {
-    date_from,
-    date_to,
     project_id,
     payment_type,
     payment_method,
+    search,
   } = req.query
+  const { page, limit, offset } = getReportPagination(req)
+  const { dateFrom, dateTo } = getReportDateRange(req)
+  const { sortColumn, sortDir } = getSortOptions(
+    req.query,
+    {
+      payment_date: 'py.payment_date',
+      amount: 'py.amount',
+      client_name: 'c.full_name',
+      project_name: 'p.name',
+      unit_id: 'l.unit_id',
+      payment_type: 'py.payment_type',
+      payment_method: 'py.payment_method',
+    },
+    { defaultSortBy: 'payment_date', defaultSortDir: 'DESC' }
+  )
 
   const conditions = ["py.status = 'verified'"]
   const params = []
 
-  if (!isMissing(date_from)) {
-    conditions.push('py.payment_date >= ?')
-    params.push(date_from)
-  }
-
-  if (!isMissing(date_to)) {
-    conditions.push('py.payment_date <= ?')
-    params.push(date_to)
-  }
+  addDateRangeConditions({
+    conditions,
+    params,
+    column: 'py.payment_date',
+    dateFrom,
+    dateTo,
+  })
 
   if (!isMissing(project_id) && project_id !== 'all') {
     conditions.push('p.id = ?')
@@ -153,8 +232,27 @@ export const getCollectionsReport = async (req, res) => {
     params.push(payment_method)
   }
 
+  if (!isMissing(search)) {
+    const searchTerm = `%${search}%`
+    conditions.push('(c.full_name LIKE ? OR p.name LIKE ? OR l.unit_id LIKE ? OR py.payment_type LIKE ? OR py.payment_method LIKE ?)')
+    params.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm)
+  }
+
   const whereClause =
     conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
+
+  const [[countRow]] = await db.query(
+    `
+    SELECT COUNT(*) AS totalRows
+    FROM payments py
+    INNER JOIN client_units cu ON cu.id = py.client_unit_id
+    INNER JOIN clients c ON c.id = cu.client_id
+    INNER JOIN listings l ON l.id = cu.listing_id
+    INNER JOIN projects p ON p.id = l.project_id
+    ${whereClause}
+    `,
+    params
+  )
 
   const [rows] = await db.query(
     `
@@ -186,13 +284,19 @@ export const getCollectionsReport = async (req, res) => {
       GROUP BY client_unit_id
     ) payment_summary ON payment_summary.client_unit_id = cu.id
     ${whereClause}
-    ORDER BY py.payment_date DESC, py.id DESC
+    ORDER BY ${sortColumn} ${sortDir}, py.id DESC
+    LIMIT ? OFFSET ?
     `,
-    params
+    [...params, limit, offset]
   )
 
-  res.status(200).json({
-    collections: rows.map((row) => ({
+  sendReportResponse({
+    res,
+    key: 'collections',
+    page,
+    limit,
+    totalRows: countRow.totalRows,
+    rows: rows.map((row) => ({
       ...row,
       amount: formatDecimal(row.amount),
       total_contract_price: formatDecimal(row.total_contract_price),
@@ -206,7 +310,20 @@ export const getInventoryReport = async (req, res) => {
     project_id,
     status,
     lot_type,
+    search,
   } = req.query
+  const { page, limit, offset } = getReportPagination(req)
+  const { sortColumn, sortDir } = getSortOptions(
+    req.query,
+    {
+      project_name: 'p.name',
+      unit_id: 'l.unit_id',
+      status: 'l.status',
+      created_at: 'l.created_at',
+      total_contract_price: 'total_contract_price',
+    },
+    { defaultSortBy: 'project_name', defaultSortDir: 'ASC' }
+  )
 
   const conditions = []
   const params = []
@@ -226,8 +343,24 @@ export const getInventoryReport = async (req, res) => {
     params.push(lot_type)
   }
 
+  if (!isMissing(search)) {
+    const searchTerm = `%${search}%`
+    conditions.push('(p.name LIKE ? OR l.unit_id LIKE ? OR l.cadastral_lot_no LIKE ? OR l.lot_type LIKE ? OR l.status LIKE ?)')
+    params.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm)
+  }
+
   const whereClause =
     conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
+
+  const [[countRow]] = await db.query(
+    `
+    SELECT COUNT(*) AS totalRows
+    FROM listings l
+    INNER JOIN projects p ON p.id = l.project_id
+    ${whereClause}
+    `,
+    params
+  )
 
   const [rows] = await db.query(
     `
@@ -248,13 +381,19 @@ export const getInventoryReport = async (req, res) => {
     FROM listings l
     INNER JOIN projects p ON p.id = l.project_id
     ${whereClause}
-    ORDER BY p.name ASC, l.unit_id ASC
+    ORDER BY ${sortColumn} ${sortDir}, l.unit_id ASC
+    LIMIT ? OFFSET ?
     `,
-    params
+    [...params, limit, offset]
   )
 
-  res.status(200).json({
-    inventory: rows.map((row) => ({
+  sendReportResponse({
+    res,
+    key: 'inventory',
+    page,
+    limit,
+    totalRows: countRow.totalRows,
+    rows: rows.map((row) => ({
       ...row,
       lot_area_sqm: formatDecimal(row.lot_area_sqm),
       price_per_sqm: formatDecimal(row.price_per_sqm),
@@ -268,25 +407,37 @@ export const getInventoryReport = async (req, res) => {
 
 export const getCommissionsReport = async (req, res) => {
   const {
-    date_from,
-    date_to,
     project_id,
     status,
     seller_role,
+    search,
   } = req.query
+  const { page, limit, offset } = getReportPagination(req)
+  const { dateFrom, dateTo } = getReportDateRange(req)
+  const { sortColumn, sortDir } = getSortOptions(
+    req.query,
+    {
+      created_at: 'cm.created_at',
+      seller_name: 'seller.full_name',
+      client_name: 'c.full_name',
+      project_name: 'p.name',
+      unit_id: 'l.unit_id',
+      gross_commission: 'cm.gross_commission',
+      status: 'cm.status',
+    },
+    { defaultSortBy: 'created_at', defaultSortDir: 'DESC' }
+  )
 
   const conditions = []
   const params = []
 
-  if (!isMissing(date_from)) {
-    conditions.push('DATE(cm.created_at) >= ?')
-    params.push(date_from)
-  }
-
-  if (!isMissing(date_to)) {
-    conditions.push('DATE(cm.created_at) <= ?')
-    params.push(date_to)
-  }
+  addDateRangeConditions({
+    conditions,
+    params,
+    column: 'cm.created_at',
+    dateFrom,
+    dateTo,
+  })
 
   if (!isMissing(project_id) && project_id !== 'all') {
     conditions.push('p.id = ?')
@@ -303,8 +454,28 @@ export const getCommissionsReport = async (req, res) => {
     params.push(seller_role)
   }
 
+  if (!isMissing(search)) {
+    const searchTerm = `%${search}%`
+    conditions.push('(seller.full_name LIKE ? OR c.full_name LIKE ? OR p.name LIKE ? OR l.unit_id LIKE ? OR cm.status LIKE ?)')
+    params.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm)
+  }
+
   const whereClause =
     conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
+
+  const [[countRow]] = await db.query(
+    `
+    SELECT COUNT(*) AS totalRows
+    FROM commissions cm
+    INNER JOIN client_units cu ON cu.id = cm.client_unit_id
+    INNER JOIN clients c ON c.id = cu.client_id
+    INNER JOIN listings l ON l.id = cu.listing_id
+    INNER JOIN projects p ON p.id = l.project_id
+    LEFT JOIN accredited_sellers seller ON seller.id = cm.seller_id
+    ${whereClause}
+    `,
+    params
+  )
 
   const [rows] = await db.query(
     `
@@ -332,13 +503,19 @@ export const getCommissionsReport = async (req, res) => {
     LEFT JOIN accredited_sellers seller ON seller.id = cm.seller_id
     LEFT JOIN accredited_sellers parent ON parent.id = seller.parent_seller_id
     ${whereClause}
-    ORDER BY cm.created_at DESC, cm.id DESC
+    ORDER BY ${sortColumn} ${sortDir}, cm.id DESC
+    LIMIT ? OFFSET ?
     `,
-    params
+    [...params, limit, offset]
   )
 
-  res.status(200).json({
-    commissions: rows.map((row) => ({
+  sendReportResponse({
+    res,
+    key: 'commissions',
+    page,
+    limit,
+    totalRows: countRow.totalRows,
+    rows: rows.map((row) => ({
       ...row,
       net_selling_price: formatDecimal(row.net_selling_price),
       total_contract_price: formatDecimal(row.total_contract_price),
@@ -352,11 +529,31 @@ export const getCommissionsReport = async (req, res) => {
 
 export const getDocumentsReport = async (req, res) => {
   const {
+    date_from,
+    date_to,
     project_id,
     status,
     is_required,
     can_reuse,
+    search,
   } = req.query
+  const { page, limit, offset } = getReportPagination(req)
+  const fallbackRange = getReportDateRange(req)
+  const dateFrom = date_from ? fallbackRange.dateFrom : null
+  const dateTo = date_to ? fallbackRange.dateTo : null
+  const { sortColumn, sortDir } = getSortOptions(
+    req.query,
+    {
+      client_name: 'c.full_name',
+      project_name: 'p.name',
+      unit_id: 'l.unit_id',
+      document_name: 'd.name',
+      status: 'cdl.status',
+      updated_at: 'cdl.updated_at',
+      reviewed_at: 'cdl.reviewed_at',
+    },
+    { defaultSortBy: 'client_name', defaultSortDir: 'ASC' }
+  )
 
   const conditions = []
   const params = []
@@ -381,8 +578,36 @@ export const getDocumentsReport = async (req, res) => {
     params.push(booleanFilterValue(can_reuse))
   }
 
+  addDateRangeConditions({
+    conditions,
+    params,
+    column: 'COALESCE(cdl.reviewed_at, cdl.updated_at)',
+    dateFrom,
+    dateTo,
+  })
+
+  if (!isMissing(search)) {
+    const searchTerm = `%${search}%`
+    conditions.push('(c.full_name LIKE ? OR p.name LIKE ? OR l.unit_id LIKE ? OR d.name LIKE ? OR cdl.status LIKE ?)')
+    params.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm)
+  }
+
   const whereClause =
     conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
+
+  const [[countRow]] = await db.query(
+    `
+    SELECT COUNT(*) AS totalRows
+    FROM client_document_list cdl
+    INNER JOIN client_units cu ON cu.id = cdl.client_unit_id
+    INNER JOIN clients c ON c.id = cu.client_id
+    INNER JOIN listings l ON l.id = cu.listing_id
+    INNER JOIN projects p ON p.id = l.project_id
+    INNER JOIN documents d ON d.id = cdl.document_id
+    ${whereClause}
+    `,
+    params
+  )
 
   const [rows] = await db.query(
     `
@@ -405,20 +630,38 @@ export const getDocumentsReport = async (req, res) => {
     INNER JOIN documents d ON d.id = cdl.document_id
     LEFT JOIN users reviewer ON reviewer.id = cdl.reviewed_by
     ${whereClause}
-    ORDER BY c.full_name ASC, l.unit_id ASC, d.name ASC
+    ORDER BY ${sortColumn} ${sortDir}, l.unit_id ASC, d.name ASC
+    LIMIT ? OFFSET ?
     `,
-    params
+    [...params, limit, offset]
   )
 
-  res.status(200).json({
-    documents: rows,
+  sendReportResponse({
+    res,
+    key: 'documents',
+    rows,
+    page,
+    limit,
+    totalRows: countRow.totalRows,
   })
 }
 
 export const getClientsReport = async (req, res) => {
   const {
     project_id,
+    search,
   } = req.query
+  const { page, limit, offset } = getReportPagination(req)
+  const { sortColumn, sortDir } = getSortOptions(
+    req.query,
+    {
+      client_name: 'c.full_name',
+      region: 'c.region',
+      units_count: 'units_count',
+      total_contract_value: 'total_contract_value',
+    },
+    { defaultSortBy: 'client_name', defaultSortDir: 'ASC' }
+  )
 
   const conditions = []
   const params = []
@@ -428,8 +671,30 @@ export const getClientsReport = async (req, res) => {
     params.push(project_id)
   }
 
+  if (!isMissing(search)) {
+    const searchTerm = `%${search}%`
+    conditions.push('(c.full_name LIKE ? OR c.email LIKE ? OR c.contact_no LIKE ? OR c.region LIKE ?)')
+    params.push(searchTerm, searchTerm, searchTerm, searchTerm)
+  }
+
   const whereClause =
     conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
+
+  const [[countRow]] = await db.query(
+    `
+    SELECT COUNT(*) AS totalRows
+    FROM (
+      SELECT c.id
+      FROM clients c
+      LEFT JOIN client_units cu ON cu.client_id = c.id
+      LEFT JOIN listings l ON l.id = cu.listing_id
+      LEFT JOIN projects p ON p.id = l.project_id
+      ${whereClause}
+      GROUP BY c.id
+    ) counted_clients
+    `,
+    params
+  )
 
   const [rows] = await db.query(
     `
@@ -471,13 +736,19 @@ export const getClientsReport = async (req, res) => {
       c.contact_no,
       c.address,
       c.region
-    ORDER BY c.full_name ASC
+    ORDER BY ${sortColumn} ${sortDir}, c.id ASC
+    LIMIT ? OFFSET ?
     `,
-    params
+    [...params, limit, offset]
   )
 
-  res.status(200).json({
-    clients: rows.map((row) => ({
+  sendReportResponse({
+    res,
+    key: 'clients',
+    page,
+    limit,
+    totalRows: countRow.totalRows,
+    rows: rows.map((row) => ({
       ...row,
       units_count: Number(row.units_count || 0),
       total_contract_value: formatDecimal(row.total_contract_value),
@@ -486,4 +757,3 @@ export const getClientsReport = async (req, res) => {
     })),
   })
 }
-

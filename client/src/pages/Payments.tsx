@@ -31,7 +31,6 @@ import {
   getDateInputValue,
   getLocalDate,
 } from "../utils/formatters"
-import { paginateRows } from "../utils/pagination"
 
 type PaymentStatus = "pending" | "verified" | "rejected" | string
 
@@ -119,6 +118,19 @@ type PaymentFormData = {
 type PaymentsResponse = {
   payments?: Payment[]
   data?: Payment[]
+  pagination?: PaginationMeta
+}
+
+type PaymentsResult = {
+  payments: Payment[]
+  pagination: PaginationMeta
+}
+
+type PaginationMeta = {
+  page: number
+  limit: number
+  totalRows: number
+  totalPages: number
 }
 
 type ClientUnitsResponse = {
@@ -181,8 +193,40 @@ const getPaymentDateRuleMessage = (paymentType: string) => {
 
 const paymentStatuses = ["pending", "verified", "rejected"]
 
-const fetchPayments = async (): Promise<Payment[]> => {
-  const response = await fetch(`${API_URL}/payments`, {
+const fetchPayments = async ({
+  dateFrom,
+  dateTo,
+  limit,
+  page,
+  paymentType,
+  paymentMethod,
+  search,
+  status,
+}: {
+  dateFrom: string
+  dateTo: string
+  limit: number
+  page: number
+  paymentType: string
+  paymentMethod: string
+  search: string
+  status: string
+}): Promise<PaymentsResult> => {
+  const params = new URLSearchParams({
+    page: String(page),
+    limit: String(limit),
+    sort_by: "payment_date",
+    sort_dir: "DESC",
+  })
+
+  if (search.trim()) params.set("search", search.trim())
+  if (status !== "all") params.set("status", status)
+  if (paymentType !== "all") params.set("payment_type", paymentType)
+  if (paymentMethod !== "all") params.set("payment_method", paymentMethod)
+  if (dateFrom) params.set("date_from", dateFrom)
+  if (dateTo) params.set("date_to", dateTo)
+
+  const response = await fetch(`${API_URL}/payments?${params.toString()}`, {
     credentials: "include",
   })
 
@@ -191,11 +235,22 @@ const fetchPayments = async (): Promise<Payment[]> => {
   }
 
   const data = (await response.json()) as PaymentsResponse
-  return data.payments || data.data || []
+  const payments = data.payments || data.data || []
+
+  return {
+    payments,
+    pagination:
+      data.pagination || {
+        page,
+        limit,
+        totalRows: payments.length,
+        totalPages: Math.max(Math.ceil(payments.length / limit), 1),
+      },
+  }
 }
 
 const fetchClientUnits = async (): Promise<ClientUnit[]> => {
-  const response = await fetch(`${API_URL}/client-units`, {
+  const response = await fetch(`${API_URL}/client-units?limit=100`, {
     credentials: "include",
   })
 
@@ -387,13 +442,36 @@ const Payments = () => {
   const [paymentFormError, setPaymentFormError] = useState("")
 
   const {
-    data: payments = [],
+    data: paymentsResult,
     isLoading,
     error,
-  } = useQuery<Payment[]>({
-    queryKey: ["payments"],
-    queryFn: fetchPayments,
+  } = useQuery<PaymentsResult>({
+    queryKey: [
+      "payments",
+      page,
+      rowsPerPage,
+      searchInput,
+      paymentTypeFilter,
+      paymentMethodFilter,
+      statusFilter,
+      dateFrom,
+      dateTo,
+    ],
+    queryFn: () =>
+      fetchPayments({
+        dateFrom,
+        dateTo,
+        limit: rowsPerPage,
+        page,
+        paymentMethod: paymentMethodFilter,
+        paymentType: paymentTypeFilter,
+        search: searchInput,
+        status: statusFilter,
+      }),
   })
+
+  const payments = paymentsResult?.payments || []
+  const paymentsTotalRows = paymentsResult?.pagination.totalRows || payments.length
 
   const { data: clientUnits = [] } = useQuery<ClientUnit[]>({
     queryKey: ["client-units"],
@@ -487,7 +565,7 @@ const Payments = () => {
     )
   })
 
-  const paginatedPayments = paginateRows(filteredPayments, page, rowsPerPage)
+  const paginatedPayments = filteredPayments
 
   const filteredClientUnits = useMemo(() => {
     const search = clientUnitSearch.toLowerCase().trim()
@@ -543,6 +621,7 @@ const Payments = () => {
 
     const nextAmount = Number(suggestedAmount).toFixed(2)
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setFormData((current) => {
       if (
         current.client_unit_id !== formData.client_unit_id ||
@@ -890,7 +969,7 @@ const Payments = () => {
       <Pagination
         page={page}
         rowsPerPage={rowsPerPage}
-        totalRows={filteredPayments.length}
+        totalRows={paymentsTotalRows}
         onPageChange={setPage}
         onRowsPerPageChange={setRowsPerPage}
       />
@@ -1423,4 +1502,3 @@ const MiniDetail = ({
 }
 
 export default Payments
-

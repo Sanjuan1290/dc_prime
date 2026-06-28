@@ -9,6 +9,11 @@ import {
 } from './commissions.controller.js'
 import { recomputeClientUnitBalance } from './payments.controller.js'
 import { rebuildPaymentSchedule, rebuildAndGetPaymentScheduleRows } from '../utils/paymentSchedule.js'
+import {
+  buildPagination,
+  getPaginationOptions,
+  getSortOptions,
+} from '../utils/queryOptions.js'
 
 const allowedClientUnitStatuses = [
   'reserved',
@@ -1544,6 +1549,20 @@ const createReservationCommissions = async ({
 
 export const getClientUnits = async (req, res) => {
   const { search, status, client_id } = req.query
+  const { page, limit, offset } = getPaginationOptions(req.query)
+  const { sortColumn, sortDir } = getSortOptions(
+    req.query,
+    {
+      id: 'cu.id',
+      created_at: 'cu.created_at',
+      updated_at: 'cu.updated_at',
+      client_name: 'c.full_name',
+      unit_id: 'l.unit_id',
+      project_name: 'p.name',
+      status: 'cu.status',
+    },
+    { defaultSortBy: 'id', defaultSortDir: 'DESC' }
+  )
 
   const conditions = []
   const params = []
@@ -1589,12 +1608,38 @@ export const getClientUnits = async (req, res) => {
   const whereClause =
     conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
 
-  const clientUnits = await getClientUnitsForWhereClause(whereClause, params)
+  const [[countRow]] = await db.query(
+    `
+    SELECT COUNT(DISTINCT cu.id) AS totalRows
+    ${clientUnitJoins}
+    ${whereClause}
+    `,
+    params
+  )
+
+  const [clientUnits] = await db.query(
+    `
+    SELECT
+      ${clientUnitFields}
+    ${clientUnitJoins}
+    ${whereClause}
+    ORDER BY ${sortColumn} ${sortDir}, cu.id DESC
+    LIMIT ? OFFSET ?
+    `,
+    [...params, limit, offset]
+  )
+
+  const pagination = buildPagination({
+    page,
+    limit,
+    totalRows: countRow.totalRows,
+  })
 
   res.status(200).json({
     message: 'Client units fetched successfully',
     clientUnits,
     data: clientUnits,
+    pagination,
   })
 }
 

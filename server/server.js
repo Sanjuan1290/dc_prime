@@ -47,6 +47,22 @@ app.use(
   })
 )
 
+app.use((req, res, next) => {
+  const start = process.hrtime.bigint()
+
+  res.on('finish', () => {
+    const ms = Number(process.hrtime.bigint() - start) / 1_000_000
+
+    if (ms > 500) {
+      console.warn(
+        `[slow-request] ${req.method} ${req.originalUrl} ${res.statusCode} ${ms.toFixed(1)}ms`
+      )
+    }
+  })
+
+  next()
+})
+
 app.get('/', (req, res) => {
   res.json({ message: 'Server is running' })
 })
@@ -159,4 +175,3 @@ app.listen(PORT, async () => {
     process.exit(1)
   }
 })
-

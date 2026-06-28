@@ -13,7 +13,6 @@ import StatCard from "../components/ui/StatCard"
 import TableContainer from "../components/ui/TableContainer"
 import { API_URL, getErrorMessage } from "../utils/api"
 import { formatDate, formatNumber, formatText } from "../utils/formatters"
-import { paginateRows } from "../utils/pagination"
 
 type AuditLog = {
   id: number
@@ -30,10 +29,55 @@ type AuditLog = {
 
 type AuditLogsResponse = {
   auditLogs: AuditLog[]
+  data?: AuditLog[]
+  pagination?: PaginationMeta
 }
 
-const fetchAuditLogs = async (): Promise<AuditLog[]> => {
-  const res = await fetch(`${API_URL}/audit-logs`, {
+type PaginationMeta = {
+  page: number
+  limit: number
+  totalRows: number
+  totalPages: number
+}
+
+type AuditLogsResult = {
+  auditLogs: AuditLog[]
+  pagination: PaginationMeta
+}
+
+const emptyAuditLogs: AuditLog[] = []
+
+const fetchAuditLogs = async ({
+  action,
+  date,
+  limit,
+  module,
+  page,
+  search,
+}: {
+  action: string
+  date: string
+  limit: number
+  module: string
+  page: number
+  search: string
+}): Promise<AuditLogsResult> => {
+  const params = new URLSearchParams({
+    page: String(page),
+    limit: String(limit),
+    sort_by: "created_at",
+    sort_dir: "DESC",
+  })
+
+  if (search.trim()) params.set("search", search.trim())
+  if (action !== "all") params.set("action", action)
+  if (module !== "all") params.set("module", module)
+  if (date) {
+    params.set("date_from", date)
+    params.set("date_to", date)
+  }
+
+  const res = await fetch(`${API_URL}/audit-logs?${params.toString()}`, {
     credentials: "include",
   })
 
@@ -42,7 +86,18 @@ const fetchAuditLogs = async (): Promise<AuditLog[]> => {
   }
 
   const data: AuditLogsResponse = await res.json()
-  return data.auditLogs
+  const auditLogs = data.auditLogs || data.data || []
+
+  return {
+    auditLogs,
+    pagination:
+      data.pagination || {
+        page,
+        limit,
+        totalRows: auditLogs.length,
+        totalPages: Math.max(Math.ceil(auditLogs.length / limit), 1),
+      },
+  }
 }
 
 const formatDateTime = (date: string | null) => {
@@ -66,13 +121,33 @@ const AuditLogs = () => {
   const [rowsPerPage, setRowsPerPage] = useState(10)
 
   const {
-    data: auditLogs = [],
+    data: auditLogResult,
     isLoading,
     error,
-  } = useQuery<AuditLog[]>({
-    queryKey: ["audit-logs"],
-    queryFn: fetchAuditLogs,
+  } = useQuery<AuditLogsResult>({
+    queryKey: [
+      "audit-logs",
+      page,
+      rowsPerPage,
+      searchInput,
+      actionFilter,
+      moduleFilter,
+      dateFilter,
+    ],
+    queryFn: () =>
+      fetchAuditLogs({
+        action: actionFilter,
+        date: dateFilter,
+        limit: rowsPerPage,
+        module: moduleFilter,
+        page,
+        search: searchInput,
+      }),
   })
+
+  const auditLogs = auditLogResult?.auditLogs ?? emptyAuditLogs
+  const auditLogsTotalRows =
+    auditLogResult?.pagination.totalRows || auditLogs.length
 
   const actions = useMemo(
     () => [...new Set(auditLogs.map((log) => log.action).filter(Boolean))],
@@ -110,7 +185,7 @@ const AuditLogs = () => {
     })
   }, [actionFilter, auditLogs, dateFilter, moduleFilter, searchInput])
 
-  const paginatedLogs = paginateRows(filteredLogs, page, rowsPerPage)
+  const paginatedLogs = filteredLogs
 
   const resetFilters = () => {
     setSearchInput("")
@@ -267,7 +342,7 @@ const AuditLogs = () => {
       <Pagination
         page={page}
         rowsPerPage={rowsPerPage}
-        totalRows={filteredLogs.length}
+        totalRows={auditLogsTotalRows}
         onPageChange={setPage}
         onRowsPerPageChange={setRowsPerPage}
       />
@@ -276,4 +351,3 @@ const AuditLogs = () => {
 }
 
 export default AuditLogs
-

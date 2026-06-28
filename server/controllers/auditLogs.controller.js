@@ -1,5 +1,12 @@
 import { db } from '../db/connect.js'
 import { formatIpForDisplay } from '../utils/getClientIp.js'
+import {
+  addDateRangeConditions,
+  buildPagination,
+  getDateRangeFromQuery,
+  getPaginationOptions,
+  getSortOptions,
+} from '../utils/queryOptions.js'
 
 const isMissing = (value) => {
   return value === undefined || value === null || value === ''
@@ -51,9 +58,20 @@ export const getAuditLogs = async (req, res) => {
     action,
     module,
     user_id,
-    date_from,
-    date_to
   } = req.query
+  const { page, limit, offset } = getPaginationOptions(req.query)
+  const { dateFrom, dateTo } = getDateRangeFromQuery(req.query)
+  const { sortColumn, sortDir } = getSortOptions(
+    req.query,
+    {
+      id: 'al.id',
+      created_at: 'al.created_at',
+      action: 'al.action',
+      module: 'al.module',
+      user_name: 'u.full_name',
+    },
+    { defaultSortBy: 'created_at', defaultSortDir: 'DESC' }
+  )
 
   const conditions = []
   const params = []
@@ -97,24 +115,50 @@ export const getAuditLogs = async (req, res) => {
     params.push(user_id)
   }
 
-  if (!isMissing(date_from)) {
-    conditions.push('al.created_at >= ?')
-    params.push(date_from)
-  }
-
-  if (!isMissing(date_to)) {
-    conditions.push('al.created_at <= ?')
-    params.push(date_to)
-  }
+  addDateRangeConditions({
+    conditions,
+    params,
+    column: 'al.created_at',
+    dateFrom,
+    dateTo,
+  })
 
   const whereClause = conditions.length > 0
     ? `WHERE ${conditions.join(' AND ')}`
     : ''
 
-  const auditLogs = await getAuditLogsForWhereClause(whereClause, params)
+  const [[countRow]] = await db.query(
+    `
+    SELECT COUNT(*) AS totalRows
+    ${auditLogJoins}
+    ${whereClause}
+    `,
+    params
+  )
+
+  const [auditRows] = await db.query(
+    `
+    SELECT
+      ${auditLogFields}
+    ${auditLogJoins}
+    ${whereClause}
+    ORDER BY ${sortColumn} ${sortDir}, al.id DESC
+    LIMIT ? OFFSET ?
+    `,
+    [...params, limit, offset]
+  )
+
+  const auditLogs = mapAuditLogs(auditRows)
+  const pagination = buildPagination({
+    page,
+    limit,
+    totalRows: countRow.totalRows,
+  })
 
   res.status(200).json({
-    auditLogs
+    auditLogs,
+    data: auditLogs,
+    pagination,
   })
 }
 
@@ -138,4 +182,3 @@ export const getAuditLog = async (req, res) => {
     auditLog
   })
 }
-
