@@ -111,9 +111,6 @@ type SellerGroupForm = {
 type MemberRateForm = {
   personal_commission_rate: string
   override_commission_rate: string
-  commission_pool_rate: string
-  direct_to_developer_rate: string
-  max_downline_rate: string
 }
 
 const statuses = ["active", "inactive"]
@@ -215,9 +212,6 @@ const emptyGroupForm: SellerGroupForm = {
 const emptyMemberRateForm: MemberRateForm = {
   personal_commission_rate: "",
   override_commission_rate: "",
-  commission_pool_rate: "",
-  direct_to_developer_rate: "",
-  max_downline_rate: "",
 }
 
 const fetchSellerGroups = async () => {
@@ -292,25 +286,28 @@ const recalculateSellerGroup = async (id: number) => {
 const updateMemberRates = async ({
   groupId,
   sellerId,
+  sellerRole,
   form,
 }: {
   groupId: number
   sellerId: number
+  sellerRole: string
   form: MemberRateForm
 }) => {
   const nullableRate = (value: string) => (value.trim() === "" ? null : Number(value))
+  const payload: Record<string, number | null> = {
+    personal_commission_rate: nullableRate(form.personal_commission_rate),
+  }
+
+  if (sellerRole !== "agent") {
+    payload.override_commission_rate = nullableRate(form.override_commission_rate)
+  }
 
   const res = await fetch(`${API_URL}/seller-groups/${groupId}/members/${sellerId}/rates`, {
     method: "PATCH",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      personal_commission_rate: nullableRate(form.personal_commission_rate),
-      override_commission_rate: nullableRate(form.override_commission_rate),
-      commission_pool_rate: nullableRate(form.commission_pool_rate),
-      direct_to_developer_rate: nullableRate(form.direct_to_developer_rate),
-      max_downline_rate: nullableRate(form.max_downline_rate),
-    }),
+    body: JSON.stringify(payload),
   })
   if (!res.ok) throw new Error(await getErrorMessage(res))
   return res.json()
@@ -384,9 +381,6 @@ const groupFormFromGroup = (group: SellerGroup): SellerGroupForm => ({
 const memberRateFormFromMember = (member: SellerGroupMember): MemberRateForm => ({
   personal_commission_rate: formatRateInput(member.personal_commission_rate),
   override_commission_rate: formatRateInput(member.override_commission_rate),
-  commission_pool_rate: formatRateInput(member.commission_pool_rate),
-  direct_to_developer_rate: formatRateInput(member.direct_to_developer_rate),
-  max_downline_rate: formatRateInput(member.max_downline_rate),
 })
 
 const getGroupSplitTotals = (form: SellerGroupForm) => {
@@ -402,6 +396,21 @@ const getHierarchyDisplay = (member: SellerGroupMember) => {
   return member.full_name
 }
 
+const canUseOverrideRate = (sellerRole: string) => sellerRole !== "agent"
+
+const parseOptionalRateInput = (value: string) => {
+  if (value.trim() === "") return null
+  const parsed = Number(value)
+  return Number.isNaN(parsed) ? undefined : parsed
+}
+
+const validateRateInput = (value: string, label: string) => {
+  const parsed = parseOptionalRateInput(value)
+  if (parsed === undefined) return `${label} must be numeric or blank.`
+  if (parsed !== null && (parsed < 0 || parsed > 100)) return `${label} must be between 0 and 100.`
+  return null
+}
+
 const SellerGroups = () => {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -414,6 +423,7 @@ const SellerGroups = () => {
   const [groupForm, setGroupForm] = useState<SellerGroupForm>(emptyGroupForm)
   const [selectedMember, setSelectedMember] = useState<SellerGroupMember | null>(null)
   const [memberRateForm, setMemberRateForm] = useState<MemberRateForm>(emptyMemberRateForm)
+  const [memberRateError, setMemberRateError] = useState("")
 
   const { data: currentUserData } = useCurrentUser()
   const currentUser = (currentUserData as CurrentUserResponse | null)?.user
@@ -521,6 +531,7 @@ const SellerGroups = () => {
       invalidateGroupData()
       setSelectedMember(null)
       setMemberRateForm(emptyMemberRateForm)
+      setMemberRateError("")
       setMessage("Member rates updated successfully.")
     },
   })
@@ -540,6 +551,7 @@ const SellerGroups = () => {
   const openMemberDetails = (member: SellerGroupMember) => {
     setSelectedMember(member)
     setMemberRateForm(memberRateFormFromMember(member))
+    setMemberRateError("")
   }
 
   const updateGroupSaleSplit = (
@@ -557,6 +569,7 @@ const SellerGroups = () => {
   }
 
   const updateMemberRate = (values: Partial<MemberRateForm>) => {
+    setMemberRateError("")
     setMemberRateForm((prev) => ({ ...prev, ...values }))
   }
 
@@ -573,9 +586,23 @@ const SellerGroups = () => {
 
   const handleSaveMemberRates = () => {
     if (!selectedMember || !detailsGroup) return
+
+    const directError = validateRateInput(memberRateForm.personal_commission_rate, "Direct Rate")
+    const overrideError = canUseOverrideRate(selectedMember.seller_role)
+      ? validateRateInput(memberRateForm.override_commission_rate, "Override Rate")
+      : null
+    const validationError = directError || overrideError
+
+    if (validationError) {
+      setMemberRateError(validationError)
+      return
+    }
+
+    setMemberRateError("")
     updateMemberRatesMutation.mutate({
       groupId: detailsGroup.id,
       sellerId: selectedMember.id,
+      sellerRole: selectedMember.seller_role,
       form: memberRateForm,
     })
   }
@@ -736,8 +763,6 @@ const SellerGroups = () => {
                       <th className="px-4 py-3 text-left">Hierarchy Path</th>
                       <th className="px-4 py-3 text-left">Direct Rate</th>
                       <th className="px-4 py-3 text-left">Override Rate</th>
-                      <th className="px-4 py-3 text-left">Direct-to-Developer Rate</th>
-                      <th className="px-4 py-3 text-left">Pool Rate</th>
                       <th className="px-4 py-3 text-left">Status</th>
                       <th className="px-4 py-3 text-left">Last Updated</th>
                       <th className="px-4 py-3 text-left">Action</th>
@@ -755,8 +780,6 @@ const SellerGroups = () => {
                         <td className="px-4 py-3 text-slate-600">{getHierarchyDisplay(member)}</td>
                         <td className="px-4 py-3 text-slate-600">{formatRate(member.personal_commission_rate ?? member.commission_rate)}</td>
                         <td className="px-4 py-3 text-slate-600">{formatRate(member.override_commission_rate)}</td>
-                        <td className="px-4 py-3 text-slate-600">{formatRate(member.direct_to_developer_rate)}</td>
-                        <td className="px-4 py-3 text-slate-600">{formatRate(member.commission_pool_rate)}</td>
                         <td className="px-4 py-3"><StatusBadge status={member.status} /></td>
                         <td className="px-4 py-3 text-slate-600">{member.rate_updated_at ? formatDate(member.rate_updated_at) : "-"}</td>
                         <td className="px-4 py-3">
@@ -768,7 +791,7 @@ const SellerGroups = () => {
                     ))}
                     {!filteredMembers.length ? (
                       <tr>
-                        <td colSpan={11} className="px-4 py-8 text-center text-slate-500">No members found.</td>
+                        <td colSpan={9} className="px-4 py-8 text-center text-slate-500">No members found.</td>
                       </tr>
                     ) : null}
                   </tbody>
@@ -782,11 +805,21 @@ const SellerGroups = () => {
       {selectedMember && detailsGroup ? (
         <Modal
           title={`Member Details - ${selectedMember.full_name}`}
-          onClose={() => setSelectedMember(null)}
+          onClose={() => {
+            setSelectedMember(null)
+            setMemberRateError("")
+          }}
           size="lg"
           footer={
             <div className="flex justify-end gap-2">
-              <Button onClick={() => setSelectedMember(null)}>Close</Button>
+              <Button
+                onClick={() => {
+                  setSelectedMember(null)
+                  setMemberRateError("")
+                }}
+              >
+                Close
+              </Button>
               {canManageRates ? (
                 <Button disabled={updateMemberRatesMutation.isPending} onClick={handleSaveMemberRates} variant="primary">
                   {updateMemberRatesMutation.isPending ? "Saving..." : "Save Rates"}
@@ -802,10 +835,10 @@ const SellerGroups = () => {
                 ["Role", formatText(selectedMember.seller_role)],
                 ["Group", selectedMember.seller_group_name || detailsGroup.group_name],
                 ["Reports Under", selectedMember.parent_seller_name || "Group Head"],
-                ["Direct downline count", formatNumber(selectedMember.direct_downline_count || 0)],
+                ["Hierarchy", getHierarchyDisplay(selectedMember)],
+                ["Group Pool Rate", formatRate(detailsGroup.pool_rate)],
                 ["Rate last updated", selectedMember.rate_updated_at ? formatDate(selectedMember.rate_updated_at) : "-"],
                 ["Rate set by", selectedMember.rate_set_by_name || "-"],
-                ["Hierarchy", getHierarchyDisplay(selectedMember)],
               ].map(([label, value]) => (
                 <div key={label} className="rounded-lg border border-slate-200 bg-white p-3">
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</p>
@@ -816,6 +849,30 @@ const SellerGroups = () => {
 
             <div className="rounded-xl border border-blue-100 bg-blue-50 p-4">
               <h3 className="text-sm font-bold text-slate-900">Member Rates</h3>
+              <p className="mt-1 text-xs text-slate-600">
+                Direct Rate is used when this member personally sells. Override Rate is used when a downline seller closes the sale.
+              </p>
+
+              {memberRateError ? (
+                <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">
+                  {memberRateError}
+                </p>
+              ) : null}
+
+              {(() => {
+                const poolRate = parseOptionalRateInput(String(detailsGroup.pool_rate ?? ""))
+                const directRate = parseOptionalRateInput(memberRateForm.personal_commission_rate)
+                const overrideRate = parseOptionalRateInput(memberRateForm.override_commission_rate)
+                const directOverPool = poolRate !== null && poolRate !== undefined && directRate !== null && directRate !== undefined && directRate > poolRate
+                const overrideOverPool = poolRate !== null && poolRate !== undefined && overrideRate !== null && overrideRate !== undefined && overrideRate > poolRate
+
+                return directOverPool || (canUseOverrideRate(selectedMember.seller_role) && overrideOverPool) ? (
+                  <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-700">
+                    One or more visible rates are greater than the group pool rate of {formatRate(detailsGroup.pool_rate)}.
+                  </p>
+                ) : null
+              })()}
+
               <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2">
                 <Input
                   disabled={!canManageRates}
@@ -827,46 +884,18 @@ const SellerGroups = () => {
                   value={memberRateForm.personal_commission_rate}
                   onChange={(e) => updateMemberRate({ personal_commission_rate: e.target.value })}
                 />
-                <Input
-                  disabled={!canManageRates}
-                  label="Override Rate (%) - used when a downline seller closes the sale"
-                  max={100}
-                  min={0}
-                  step="0.01"
-                  type="number"
-                  value={memberRateForm.override_commission_rate}
-                  onChange={(e) => updateMemberRate({ override_commission_rate: e.target.value })}
-                />
-                <Input
-                  disabled={!canManageRates}
-                  label="Direct-to-Developer Rate (%) - used for direct-to-developer sale setup"
-                  max={100}
-                  min={0}
-                  step="0.01"
-                  type="number"
-                  value={memberRateForm.direct_to_developer_rate}
-                  onChange={(e) => updateMemberRate({ direct_to_developer_rate: e.target.value })}
-                />
-                <Input
-                  disabled={!canManageRates}
-                  label="Pool Rate (%) - total pool/limit for the group or upper-level seller"
-                  max={100}
-                  min={0}
-                  step="0.01"
-                  type="number"
-                  value={memberRateForm.commission_pool_rate}
-                  onChange={(e) => updateMemberRate({ commission_pool_rate: e.target.value })}
-                />
-                <Input
-                  disabled={!canManageRates}
-                  label="Max Downline Rate (%)"
-                  max={100}
-                  min={0}
-                  step="0.01"
-                  type="number"
-                  value={memberRateForm.max_downline_rate}
-                  onChange={(e) => updateMemberRate({ max_downline_rate: e.target.value })}
-                />
+                {canUseOverrideRate(selectedMember.seller_role) ? (
+                  <Input
+                    disabled={!canManageRates}
+                    label="Override Rate (%) - used when a downline seller closes the sale"
+                    max={100}
+                    min={0}
+                    step="0.01"
+                    type="number"
+                    value={memberRateForm.override_commission_rate}
+                    onChange={(e) => updateMemberRate({ override_commission_rate: e.target.value })}
+                  />
+                ) : null}
               </div>
             </div>
           </div>
